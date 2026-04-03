@@ -1,0 +1,29 @@
+[package]
+name = "mfs"
+version = "0.1.0"
+edition = "2024"
+description = "Microwave filter synthesis core library in Rust"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/LyingCortex/microwave-filter-synthesis-rust"
+homepage = "https://github.com/LyingCortex/microwave-filter-synthesis-rust"
+documentation = "https://docs.rs/mfs"
+keywords = ["microwave", "filter", "rf", "synthesis", "coupling-matrix"]
+categories = ["science", "mathematics"]
+rust-version = "1.85"
+include = [
+    "Cargo.toml",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "CHANGELOG.md",
+    "src/**",
+    "examples/**",
+    "docs/**",
+]
+
+[package.metadata.docs.rs]
+all-features = false
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]

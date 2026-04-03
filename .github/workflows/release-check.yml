@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Package
+        run: cargo package --allow-dirty
+
+      - name: Locate package artifact
+        shell: bash
+        run: |
+          ls -la target/package
+          echo "PACKAGE_FILE=$(ls target/package/*.crate | head -n 1)" >> "$GITHUB_ENV"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: docs/first-github-release-notes.md
+          files: |
+            ${{ env.PACKAGE_FILE }}
