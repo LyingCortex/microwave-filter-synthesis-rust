@@ -1,95 +1,10 @@
 use crate::error::{MfsError, Result};
 use crate::matrix::CouplingMatrix;
 
+use nalgebra::{DMatrix, DVector};
+use num_complex::Complex64;
+
 use super::{ResponseSample, ResponseSettings, SParameterResponse};
-
-/// Minimal complex number type used to keep the backend dependency-free.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-struct Complex64 {
-    re: f64,
-    im: f64,
-}
-
-impl Complex64 {
-    const ZERO: Self = Self { re: 0.0, im: 0.0 };
-    const ONE: Self = Self { re: 1.0, im: 0.0 };
-
-    fn new(re: f64, im: f64) -> Self {
-        Self { re, im }
-    }
-
-    fn from_real(value: f64) -> Self {
-        Self { re: value, im: 0.0 }
-    }
-
-    /// Returns the squared magnitude, useful for pivot selection and power checks.
-    fn norm_sqr(self) -> f64 {
-        self.re * self.re + self.im * self.im
-    }
-}
-
-impl std::ops::Add for Complex64 {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Self::new(self.re + rhs.re, self.im + rhs.im)
-    }
-}
-
-impl std::ops::Sub for Complex64 {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        Self::new(self.re - rhs.re, self.im - rhs.im)
-    }
-}
-
-impl std::ops::Mul for Complex64 {
-    type Output = Self;
-
-    fn mul(self, rhs: Self) -> Self::Output {
-        Self::new(
-            self.re * rhs.re - self.im * rhs.im,
-            self.re * rhs.im + self.im * rhs.re,
-        )
-    }
-}
-
-impl std::ops::Mul<f64> for Complex64 {
-    type Output = Self;
-
-    fn mul(self, rhs: f64) -> Self::Output {
-        Self::new(self.re * rhs, self.im * rhs)
-    }
-}
-
-impl std::ops::Div for Complex64 {
-    type Output = Self;
-
-    fn div(self, rhs: Self) -> Self::Output {
-        let denom = rhs.norm_sqr();
-        Self::new(
-            (self.re * rhs.re + self.im * rhs.im) / denom,
-            (self.im * rhs.re - self.re * rhs.im) / denom,
-        )
-    }
-}
-
-impl std::ops::Div<f64> for Complex64 {
-    type Output = Self;
-
-    fn div(self, rhs: f64) -> Self::Output {
-        Self::new(self.re / rhs, self.im / rhs)
-    }
-}
-
-impl std::ops::Neg for Complex64 {
-    type Output = Self;
-
-    fn neg(self) -> Self::Output {
-        Self::new(-self.re, -self.im)
-    }
-}
 
 /// Evaluates a response when the supplied grid is already normalized.
 pub(super) fn evaluate_normalized_response(
@@ -115,7 +30,7 @@ pub(super) fn evaluate_response(
         });
     }
 
-    let side = matrix.shape().rows;
+    let side = matrix.side();
     let source = settings.source_resistance;
     let load = settings.load_resistance;
     let transmission_scale = 2.0 * (source * load).sqrt();
@@ -125,19 +40,15 @@ pub(super) fn evaluate_response(
         .copied()
         .zip(normalized_omegas.iter().copied())
         .map(|(frequency_hz, omega)| {
-            let inverse = invert_response_matrix(matrix, omega, settings)?;
+            let inverse = solve_inverse(matrix, omega, settings)?;
 
-            let s11 = Complex64::ONE + Complex64::new(0.0, 2.0 * source) * inverse[0][0];
-            let s21 = Complex64::new(0.0, -transmission_scale) * inverse[side - 1][0];
+            let s11 = Complex64::new(1.0, 0.0) + Complex64::new(0.0, 2.0 * source) * inverse[(0, 0)];
+            let s21 = Complex64::new(0.0, -transmission_scale) * inverse[(side - 1, 0)];
 
-            let last_row = &inverse[side - 1];
-            let numerator = last_row
-                .iter()
-                .copied()
-                .zip(inverse.iter().map(|row| row[0]))
-                .fold(Complex64::ZERO, |acc, (lhs, rhs)| acc + lhs * rhs);
-            let denominator = inverse[side - 1][0];
-            // This mirrors the current prototype's inexpensive group-delay estimate.
+            let numerator = (0..side).fold(Complex64::new(0.0, 0.0), |acc, index| {
+                acc + inverse[(side - 1, index)] * inverse[(index, 0)]
+            });
+            let denominator = inverse[(side - 1, 0)];
             let group_delay = if denominator.norm_sqr() <= 1e-18 {
                 0.0
             } else {
@@ -176,83 +87,39 @@ fn validate_settings(settings: ResponseSettings) -> Result<()> {
     Ok(())
 }
 
-/// Builds and inverts the linear response matrix for one frequency sample.
-fn invert_response_matrix(
+/// Builds the complex response matrix for one frequency sample.
+fn build_response_matrix(
     matrix: &CouplingMatrix,
     omega: f64,
     settings: ResponseSettings,
-) -> Result<Vec<Vec<Complex64>>> {
-    let side = matrix.shape().rows;
-    let mut a = vec![vec![Complex64::ZERO; side]; side];
-    let mut inv = vec![vec![Complex64::ZERO; side]; side];
+) -> DMatrix<Complex64> {
+    let side = matrix.side();
+    let mut response = matrix.to_complex_dense();
 
-    for row in 0..side {
-        for col in 0..side {
-            let mut value = Complex64::from_real(matrix.at(row, col).unwrap_or_default());
-            if row == col {
-                if row != 0 && row != side - 1 {
-                    // Resonator diagonals are shifted by the normalized frequency sample.
-                    value = value + Complex64::from_real(omega);
-                }
-                if row == 0 {
-                    value = value + Complex64::new(0.0, -settings.source_resistance);
-                } else if row == side - 1 {
-                    value = value + Complex64::new(0.0, -settings.load_resistance);
-                }
-            }
-            a[row][col] = value;
+    for index in 0..side {
+        if index != 0 && index != side - 1 {
+            // Resonator diagonals are shifted by the normalized frequency sample.
+            response[(index, index)] += Complex64::new(omega, 0.0);
         }
-        inv[row][row] = Complex64::ONE;
     }
 
-    gauss_jordan_inverse(&mut a, &mut inv)?;
-    Ok(inv)
+    response[(0, 0)] += Complex64::new(0.0, -settings.source_resistance);
+    response[(side - 1, side - 1)] += Complex64::new(0.0, -settings.load_resistance);
+    response
 }
 
-/// Inverts a dense complex matrix with Gauss-Jordan elimination and pivoting.
-fn gauss_jordan_inverse(a: &mut [Vec<Complex64>], inv: &mut [Vec<Complex64>]) -> Result<()> {
-    let n = a.len();
-    for pivot_index in 0..n {
-        let pivot_row = (pivot_index..n)
-            .max_by(|&lhs, &rhs| {
-                a[lhs][pivot_index]
-                    .norm_sqr()
-                    .partial_cmp(&a[rhs][pivot_index].norm_sqr())
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .ok_or_else(|| MfsError::Unsupported("empty matrix inversion".to_string()))?;
+/// Solves the matrix inverse through the backend linear solver.
+fn solve_inverse(
+    matrix: &CouplingMatrix,
+    omega: f64,
+    settings: ResponseSettings,
+) -> Result<DMatrix<Complex64>> {
+    let side = matrix.side();
+    let response = build_response_matrix(matrix, omega, settings);
+    let lu = response.lu();
+    let identity = DMatrix::from_diagonal(&DVector::from_element(side, Complex64::new(1.0, 0.0)));
 
-        if a[pivot_row][pivot_index].norm_sqr() <= 1e-18 {
-            return Err(MfsError::Unsupported(
-                "response matrix became singular during inversion".to_string(),
-            ));
-        }
-
-        if pivot_row != pivot_index {
-            a.swap(pivot_row, pivot_index);
-            inv.swap(pivot_row, pivot_index);
-        }
-
-        let pivot = a[pivot_index][pivot_index];
-        for column in 0..n {
-            a[pivot_index][column] = a[pivot_index][column] / pivot;
-            inv[pivot_index][column] = inv[pivot_index][column] / pivot;
-        }
-
-        for row in 0..n {
-            if row == pivot_index {
-                continue;
-            }
-            let factor = a[row][pivot_index];
-            if factor.norm_sqr() <= 1e-24 {
-                continue;
-            }
-            for column in 0..n {
-                a[row][column] = a[row][column] - factor * a[pivot_index][column];
-                inv[row][column] = inv[row][column] - factor * inv[pivot_index][column];
-            }
-        }
-    }
-
-    Ok(())
+    lu.solve(&identity).ok_or_else(|| {
+        MfsError::Unsupported("response matrix became singular during solve".to_string())
+    })
 }

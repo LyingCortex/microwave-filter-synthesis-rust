@@ -9,14 +9,14 @@ pub struct NormalizedSample {
 }
 
 /// Maps between physical frequency units and normalized prototype coordinates.
-pub trait FrequencyPlan {
+pub trait FrequencyMapping {
     /// Converts one physical-frequency sample into prototype coordinates.
     fn map_hz_to_normalized(&self, frequency_hz: f64) -> Result<NormalizedSample>;
 
     /// Converts one normalized prototype sample back into physical frequency.
     fn map_normalized_to_hz(&self, sample: NormalizedSample) -> Result<f64>;
 
-    /// Converts every sample in a grid through the plan in one pass.
+    /// Converts every sample in a grid through the mapping in one pass.
     fn map_grid_hz_to_normalized(&self, grid: &FrequencyGrid) -> Result<Vec<NormalizedSample>> {
         grid.as_slice()
             .iter()
@@ -26,10 +26,10 @@ pub trait FrequencyPlan {
     }
 }
 
-/// Normalizes a single transmission zero according to the supplied plan.
+/// Normalizes a single transmission zero according to the supplied mapping.
 pub fn normalize_transmission_zero(
     zero: TransmissionZero,
-    plan: &impl FrequencyPlan,
+    mapping: &impl FrequencyMapping,
 ) -> Result<f64> {
     if !zero.value.is_finite() {
         return Err(MfsError::InvalidTransmissionZero(
@@ -39,30 +39,30 @@ pub fn normalize_transmission_zero(
 
     match zero.domain {
         TransmissionZeroDomain::Normalized => Ok(zero.value),
-        TransmissionZeroDomain::PhysicalHz => Ok(plan.map_hz_to_normalized(zero.value)?.omega),
+        TransmissionZeroDomain::PhysicalHz => Ok(mapping.map_hz_to_normalized(zero.value)?.omega),
     }
 }
 
-/// Normalizes a list of transmission zeros according to the supplied plan.
+/// Normalizes a list of transmission zeros according to the supplied mapping.
 pub fn normalize_transmission_zeros(
     zeros: &[TransmissionZero],
-    plan: &impl FrequencyPlan,
+    mapping: &impl FrequencyMapping,
 ) -> Result<Vec<f64>> {
     zeros
         .iter()
         .copied()
-        .map(|zero| normalize_transmission_zero(zero, plan))
+        .map(|zero| normalize_transmission_zero(zero, mapping))
         .collect()
 }
 
-/// Low-pass normalization plan parameterized by a single cutoff frequency.
+/// Low-pass frequency mapping parameterized by a single cutoff frequency.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LowPassPlan {
+pub struct LowPassMapping {
     cutoff_hz: f64,
 }
 
-impl LowPassPlan {
-    /// Creates a validated low-pass plan.
+impl LowPassMapping {
+    /// Creates a validated low-pass mapping.
     pub fn new(cutoff_hz: f64) -> Result<Self> {
         if !cutoff_hz.is_finite() || cutoff_hz <= 0.0 {
             return Err(MfsError::InvalidFrequency(format!(
@@ -78,7 +78,7 @@ impl LowPassPlan {
     }
 }
 
-impl FrequencyPlan for LowPassPlan {
+impl FrequencyMapping for LowPassMapping {
     fn map_hz_to_normalized(&self, frequency_hz: f64) -> Result<NormalizedSample> {
         if !frequency_hz.is_finite() || frequency_hz < 0.0 {
             return Err(MfsError::InvalidFrequency(format!(
@@ -104,15 +104,15 @@ impl FrequencyPlan for LowPassPlan {
     }
 }
 
-/// Band-pass normalization plan parameterized by center frequency and bandwidth.
+/// Band-pass frequency mapping parameterized by center frequency and bandwidth.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct BandPassPlan {
+pub struct BandPassMapping {
     center_hz: f64,
     bandwidth_hz: f64,
 }
 
-impl BandPassPlan {
-    /// Creates a validated band-pass plan.
+impl BandPassMapping {
+    /// Creates a validated band-pass mapping.
     pub fn new(center_hz: f64, bandwidth_hz: f64) -> Result<Self> {
         if !center_hz.is_finite() || center_hz <= 0.0 {
             return Err(MfsError::InvalidFrequency(format!(
@@ -142,7 +142,7 @@ impl BandPassPlan {
     }
 }
 
-impl FrequencyPlan for BandPassPlan {
+impl FrequencyMapping for BandPassMapping {
     fn map_hz_to_normalized(&self, frequency_hz: f64) -> Result<NormalizedSample> {
         if !frequency_hz.is_finite() || frequency_hz <= 0.0 {
             return Err(MfsError::InvalidFrequency(format!(
@@ -226,31 +226,31 @@ mod tests {
 
     #[test]
     fn low_pass_forward_and_inverse_mapping_round_trip() -> Result<()> {
-        let plan = LowPassPlan::new(2.0e9)?;
-        let normalized = plan.map_hz_to_normalized(1.0e9)?;
+        let mapping = LowPassMapping::new(2.0e9)?;
+        let normalized = mapping.map_hz_to_normalized(1.0e9)?;
         approx_eq(normalized.omega, 0.5, 1e-12);
 
-        let restored = plan.map_normalized_to_hz(normalized)?;
+        let restored = mapping.map_normalized_to_hz(normalized)?;
         approx_eq(restored, 1.0e9, 1e-3);
         Ok(())
     }
 
     #[test]
     fn band_pass_center_frequency_maps_to_zero() -> Result<()> {
-        let plan = BandPassPlan::new(6.75e9, 300.0e6)?;
-        let normalized = plan.map_hz_to_normalized(plan.center_hz())?;
+        let mapping = BandPassMapping::new(6.75e9, 300.0e6)?;
+        let normalized = mapping.map_hz_to_normalized(mapping.center_hz())?;
         approx_eq(normalized.omega, 0.0, 1e-12);
         Ok(())
     }
 
     #[test]
     fn band_pass_inverse_matches_python_positive_branch() -> Result<()> {
-        let plan = BandPassPlan::new(6.75e9, 300.0e6)?;
+        let mapping = BandPassMapping::new(6.75e9, 300.0e6)?;
         let sample = NormalizedSample { omega: 1.25 };
-        let mapped = plan.map_normalized_to_hz(sample)?;
+        let mapped = mapping.map_normalized_to_hz(sample)?;
 
-        let expected = (sample.omega * plan.bandwidth_hz()
-            + ((sample.omega * plan.bandwidth_hz()).powi(2) + 4.0 * plan.center_hz().powi(2))
+        let expected = (sample.omega * mapping.bandwidth_hz()
+            + ((sample.omega * mapping.bandwidth_hz()).powi(2) + 4.0 * mapping.center_hz().powi(2))
                 .sqrt())
             / 2.0;
         approx_eq(mapped, expected, 1e-3);
@@ -259,9 +259,9 @@ mod tests {
 
     #[test]
     fn grid_mapping_preserves_length() -> Result<()> {
-        let plan = LowPassPlan::new(1.0e9)?;
+        let mapping = LowPassMapping::new(1.0e9)?;
         let grid = FrequencyGrid::linspace(0.5e9, 1.5e9, 5)?;
-        let normalized = plan.map_grid_hz_to_normalized(&grid)?;
+        let normalized = mapping.map_grid_hz_to_normalized(&grid)?;
 
         assert_eq!(normalized.len(), 5);
         approx_eq(normalized[0].omega, 0.5, 1e-12);
@@ -270,9 +270,10 @@ mod tests {
     }
 
     #[test]
-    fn transmission_zero_normalization_uses_frequency_plan() -> Result<()> {
-        let plan = BandPassPlan::new(6.75e9, 300.0e6)?;
-        let normalized = normalize_transmission_zero(TransmissionZero::physical_hz(6.9e9), &plan)?;
+    fn transmission_zero_normalization_uses_frequency_mapping() -> Result<()> {
+        let mapping = BandPassMapping::new(6.75e9, 300.0e6)?;
+        let normalized =
+            normalize_transmission_zero(TransmissionZero::physical_hz(6.9e9), &mapping)?;
 
         approx_eq(normalized, 0.9891304347826066, 1e-12);
         Ok(())
@@ -280,8 +281,8 @@ mod tests {
 
     #[test]
     fn transmission_zero_normalization_rejects_non_finite_values() {
-        let plan = LowPassPlan::new(1.0).expect("valid plan");
-        let error = normalize_transmission_zero(TransmissionZero::normalized(f64::NAN), &plan)
+        let mapping = LowPassMapping::new(1.0).expect("valid mapping");
+        let error = normalize_transmission_zero(TransmissionZero::normalized(f64::NAN), &mapping)
             .expect_err("non-finite transmission zero must fail");
 
         assert!(matches!(error, MfsError::InvalidTransmissionZero(_)));

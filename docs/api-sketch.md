@@ -13,14 +13,14 @@ direction for implementation.
 ```rust
 use mfs::{
     ApproximationFamily,
-    BandPassPlan,
+    BandPassMapping,
     ChebyshevApproximation,
     ChebyshevSynthesis,
     CouplingMatrixSynthesizer,
     FilterClass,
-    FilterSpec,
+    FilterParameter,
     FrequencyGrid,
-    PerformanceSpec,
+    ReturnLossSpec,
     ResponseSettings,
     ResponseSolver,
     TransmissionZero,
@@ -30,22 +30,23 @@ use mfs::{
 ### Typical Workflow
 
 ```rust
-let spec = FilterSpec::chebyshev(6, 23.0)?
+let spec = FilterParameter::chebyshev(6, 23.0)?
     .with_transmission_zeros(vec![
         TransmissionZero::finite(-2.0),
         TransmissionZero::finite(-1.2),
         TransmissionZero::finite(1.5),
     ]);
 
-let plan = BandPassPlan::new(6.75e9, 300.0e6)?;
+let mapping = BandPassMapping::new(6.75e9, 300.0e6)?;
 let approximation = ChebyshevApproximation::default();
-let polynomials = approximation.synthesize(&spec, &plan)?;
+let polynomials = approximation.synthesize(&spec, &mapping)?;
 
 let matrix = CouplingMatrixSynthesizer::default().synthesize(&polynomials)?;
 let grid = FrequencyGrid::linspace(6.0e9, 7.5e9, 2001)?;
 let response = ResponseSolver::default().evaluate_with_settings(
     &matrix,
     &grid,
+    &mapping,
     ResponseSettings {
         source_resistance: 1.0,
         load_resistance: 1.0,
@@ -56,11 +57,11 @@ let response = ResponseSolver::default().evaluate_with_settings(
 ### Explicit Semantic Construction
 
 ```rust
-let spec = FilterSpec::new(
+let spec = FilterParameter::new(
     6,
     FilterClass::BandPass,
     ApproximationFamily::Chebyshev,
-    PerformanceSpec::new(23.0)?,
+    ReturnLossSpec::new(23.0)?,
 )?
 .with_transmission_zeros(vec![
     TransmissionZero::finite(-2.0),
@@ -72,7 +73,7 @@ let spec = FilterSpec::new(
 
 ```rust
 let outcome = ChebyshevSynthesis::default()
-    .synthesize_and_evaluate(&spec, &plan, &grid)?;
+    .synthesize_and_evaluate_with_mapping(&spec, &mapping, &grid)?;
 
 println!("{}", outcome.response.samples.len());
 println!("{}", outcome.response.samples[0].group_delay);
@@ -84,20 +85,19 @@ println!("{}", outcome.response.samples[0].group_delay);
 
 Expected public items:
 
-- `FilterSpec`
+- `FilterParameter`
 - `FilterClass`
 - `ApproximationFamily`
-- `PerformanceSpec`
-- `FilterType`
+- `ReturnLossSpec`
 - `TransmissionZero`
 
 ### `mfs::freq`
 
 Expected public items:
 
-- `FrequencyPlan`
-- `LowPassPlan`
-- `BandPassPlan`
+- `FrequencyMapping`
+- `LowPassMapping`
+- `BandPassMapping`
 - `FrequencyGrid`
 
 ### `mfs::approx`
@@ -139,7 +139,7 @@ Expected public items:
 The crate should also expose compact helpers for common workflows:
 
 ```rust
-let (polynomials, matrix) = mfs::synthesize_chebyshev(&spec, &plan)?;
+let (polynomials, matrix) = mfs::synthesize_chebyshev(&spec, &mapping)?;
 ```
 
 Possible future helpers:
@@ -153,7 +153,7 @@ Possible future helpers:
 For more advanced configuration, builder-style APIs may be useful:
 
 ```rust
-let spec = FilterSpec::chebyshev(8, 22.0)?
+let spec = FilterParameter::chebyshev(8, 22.0)?
     .with_filter_class(mfs::FilterClass::BandPass)
     .with_transmission_zeros(vec![
         TransmissionZero::finite(-1.8),
@@ -174,7 +174,7 @@ mfs::Result<T>
 Error categories should remain typed:
 
 - invalid specification
-- invalid frequency plan
+- invalid frequency mapping
 - dimensional mismatch
 - unsupported operation
 - numerical failure
@@ -189,24 +189,24 @@ Illustrative Python-facing API:
 ```python
 import mfs
 
-spec = mfs.FilterSpec.chebyshev(
+spec = mfs.FilterParameter.chebyshev(
     order=6,
     return_loss_db=23.0,
     transmission_zeros=[-2.0, -1.2, 1.5],
 )
 
-plan = mfs.BandPassPlan(center_hz=6.75e9, bandwidth_hz=300e6)
-polys, matrix = mfs.synthesize_chebyshev(spec, plan)
-response = mfs.evaluate_response(matrix, 6.0e9, 7.5e9, 2001)
+mapping = mfs.BandPassMapping(center_hz=6.75e9, bandwidth_hz=300e6)
+polys, matrix = mfs.synthesize_chebyshev(spec, mapping)
+response = mfs.ResponseSolver().evaluate(matrix, grid, mapping)
 ```
 
 ## API Stability Notes
 
 The following are likely to remain stable:
 
-- explicit `FilterSpec`
+- explicit `FilterParameter`
 - explicit filter-class / approximation-family split
-- explicit frequency-plan types
+- explicit frequency-mapping types
 - explicit response solver stage
 - typed error returns
 

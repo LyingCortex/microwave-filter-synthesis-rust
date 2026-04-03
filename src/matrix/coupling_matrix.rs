@@ -1,4 +1,6 @@
 use crate::error::{MfsError, Result};
+use nalgebra::DMatrix;
+use num_complex::Complex64;
 
 /// Simple shape metadata for a dense coupling matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,7 +14,7 @@ pub struct MatrixShape {
 /// Dense coupling matrix including source and load rows/columns.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CouplingMatrix {
-    shape: MatrixShape,
+    order: usize,
     data: Vec<f64>,
 }
 
@@ -33,10 +35,7 @@ impl CouplingMatrix {
         }
 
         Ok(Self {
-            shape: MatrixShape {
-                rows: side,
-                cols: side,
-            },
+            order,
             data,
         })
     }
@@ -58,26 +57,51 @@ impl CouplingMatrix {
 
     /// Returns the resonator count represented by this matrix.
     pub fn order(&self) -> usize {
-        self.shape.rows - 2
+        self.order
+    }
+
+    /// Returns the physical matrix side length including source and load nodes.
+    pub fn side(&self) -> usize {
+        self.order + 2
     }
 
     /// Returns the matrix dimensions.
     pub fn shape(&self) -> MatrixShape {
-        self.shape
+        let side = self.side();
+        MatrixShape {
+            rows: side,
+            cols: side,
+        }
     }
 
     /// Returns one matrix entry if the indices are in range.
     pub fn at(&self, row: usize, col: usize) -> Option<f64> {
-        if row >= self.shape.rows || col >= self.shape.cols {
+        let side = self.side();
+        if row >= side || col >= side {
             return None;
         }
 
-        Some(self.data[row * self.shape.cols + col])
+        Some(self.data[row * side + col])
     }
 
     /// Returns the underlying row-major storage.
     pub fn as_slice(&self) -> &[f64] {
         &self.data
+    }
+
+    /// Returns the matrix as a dense complex matrix for numerical solver backends.
+    pub(crate) fn to_complex_dense(&self) -> DMatrix<Complex64> {
+        let side = self.side();
+        DMatrix::from_row_slice(
+            side,
+            side,
+            &self
+                .data
+                .iter()
+                .copied()
+                .map(Complex64::from)
+                .collect::<Vec<_>>(),
+        )
     }
 
     /// Returns the source-to-first-resonator coupling magnitude.
@@ -87,9 +111,7 @@ impl CouplingMatrix {
 
     /// Returns the last-resonator-to-load coupling magnitude.
     pub fn load_coupling(&self) -> f64 {
-        self.at(self.order(), self.order() + 1)
-            .unwrap_or_default()
-            .abs()
+        self.at(self.order(), self.side() - 1).unwrap_or_default().abs()
     }
 
     /// Returns the diagonal detuning term for one resonator.

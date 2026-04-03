@@ -3,8 +3,8 @@ mod generalized_chebyshev;
 mod polynomial;
 
 use crate::error::Result;
-use crate::freq::FrequencyPlan;
-use crate::spec::FilterSpec;
+use crate::freq::FrequencyMapping;
+use crate::spec::FilterParameter;
 
 pub use chebyshev::ChebyshevApproximation;
 pub use generalized_chebyshev::{
@@ -26,5 +26,9 @@ pub struct PrototypePoint {
 /// Trait implemented by approximation engines that generate prototype polynomials.
 pub trait ApproximationEngine {
     /// Synthesizes a polynomial set from a validated filter specification.
-    fn synthesize(&self, spec: &FilterSpec, plan: &impl FrequencyPlan) -> Result<PolynomialSet>;
+    fn synthesize(
+        &self,
+        spec: &FilterParameter,
+        mapping: &impl FrequencyMapping,
+    ) -> Result<PolynomialSet>;
 }

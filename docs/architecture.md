@@ -62,8 +62,7 @@ Capture the user-facing design intent with validation close to data creation.
 
 Current types:
 
-- `FilterSpec`
-- `FilterType`
+- `FilterParameter`
 - `TransmissionZero`
 
 Responsibilities:
@@ -82,13 +81,13 @@ Future expansion:
 ### `freq`
 
 Purpose:
-Separate physical frequency plans from normalized low-pass prototype math.
+Separate physical frequency mappings from normalized low-pass prototype math.
 
 Current types:
 
-- `FrequencyPlan` trait
-- `LowPassPlan`
-- `BandPassPlan`
+- `FrequencyMapping` trait
+- `LowPassMapping`
+- `BandPassMapping`
 - `FrequencyGrid`
 - `NormalizedSample`
 
@@ -104,8 +103,8 @@ multiple synthesis and evaluation engines can share the same mapping logic.
 
 Future expansion:
 
-- `HighPassPlan`
-- `BandStopPlan`
+- `HighPassMapping`
+- `BandStopMapping`
 - Multi-band mapping
 - Reverse mapping from normalized domain back to physical domain
 - Unit-safe wrappers if frequency unit handling becomes richer
@@ -222,8 +221,8 @@ Future expansion:
 
 The intended happy-path flow is:
 
-1. Construct a validated `FilterSpec`
-2. Choose a `FrequencyPlan`
+1. Construct a validated `FilterParameter`
+2. Choose a `FrequencyMapping`
 3. Run an approximation engine to obtain a `PolynomialSet`
 4. Build or synthesize a `CouplingMatrix`
 5. Evaluate response across a `FrequencyGrid`
@@ -231,13 +230,13 @@ The intended happy-path flow is:
 In code, the facade currently looks like this:
 
 ```rust
-let spec = FilterSpec::chebyshev(4, 20.0)?
+let spec = FilterParameter::chebyshev(4, 20.0)?
     .with_transmission_zeros(vec![TransmissionZero::finite(-1.25)]);
-let plan = BandPassPlan::new(6.75e9, 300.0e6)?;
+let mapping = BandPassMapping::new(6.75e9, 300.0e6)?;
 
-let (polynomials, matrix) = synthesize_chebyshev(&spec, &plan)?;
+let (polynomials, matrix) = synthesize_chebyshev(&spec, &mapping)?;
 let grid = FrequencyGrid::linspace(6.0e9, 7.0e9, 201)?;
-let response = ResponseSolver::default().evaluate(&matrix, &grid)?;
+let response = ResponseSolver::default().evaluate_normalized(&matrix, &grid)?;
 ```
 
 This is intentionally functional in style: each stage returns data for the next
@@ -267,8 +266,8 @@ The crate should expose two API levels:
 
 For advanced users and future internal composition:
 
-- construct `FilterSpec`
-- choose `FrequencyPlan`
+- construct `FilterParameter`
+- choose `FrequencyMapping`
 - call approximation engine directly
 - build or transform a `CouplingMatrix`
 - run `ResponseSolver`
@@ -278,7 +277,7 @@ For advanced users and future internal composition:
 For common workflows:
 
 - `synthesize_chebyshev(...)`
-- `synthesize_and_evaluate_chebyshev(...)`
+- `synthesize_and_evaluate_chebyshev_with_mapping(...)`
 - `ChebyshevSynthesis`
 - future convenience functions for common prototype and topology patterns
 
@@ -290,14 +289,14 @@ artifacts.
 The crate currently supports two ergonomic orchestration styles:
 
 ```rust
-let (polynomials, matrix) = mfs::synthesize_chebyshev(&spec, &plan)?;
+let (polynomials, matrix) = mfs::synthesize_chebyshev(&spec, &mapping)?;
 ```
 
 and
 
 ```rust
 let outcome = mfs::ChebyshevSynthesis::default()
-    .synthesize_and_evaluate(&spec, &plan, &grid)?;
+    .synthesize_and_evaluate_with_mapping(&spec, &mapping, &grid)?;
 ```
 
 The second form is the better long-term home for orchestration because it keeps

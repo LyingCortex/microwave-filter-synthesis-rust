@@ -1,9 +1,9 @@
 use crate::approx::{ApproximationEngine, ChebyshevApproximation, PolynomialSet};
 use crate::error::Result;
-use crate::freq::{FrequencyGrid, FrequencyPlan};
+use crate::freq::{FrequencyGrid, FrequencyMapping};
 use crate::matrix::{CouplingMatrix, CouplingMatrixSynthesizer};
 use crate::response::{ResponseSolver, SParameterResponse};
-use crate::spec::FilterSpec;
+use crate::spec::FilterParameter;
 
 /// Result of the synthesis stage before response evaluation.
 #[derive(Debug, Clone, PartialEq)]
@@ -37,10 +37,10 @@ impl ChebyshevSynthesis {
     /// Synthesizes prototype polynomials and a coupling matrix from the input spec.
     pub fn synthesize(
         &self,
-        spec: &FilterSpec,
-        plan: &impl FrequencyPlan,
+        spec: &FilterParameter,
+        mapping: &impl FrequencyMapping,
     ) -> Result<SynthesisOutcome> {
-        let polynomials = self.approximation.synthesize(spec, plan)?;
+        let polynomials = self.approximation.synthesize(spec, mapping)?;
         let matrix = self.matrix_synthesizer.synthesize(&polynomials)?;
         Ok(SynthesisOutcome {
             polynomials,
@@ -48,17 +48,15 @@ impl ChebyshevSynthesis {
         })
     }
 
-    /// Synthesizes a design and immediately evaluates its response over a grid.
-    pub fn synthesize_and_evaluate(
+    /// Synthesizes a design and immediately evaluates its response over a physical grid.
+    pub fn synthesize_and_evaluate_with_mapping(
         &self,
-        spec: &FilterSpec,
-        plan: &impl FrequencyPlan,
+        spec: &FilterParameter,
+        mapping: &impl FrequencyMapping,
         grid: &FrequencyGrid,
     ) -> Result<EvaluationOutcome> {
-        let synthesis = self.synthesize(spec, plan)?;
-        let response = self
-            .response_solver
-            .evaluate_with_plan(&synthesis.matrix, grid, plan)?;
+        let synthesis = self.synthesize(spec, mapping)?;
+        let response = self.response_solver.evaluate(&synthesis.matrix, grid, mapping)?;
 
         Ok(EvaluationOutcome {
             polynomials: synthesis.polynomials,
@@ -71,17 +69,18 @@ impl ChebyshevSynthesis {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::freq::BandPassPlan;
+    use crate::freq::BandPassMapping;
     use crate::spec::TransmissionZero;
 
     #[test]
     fn orchestration_object_runs_full_flow() -> Result<()> {
-        let spec = FilterSpec::chebyshev(4, 20.0)?
+        let spec = FilterParameter::chebyshev(4, 20.0)?
             .with_transmission_zeros(vec![TransmissionZero::physical_hz(6.9e9)]);
-        let plan = BandPassPlan::new(6.75e9, 300.0e6)?;
+        let mapping = BandPassMapping::new(6.75e9, 300.0e6)?;
         let grid = FrequencyGrid::linspace(6.6e9, 6.9e9, 9)?;
 
-        let outcome = ChebyshevSynthesis::default().synthesize_and_evaluate(&spec, &plan, &grid)?;
+        let outcome = ChebyshevSynthesis::default()
+            .synthesize_and_evaluate_with_mapping(&spec, &mapping, &grid)?;
         assert_eq!(outcome.polynomials.order, 4);
         assert_eq!(outcome.matrix.order(), 4);
         assert_eq!(outcome.response.samples.len(), 9);

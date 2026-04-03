@@ -53,7 +53,7 @@ Target modules:
 Tasks:
 
 - decide whether transmission zeros are stored in physical or normalized domain
-- add normalization helpers tied to `FrequencyPlan`
+- add normalization helpers tied to `FrequencyMapping`
 - validate finite and special-case zero handling
 
 Key design choice:

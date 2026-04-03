@@ -18,7 +18,6 @@ pub enum FilterClass {
 }
 
 /// Backward-compatible alias kept for earlier API naming.
-pub type FilterType = FilterClass;
 
 /// Selects which approximation family defines the prototype polynomials.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,15 +26,15 @@ pub enum ApproximationFamily {
     Chebyshev,
 }
 
-/// Captures performance targets that are independent from topology.
+/// Captures the passband return-loss requirement for the design.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PerformanceSpec {
+pub struct ReturnLossSpec {
     /// Minimum return loss in dB across the passband.
     pub return_loss_db: f64,
 }
 
-impl PerformanceSpec {
-    /// Creates a validated performance specification.
+impl ReturnLossSpec {
+    /// Creates a validated return-loss specification.
     pub fn new(return_loss_db: f64) -> Result<Self> {
         if !return_loss_db.is_finite() || return_loss_db <= 0.0 {
             return Err(MfsError::InvalidReturnLoss { return_loss_db });
@@ -86,28 +85,28 @@ impl TransmissionZero {
     }
 }
 
-/// Full user-facing synthesis input for a single filter design.
+/// Full parameter bundle required to define a synthesis prototype.
 #[derive(Debug, Clone, PartialEq)]
-pub struct FilterSpec {
+pub struct FilterParameter {
     /// Number of resonators in the synthesized network.
     pub order: usize,
     /// Desired physical filter topology.
     pub filter_class: FilterClass,
     /// Approximation family used to build the prototype.
     pub approximation_family: ApproximationFamily,
-    /// Performance targets such as return loss.
-    pub performance: PerformanceSpec,
+    /// Passband return-loss requirement.
+    pub return_loss: ReturnLossSpec,
     /// Optional finite transmission zeros for generalized responses.
     pub transmission_zeros: Vec<TransmissionZero>,
 }
 
-impl FilterSpec {
-    /// Creates a validated filter specification with explicit semantic axes.
+impl FilterParameter {
+    /// Creates a validated parameter bundle with explicit semantic axes.
     pub fn new(
         order: usize,
         filter_class: FilterClass,
         approximation_family: ApproximationFamily,
-        performance: PerformanceSpec,
+        return_loss: ReturnLossSpec,
     ) -> Result<Self> {
         if order == 0 {
             return Err(MfsError::InvalidOrder { order });
@@ -117,7 +116,7 @@ impl FilterSpec {
             order,
             filter_class,
             approximation_family,
-            performance,
+            return_loss,
             transmission_zeros: Vec::new(),
         })
     }
@@ -128,7 +127,7 @@ impl FilterSpec {
             order,
             FilterClass::BandPass,
             ApproximationFamily::Chebyshev,
-            PerformanceSpec::new(return_loss_db)?,
+            ReturnLossSpec::new(return_loss_db)?,
         )
     }
 
@@ -138,20 +137,12 @@ impl FilterSpec {
         self
     }
 
-    /// Backward-compatible setter that mirrors the old `FilterType` naming.
-    pub fn with_filter_type(self, filter_type: FilterType) -> Self {
-        self.with_filter_class(filter_type)
-    }
 
     /// Returns the requested passband return loss in dB.
     pub fn return_loss_db(&self) -> f64 {
-        self.performance.return_loss_db
+        self.return_loss.return_loss_db
     }
 
-    /// Backward-compatible accessor for the filter topology.
-    pub fn filter_type(&self) -> FilterType {
-        self.filter_class
-    }
 
     /// Returns the requested filter topology.
     pub fn filter_class(&self) -> FilterClass {
@@ -171,22 +162,22 @@ mod tests {
 
     #[test]
     fn chebyshev_spec_sets_independent_semantic_axes() -> Result<()> {
-        let spec = FilterSpec::chebyshev(4, 20.0)?;
+        let spec = FilterParameter::chebyshev(4, 20.0)?;
 
         assert_eq!(spec.order, 4);
         assert_eq!(spec.filter_class, FilterClass::BandPass);
         assert_eq!(spec.approximation_family, ApproximationFamily::Chebyshev);
-        assert_eq!(spec.performance.return_loss_db, 20.0);
+        assert_eq!(spec.return_loss.return_loss_db, 20.0);
         Ok(())
     }
 
     #[test]
     fn generic_constructor_supports_explicit_semantic_axes() -> Result<()> {
-        let spec = FilterSpec::new(
+        let spec = FilterParameter::new(
             5,
             FilterClass::LowPass,
             ApproximationFamily::Chebyshev,
-            PerformanceSpec::new(19.5)?,
+            ReturnLossSpec::new(19.5)?,
         )?;
 
         assert_eq!(spec.order, 5);
@@ -197,17 +188,8 @@ mod tests {
     }
 
     #[test]
-    fn filter_type_compatibility_helper_still_updates_filter_class() -> Result<()> {
-        let spec = FilterSpec::chebyshev(3, 18.0)?.with_filter_type(FilterType::LowPass);
-
-        assert_eq!(spec.filter_class(), FilterClass::LowPass);
-        assert_eq!(spec.filter_type(), FilterType::LowPass);
-        Ok(())
-    }
-
-    #[test]
-    fn performance_spec_validates_return_loss() {
-        let error = PerformanceSpec::new(0.0).expect_err("return loss must be positive");
+    fn return_loss_spec_validates_return_loss() {
+        let error = ReturnLossSpec::new(0.0).expect_err("return loss must be positive");
         assert!(matches!(error, MfsError::InvalidReturnLoss { .. }));
     }
 }

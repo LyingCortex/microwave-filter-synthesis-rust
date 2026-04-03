@@ -58,7 +58,7 @@ Tasks:
 
 Exit criteria:
 
-- `LowPassPlan` and `BandPassPlan` behavior matches Python formulas
+- `LowPassMapping` and `BandPassMapping` behavior matches Python formulas
 - frequency-grid mapping is numerically verified
 
 ### Phase 3: Approximation Port

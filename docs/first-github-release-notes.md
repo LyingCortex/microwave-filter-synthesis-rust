@@ -11,7 +11,7 @@ response evaluation.
 
 ## Included In This Release
 
-- typed filter specifications and frequency-plan APIs
+- typed filter specifications and frequency-mapping APIs
 - transmission-zero normalization helpers
 - validated polynomial and coupling-matrix artifacts
 - generalized Chebyshev helper routines derived from the Python prototype

@@ -1,6 +1,6 @@
 use crate::error::{MfsError, Result};
-use crate::freq::{FrequencyPlan, normalize_transmission_zeros};
-use crate::spec::FilterSpec;
+use crate::freq::{FrequencyMapping, normalize_transmission_zeros};
+use crate::spec::FilterParameter;
 
 use super::polynomial::{PolynomialSet, chebyshev_ripple_factor, monic_polynomial_from_real_roots};
 use super::{ApproximationEngine, PrototypePoint, synthesize_generalized_chebyshev_data};
@@ -10,9 +10,13 @@ use super::{ApproximationEngine, PrototypePoint, synthesize_generalized_chebyshe
 pub struct ChebyshevApproximation;
 
 impl ApproximationEngine for ChebyshevApproximation {
-    fn synthesize(&self, spec: &FilterSpec, plan: &impl FrequencyPlan) -> Result<PolynomialSet> {
+    fn synthesize(
+        &self,
+        spec: &FilterParameter,
+        mapping: &impl FrequencyMapping,
+    ) -> Result<PolynomialSet> {
         let transmission_zeros_normalized =
-            normalize_transmission_zeros(&spec.transmission_zeros, plan)?;
+            normalize_transmission_zeros(&spec.transmission_zeros, mapping)?;
 
         let ripple_factor = chebyshev_ripple_factor(spec.return_loss_db());
         let mut e = vec![0.0; spec.order + 1];
@@ -71,7 +75,7 @@ fn _prototype_anchor(_point: PrototypePoint) {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::freq::{BandPassPlan, LowPassPlan};
+    use crate::freq::{BandPassMapping, LowPassMapping};
     use crate::spec::TransmissionZero;
 
     fn approx_eq(lhs: f64, rhs: f64, tol: f64) {
@@ -84,11 +88,11 @@ mod tests {
 
     #[test]
     fn approximation_normalizes_physical_transmission_zeros() -> Result<()> {
-        let spec = FilterSpec::chebyshev(4, 20.0)?
+        let spec = FilterParameter::chebyshev(4, 20.0)?
             .with_transmission_zeros(vec![TransmissionZero::physical_hz(6.9e9)]);
-        let plan = BandPassPlan::new(6.75e9, 300.0e6)?;
+        let mapping = BandPassMapping::new(6.75e9, 300.0e6)?;
 
-        let polys = ChebyshevApproximation.synthesize(&spec, &plan)?;
+        let polys = ChebyshevApproximation.synthesize(&spec, &mapping)?;
         approx_eq(
             polys.transmission_zeros_normalized[0],
             0.9891304347826066,
@@ -100,13 +104,13 @@ mod tests {
 
     #[test]
     fn approximation_builds_p_polynomial_from_roots() -> Result<()> {
-        let spec = FilterSpec::chebyshev(4, 20.0)?.with_transmission_zeros(vec![
+        let spec = FilterParameter::chebyshev(4, 20.0)?.with_transmission_zeros(vec![
             TransmissionZero::normalized(-2.0),
             TransmissionZero::normalized(1.5),
         ]);
-        let plan = LowPassPlan::new(1.0)?;
+        let mapping = LowPassMapping::new(1.0)?;
 
-        let polys = ChebyshevApproximation.synthesize(&spec, &plan)?;
+        let polys = ChebyshevApproximation.synthesize(&spec, &mapping)?;
         assert_eq!(polys.p_degree(), 2);
         approx_eq(polys.p[0], 1.0, 1e-12);
         approx_eq(polys.p[1], 0.5, 1e-12);
@@ -117,10 +121,10 @@ mod tests {
 
     #[test]
     fn approximation_uses_return_loss_to_compute_ripple_factor() -> Result<()> {
-        let spec = FilterSpec::chebyshev(3, 20.0)?;
-        let plan = LowPassPlan::new(1.0)?;
+        let spec = FilterParameter::chebyshev(3, 20.0)?;
+        let mapping = LowPassMapping::new(1.0)?;
 
-        let polys = ChebyshevApproximation.synthesize(&spec, &plan)?;
+        let polys = ChebyshevApproximation.synthesize(&spec, &mapping)?;
         approx_eq(polys.ripple_factor, 0.10050378152592121, 1e-12);
         assert!(polys.generalized.is_none());
         Ok(())

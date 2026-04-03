@@ -27,3 +27,5 @@ all-features = false
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
+nalgebra = "0.33"
+num-complex = "0.4"

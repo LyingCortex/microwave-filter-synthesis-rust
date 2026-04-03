@@ -190,8 +190,8 @@ This is not required immediately, but it is the shape to grow toward once
 
 The following ideas are worth keeping even if implementation details change:
 
-- typed `FilterSpec` rather than a mutable mega-object
-- a separate frequency-planning concept
+- typed `FilterParameter` rather than a mutable mega-object
+- a separate frequency-mapping concept
 - polynomial artifacts as explicit outputs
 - coupling matrix as a first-class domain artifact
 - orchestration as a thin layer over lower-level stages
@@ -205,7 +205,7 @@ Several current concepts are useful placeholders but should evolve.
 
 ### 1. `spec` should become more expressive
 
-Today `FilterSpec` mixes "family", "shape", and "band intent" in a compact
+Today `FilterParameter` mixes "family", "shape", and "band intent" in a compact
 form. That is fine for now, but a better long-term model is:
 
 - `FilterClass`: low-pass, band-pass, band-stop, high-pass
@@ -215,10 +215,10 @@ form. That is fine for now, but a better long-term model is:
 
 This keeps the semantic axes independent.
 
-### 2. `FrequencyPlan` should move closer to domain types
+### 2. `FrequencyMapping` should move closer to domain types
 
 Frequency mapping is not just a utility trait. It is part of the domain model.
-In the long run, frequency plans should probably sit under `domain::frequency`
+In the long run, frequency mappings should probably sit under `domain::frequency`
 and expose:
 
 - physical-domain validation
@@ -294,8 +294,8 @@ This is for advanced users, testing, and future bindings.
 
 Examples:
 
-- construct `FilterSpec`
-- construct frequency plans
+- construct `FilterParameter`
+- construct frequency mappings
 - run an approximation engine directly
 - synthesize a coupling matrix explicitly
 - evaluate a response solver explicitly
@@ -308,7 +308,7 @@ This is for the common "give me a filter flow" use case.
 Examples:
 
 - `synthesize_chebyshev(...)`
-- `synthesize_and_evaluate_chebyshev(...)`
+- `synthesize_and_evaluate_chebyshev_with_mapping(...)`
 - orchestration structs such as `ChebyshevSynthesis`
 
 Guideline:
@@ -474,7 +474,7 @@ Recommended style for this crate:
 For naming:
 
 - reserve `Spec` for user intent
-- reserve `Plan` for domain mapping rules
+- reserve `Mapping` for domain mapping rules
 - reserve `Set` or `Artifact` for algorithm outputs
 - reserve `Solver` and `Synthesizer` for active computation types
 

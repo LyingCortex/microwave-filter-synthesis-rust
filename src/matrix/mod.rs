@@ -44,6 +44,8 @@ mod tests {
         )?;
 
         let matrix = CouplingMatrixSynthesizer.synthesize(&polynomials)?;
+        assert_eq!(matrix.order(), 3);
+        assert_eq!(matrix.side(), 5);
         assert_eq!(matrix.shape(), MatrixShape { rows: 5, cols: 5 });
         approx_eq(matrix.at(0, 1).unwrap_or_default(), 0.8, 1e-12);
         approx_eq(matrix.at(1, 2).unwrap_or_default(), 0.4, 1e-12);

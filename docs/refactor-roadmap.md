@@ -176,7 +176,7 @@ make `freq` the authoritative place for domain mapping rules
 
 Tasks:
 
-1. Keep `FrequencyPlan` as the only place that knows how physical frequencies
+1. Keep `FrequencyMapping` as the only place that knows how physical frequencies
    map to normalized coordinates.
 2. Add explicit helpers for zero normalization rather than calling back from
    `spec`.
