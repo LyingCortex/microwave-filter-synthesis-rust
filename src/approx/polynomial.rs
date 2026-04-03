@@ -1,18 +1,27 @@
 use super::GeneralizedChebyshevData;
 use crate::error::{MfsError, Result};
 
+/// Real-valued polynomial data produced by the approximation stage.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PolynomialSet {
+    /// Prototype order carried through the rest of the pipeline.
     pub order: usize,
+    /// Chebyshev ripple factor derived from return loss.
     pub ripple_factor: f64,
+    /// Finite transmission zeros expressed in normalized coordinates.
     pub transmission_zeros_normalized: Vec<f64>,
+    /// Denominator-like polynomial coefficients.
     pub e: Vec<f64>,
+    /// Numerator-like polynomial coefficients.
     pub f: Vec<f64>,
+    /// Finite-zero polynomial coefficients.
     pub p: Vec<f64>,
+    /// Extra generalized Chebyshev data when finite zeros are present.
     pub generalized: Option<GeneralizedChebyshevData>,
 }
 
 impl PolynomialSet {
+    /// Creates a validated polynomial bundle.
     pub fn new(
         order: usize,
         ripple_factor: f64,
@@ -34,11 +43,13 @@ impl PolynomialSet {
         Ok(set)
     }
 
+    /// Attaches generalized Chebyshev helper data to the bundle.
     pub fn with_generalized(mut self, generalized: GeneralizedChebyshevData) -> Self {
         self.generalized = Some(generalized);
         self
     }
 
+    /// Validates vector lengths and scalar ranges before downstream use.
     pub fn validate(&self) -> Result<()> {
         if self.order == 0 {
             return Err(MfsError::InvalidOrder { order: self.order });
@@ -82,24 +93,29 @@ impl PolynomialSet {
         Ok(())
     }
 
+    /// Returns the degree of the `E` polynomial.
     pub fn e_degree(&self) -> usize {
         self.e.len().saturating_sub(1)
     }
 
+    /// Returns the degree of the `F` polynomial.
     pub fn f_degree(&self) -> usize {
         self.f.len().saturating_sub(1)
     }
 
+    /// Returns the degree of the `P` polynomial.
     pub fn p_degree(&self) -> usize {
         self.p.len().saturating_sub(1)
     }
 }
 
+/// Converts passband return loss into the Chebyshev ripple factor.
 pub fn chebyshev_ripple_factor(return_loss_db: f64) -> f64 {
     let power_ratio = 10_f64.powf(return_loss_db / 10.0) - 1.0;
     1.0 / power_ratio.sqrt()
 }
 
+/// Builds a monic real polynomial from the provided real roots.
 pub fn monic_polynomial_from_real_roots(roots: &[f64]) -> Vec<f64> {
     let mut coefficients = vec![1.0];
 

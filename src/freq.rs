@@ -1,16 +1,22 @@
 use crate::error::{MfsError, Result};
 use crate::spec::{TransmissionZero, TransmissionZeroDomain};
 
+/// One sample expressed in the normalized prototype frequency domain.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NormalizedSample {
+    /// Normalized angular frequency used by approximation and response code.
     pub omega: f64,
 }
 
+/// Maps between physical frequency units and normalized prototype coordinates.
 pub trait FrequencyPlan {
+    /// Converts one physical-frequency sample into prototype coordinates.
     fn map_hz_to_normalized(&self, frequency_hz: f64) -> Result<NormalizedSample>;
 
+    /// Converts one normalized prototype sample back into physical frequency.
     fn map_normalized_to_hz(&self, sample: NormalizedSample) -> Result<f64>;
 
+    /// Converts every sample in a grid through the plan in one pass.
     fn map_grid_hz_to_normalized(&self, grid: &FrequencyGrid) -> Result<Vec<NormalizedSample>> {
         grid.as_slice()
             .iter()
@@ -20,6 +26,7 @@ pub trait FrequencyPlan {
     }
 }
 
+/// Normalizes a single transmission zero according to the supplied plan.
 pub fn normalize_transmission_zero(
     zero: TransmissionZero,
     plan: &impl FrequencyPlan,
@@ -36,6 +43,7 @@ pub fn normalize_transmission_zero(
     }
 }
 
+/// Normalizes a list of transmission zeros according to the supplied plan.
 pub fn normalize_transmission_zeros(
     zeros: &[TransmissionZero],
     plan: &impl FrequencyPlan,
@@ -47,12 +55,14 @@ pub fn normalize_transmission_zeros(
         .collect()
 }
 
+/// Low-pass normalization plan parameterized by a single cutoff frequency.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LowPassPlan {
     cutoff_hz: f64,
 }
 
 impl LowPassPlan {
+    /// Creates a validated low-pass plan.
     pub fn new(cutoff_hz: f64) -> Result<Self> {
         if !cutoff_hz.is_finite() || cutoff_hz <= 0.0 {
             return Err(MfsError::InvalidFrequency(format!(
@@ -62,6 +72,7 @@ impl LowPassPlan {
         Ok(Self { cutoff_hz })
     }
 
+    /// Returns the cutoff frequency used for normalization.
     pub fn cutoff_hz(&self) -> f64 {
         self.cutoff_hz
     }
@@ -76,6 +87,7 @@ impl FrequencyPlan for LowPassPlan {
         }
 
         Ok(NormalizedSample {
+            // A low-pass prototype normalizes directly by the cutoff frequency.
             omega: frequency_hz / self.cutoff_hz,
         })
     }
@@ -92,6 +104,7 @@ impl FrequencyPlan for LowPassPlan {
     }
 }
 
+/// Band-pass normalization plan parameterized by center frequency and bandwidth.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BandPassPlan {
     center_hz: f64,
@@ -99,6 +112,7 @@ pub struct BandPassPlan {
 }
 
 impl BandPassPlan {
+    /// Creates a validated band-pass plan.
     pub fn new(center_hz: f64, bandwidth_hz: f64) -> Result<Self> {
         if !center_hz.is_finite() || center_hz <= 0.0 {
             return Err(MfsError::InvalidFrequency(format!(
@@ -117,10 +131,12 @@ impl BandPassPlan {
         })
     }
 
+    /// Returns the center frequency of the mapped passband.
     pub fn center_hz(&self) -> f64 {
         self.center_hz
     }
 
+    /// Returns the absolute 3 dB bandwidth used by the mapping.
     pub fn bandwidth_hz(&self) -> f64 {
         self.bandwidth_hz
     }
@@ -135,6 +151,7 @@ impl FrequencyPlan for BandPassPlan {
         }
 
         let fractional_bw = self.bandwidth_hz / self.center_hz;
+        // This is the standard low-pass to band-pass frequency transformation.
         let omega =
             (1.0 / fractional_bw) * (frequency_hz / self.center_hz - self.center_hz / frequency_hz);
         Ok(NormalizedSample { omega })
@@ -147,6 +164,7 @@ impl FrequencyPlan for BandPassPlan {
             ));
         }
 
+        // Use the positive-frequency branch of the inverse quadratic mapping.
         let discriminant =
             (sample.omega * self.bandwidth_hz).powi(2) + 4.0 * self.center_hz.powi(2);
         let frequency_hz = (sample.omega * self.bandwidth_hz + discriminant.sqrt()) / 2.0;
@@ -161,12 +179,14 @@ impl FrequencyPlan for BandPassPlan {
     }
 }
 
+/// Concrete frequency samples used when evaluating a synthesized response.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrequencyGrid {
     samples_hz: Vec<f64>,
 }
 
 impl FrequencyGrid {
+    /// Builds an evenly spaced grid from `start_hz` to `stop_hz`, inclusive.
     pub fn linspace(start_hz: f64, stop_hz: f64, points: usize) -> Result<Self> {
         if points < 2 {
             return Err(MfsError::InvalidGridSize { points });
@@ -185,6 +205,7 @@ impl FrequencyGrid {
         Ok(Self { samples_hz })
     }
 
+    /// Returns the underlying grid samples as a borrowed slice.
     pub fn as_slice(&self) -> &[f64] {
         &self.samples_hz
     }

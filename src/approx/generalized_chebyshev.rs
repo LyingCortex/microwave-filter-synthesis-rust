@@ -1,8 +1,11 @@
 use crate::error::{MfsError, Result};
 
+/// Lightweight complex scalar used by the generalized Chebyshev helpers.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ComplexCoefficient {
+    /// Real part of the coefficient.
     pub re: f64,
+    /// Imaginary part of the coefficient.
     pub im: f64,
 }
 
@@ -18,14 +21,17 @@ impl ComplexCoefficient {
         Self { re: value, im: 0.0 }
     }
 
+    /// Returns the magnitude of the coefficient.
     pub fn norm(self) -> f64 {
         (self.re * self.re + self.im * self.im).sqrt()
     }
 
+    /// Returns the squared magnitude, which avoids an extra square root.
     pub fn norm_sqr(self) -> f64 {
         self.re * self.re + self.im * self.im
     }
 
+    /// Multiplies the coefficient by `i^power` using the 4-step periodicity of `i`.
     fn mul_i_pow(self, power: usize) -> Self {
         match power % 4 {
             0 => self,
@@ -106,12 +112,15 @@ impl std::ops::Neg for ComplexCoefficient {
     }
 }
 
+/// Dense polynomial with complex coefficients in ascending-power order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComplexPolynomial {
+    /// Coefficients ordered from constant term upward.
     pub coefficients: Vec<ComplexCoefficient>,
 }
 
 impl ComplexPolynomial {
+    /// Creates a validated complex polynomial.
     pub fn new(coefficients: Vec<ComplexCoefficient>) -> Result<Self> {
         if coefficients.is_empty() {
             return Err(MfsError::Unsupported(
@@ -129,6 +138,7 @@ impl ComplexPolynomial {
         Ok(Self { coefficients })
     }
 
+    /// Evaluates the polynomial at a complex point using Horner's rule.
     pub fn evaluate(&self, x: ComplexCoefficient) -> ComplexCoefficient {
         self.coefficients
             .iter()
@@ -137,10 +147,12 @@ impl ComplexPolynomial {
             .fold(ComplexCoefficient::ZERO, |acc, coeff| acc * x + coeff)
     }
 
+    /// Returns the polynomial degree.
     pub fn degree(&self) -> usize {
         self.coefficients.len().saturating_sub(1)
     }
 
+    /// Multiplies every coefficient by the given scalar.
     pub fn scale(&self, scalar: ComplexCoefficient) -> Result<Self> {
         Self::new(
             self.coefficients
@@ -151,6 +163,7 @@ impl ComplexPolynomial {
         )
     }
 
+    /// Adds two polynomials, padding the shorter one with implicit zeros.
     pub fn add(&self, rhs: &Self) -> Result<Self> {
         let target_len = self.coefficients.len().max(rhs.coefficients.len());
         let mut coefficients = vec![ComplexCoefficient::ZERO; target_len];
@@ -165,6 +178,7 @@ impl ComplexPolynomial {
         Self::new(trim_trailing_complex_zeros(coefficients))
     }
 
+    /// Builds a monic polynomial whose roots are all real.
     pub fn from_real_roots(roots: &[f64]) -> Result<Self> {
         let mut coefficients = vec![ComplexCoefficient::ONE];
         for &root in roots {
@@ -174,6 +188,7 @@ impl ComplexPolynomial {
         Self::new(coefficients)
     }
 
+    /// Builds a monic polynomial whose roots may be complex.
     pub fn from_complex_roots(roots: &[ComplexCoefficient]) -> Result<Self> {
         let mut coefficients = vec![ComplexCoefficient::ONE];
         for &root in roots {
@@ -182,6 +197,7 @@ impl ComplexPolynomial {
         Self::new(coefficients)
     }
 
+    /// Estimates all roots with the Durand-Kerner method.
     pub fn roots(&self) -> Result<Vec<ComplexCoefficient>> {
         let degree = self.degree();
         if degree == 0 {
@@ -212,6 +228,7 @@ impl ComplexPolynomial {
 
         let mut roots = (0..degree)
             .map(|index| {
+                // Spread initial guesses on a circle that safely bounds all roots.
                 let angle = 2.0 * std::f64::consts::PI * index as f64 / degree as f64;
                 ComplexCoefficient::new(radius * angle.cos(), radius * angle.sin())
             })
@@ -232,6 +249,7 @@ impl ComplexPolynomial {
                     continue;
                 }
 
+                // Durand-Kerner updates each root against the current estimate set.
                 let delta = evaluate_monic_polynomial(&normalized, root) / denominator;
                 roots[index] = root - delta;
                 max_delta = max_delta.max(delta.norm());
@@ -248,31 +266,48 @@ impl ComplexPolynomial {
     }
 }
 
+/// Transmission-zero list padded with infinities up to the target order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PaddedTransmissionZeros {
+    /// Original zeros followed by as many infinities as required.
     pub padded: Vec<f64>,
+    /// Number of explicit finite zeros before padding.
     pub finite_count: usize,
 }
 
+/// Intermediate polynomials produced by Cameron's recurrence.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CameronRecurrence {
+    /// `U` polynomial stored in descending powers of the helper variable.
     pub u_descending: Vec<f64>,
+    /// `V` polynomial stored in descending powers of the helper variable.
     pub v_descending: Vec<f64>,
+    /// Recurrence output converted into the `s` domain.
     pub f_s: ComplexPolynomial,
 }
 
+/// Extra data required for generalized Chebyshev synthesis paths.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GeneralizedChebyshevData {
+    /// Padded zero list used by the recurrence.
     pub padded_zeros: Vec<f64>,
+    /// Number of finite zeros in the original specification.
     pub finite_zero_count: usize,
+    /// `F(s)` polynomial from Cameron's recurrence.
     pub f_s: ComplexPolynomial,
+    /// `P(s)` polynomial induced by the transmission zeros.
     pub p_s: ComplexPolynomial,
+    /// Optional auxiliary `A(s)` polynomial.
     pub a_s: Option<ComplexPolynomial>,
+    /// Optional generalized denominator `E(s)` polynomial.
     pub e_s: Option<ComplexPolynomial>,
+    /// Conventional ripple parameter.
     pub eps: f64,
+    /// Ripple parameter adjusted for all-finite-zero cases.
     pub eps_r: f64,
 }
 
+/// Pads a finite-zero list with infinities so it matches the target order.
 pub fn pad_transmission_zeros(
     order: usize,
     finite_zeros: &[f64],
@@ -304,6 +339,7 @@ pub fn pad_transmission_zeros(
     })
 }
 
+/// Runs the Cameron recurrence used for generalized Chebyshev prototypes.
 pub fn cameron_recursive(padded_zeros: &[f64]) -> Result<CameronRecurrence> {
     if padded_zeros.is_empty() {
         return Err(MfsError::InvalidTransmissionZero(
@@ -329,6 +365,7 @@ pub fn cameron_recursive(padded_zeros: &[f64]) -> Result<CameronRecurrence> {
         }
 
         let temp = safe_sqrt_term(next_zero)?;
+        // Update the recurrence in descending-power form to match the reference derivation.
         let u2 = add_descending(
             &convolve_descending(&u, &[1.0, -reciprocal_or_zero(next_zero)]),
             &convolve_descending(
@@ -352,6 +389,7 @@ pub fn cameron_recursive(padded_zeros: &[f64]) -> Result<CameronRecurrence> {
     })
 }
 
+/// Builds the generalized `P(s)` polynomial from the padded zero list.
 pub fn find_p_polynomial(
     order: usize,
     padded_zeros: &[f64],
@@ -384,6 +422,7 @@ pub fn find_p_polynomial(
     ComplexPolynomial::new(coefficients)
 }
 
+/// Computes the generalized Chebyshev ripple parameters `eps` and `eps_r`.
 pub fn find_eps(
     finite_zero_count: usize,
     p_s: &ComplexPolynomial,
@@ -418,6 +457,7 @@ pub fn find_eps(
     Ok((eps, eps_r))
 }
 
+/// Builds the auxiliary `A` polynomial and returns its transformed roots.
 pub fn find_a_polynomial(
     padded_zeros: &[f64],
     order: usize,
@@ -447,6 +487,7 @@ pub fn find_a_polynomial(
         p_s.coefficients
             .iter()
             .copied()
+            // Convert from `s` coefficients to the helper `w` domain one power at a time.
             .enumerate()
             .map(|(index, coefficient)| coefficient.mul_i_pow(index))
             .collect(),
@@ -472,6 +513,7 @@ pub fn find_a_polynomial(
         .scale(ComplexCoefficient::from_real((order - finite_count) as f64))?
         .add(&psi_sum)?;
     let a_w_roots = a_w.roots()?;
+    // Rotate the roots back into the `s` plane expected by downstream code.
     let a_s_roots = a_w_roots
         .iter()
         .copied()
@@ -480,6 +522,7 @@ pub fn find_a_polynomial(
     Ok((Some(a_w), a_s_roots))
 }
 
+/// Builds the generalized `E(s)` polynomial and returns its transformed roots.
 pub fn find_e_polynomial(
     f_s: &ComplexPolynomial,
     p_s: &ComplexPolynomial,
@@ -508,6 +551,7 @@ pub fn find_e_polynomial(
         .add(&p_w.scale(ComplexCoefficient::new(0.0, 1.0 / eps))?)?;
 
     let raw_roots = e_w.roots()?;
+    // Reflect roots into the stable half-plane before reconstructing the polynomial.
     let reflected_roots = raw_roots
         .into_iter()
         .map(|root| {
@@ -537,6 +581,7 @@ pub fn find_e_polynomial(
     Ok((e_s, e_s_roots))
 }
 
+/// Executes the current generalized Chebyshev helper pipeline end to end.
 pub fn synthesize_generalized_chebyshev_data(
     order: usize,
     finite_zeros: &[f64],
@@ -567,6 +612,7 @@ pub fn synthesize_generalized_chebyshev_data(
     })
 }
 
+/// Converts a descending `w`-domain real polynomial into ascending `s`-domain form.
 fn descending_w_to_ascending_s(descending: &[f64]) -> Result<ComplexPolynomial> {
     let order = descending.len().saturating_sub(1);
     let mut ascending = vec![ComplexCoefficient::ZERO; descending.len()];
@@ -579,6 +625,7 @@ fn descending_w_to_ascending_s(descending: &[f64]) -> Result<ComplexPolynomial> 
     ComplexPolynomial::new(ascending)
 }
 
+/// Multiplies a monic polynomial by `(x - root)`.
 fn multiply_by_monic_root(
     coefficients: &[ComplexCoefficient],
     root: ComplexCoefficient,
@@ -591,6 +638,7 @@ fn multiply_by_monic_root(
     next
 }
 
+/// Removes tiny trailing coefficients introduced by numerical noise.
 fn trim_trailing_complex_zeros(
     mut coefficients: Vec<ComplexCoefficient>,
 ) -> Vec<ComplexCoefficient> {
@@ -604,6 +652,7 @@ fn trim_trailing_complex_zeros(
     coefficients
 }
 
+/// Evaluates a normalized polynomial during the Durand-Kerner iteration.
 fn evaluate_monic_polynomial(
     coefficients: &[ComplexCoefficient],
     x: ComplexCoefficient,
@@ -617,6 +666,7 @@ fn evaluate_monic_polynomial(
         })
 }
 
+/// Convolves two descending-power real polynomials.
 fn convolve_descending(lhs: &[f64], rhs: &[f64]) -> Vec<f64> {
     let mut output = vec![0.0; lhs.len() + rhs.len() - 1];
     for (left_index, left) in lhs.iter().copied().enumerate() {
@@ -627,6 +677,7 @@ fn convolve_descending(lhs: &[f64], rhs: &[f64]) -> Vec<f64> {
     output
 }
 
+/// Adds two descending-power real polynomials with automatic alignment.
 fn add_descending(lhs: &[f64], rhs: &[f64]) -> Vec<f64> {
     let target_len = lhs.len().max(rhs.len());
     let mut output = vec![0.0; target_len];
@@ -641,6 +692,7 @@ fn add_descending(lhs: &[f64], rhs: &[f64]) -> Vec<f64> {
     output
 }
 
+/// Returns the reciprocal, but preserves infinities as zeros after padding.
 fn reciprocal_or_zero(value: f64) -> f64 {
     if value.is_infinite() {
         0.0
@@ -649,6 +701,7 @@ fn reciprocal_or_zero(value: f64) -> f64 {
     }
 }
 
+/// Evaluates the square-root term that appears in the generalized recurrence.
 fn safe_sqrt_term(value: f64) -> Result<f64> {
     if value.is_infinite() {
         return Ok(1.0);
@@ -662,6 +715,7 @@ fn safe_sqrt_term(value: f64) -> Result<f64> {
     Ok(term.sqrt())
 }
 
+/// Small helper to keep scalar negation readable inside recurrence code.
 trait NegExt {
     fn neg(self) -> Self;
 }

@@ -4,28 +4,42 @@ use crate::error::Result;
 use crate::freq::{FrequencyGrid, FrequencyPlan};
 use crate::matrix::CouplingMatrix;
 
+/// One sampled point of the synthesized S-parameter response.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResponseSample {
+    /// Physical frequency associated with the sample.
     pub frequency_hz: f64,
+    /// Matching normalized frequency used internally by the solver.
     pub normalized_omega: f64,
+    /// Approximate group delay derived from the solved response matrix.
     pub group_delay: f64,
+    /// Real part of the reflection coefficient.
     pub s11_re: f64,
+    /// Imaginary part of the reflection coefficient.
     pub s11_im: f64,
+    /// Real part of the forward transmission coefficient.
     pub s21_re: f64,
+    /// Imaginary part of the forward transmission coefficient.
     pub s21_im: f64,
 }
 
+/// Collection of sampled S-parameter data.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SParameterResponse {
+    /// Response samples in the same order as the evaluation grid.
     pub samples: Vec<ResponseSample>,
 }
 
+/// Front-end API for response evaluation.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ResponseSolver;
 
+/// Source/load terminations used by the response backend.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResponseSettings {
+    /// Source resistance in normalized units.
     pub source_resistance: f64,
+    /// Load resistance in normalized units.
     pub load_resistance: f64,
 }
 
@@ -39,6 +53,7 @@ impl Default for ResponseSettings {
 }
 
 impl ResponseSolver {
+    /// Evaluates a matrix directly on a grid that is already normalized.
     pub fn evaluate(
         &self,
         matrix: &CouplingMatrix,
@@ -47,6 +62,7 @@ impl ResponseSolver {
         self.evaluate_with_settings(matrix, grid, ResponseSettings::default())
     }
 
+    /// Evaluates a matrix on a physical grid after mapping it through a frequency plan.
     pub fn evaluate_with_plan(
         &self,
         matrix: &CouplingMatrix,
@@ -56,6 +72,7 @@ impl ResponseSolver {
         self.evaluate_with_plan_and_settings(matrix, grid, plan, ResponseSettings::default())
     }
 
+    /// Evaluates a normalized grid with explicitly supplied source/load settings.
     pub fn evaluate_with_settings(
         &self,
         matrix: &CouplingMatrix,
@@ -65,6 +82,7 @@ impl ResponseSolver {
         backend::evaluate_normalized_response(matrix, grid.as_slice(), settings)
     }
 
+    /// Evaluates a physical grid with explicit frequency mapping and terminations.
     pub fn evaluate_with_plan_and_settings(
         &self,
         matrix: &CouplingMatrix,
@@ -77,6 +95,7 @@ impl ResponseSolver {
             .into_iter()
             .map(|sample| sample.omega)
             .collect::<Vec<_>>();
+        // Keep both physical and normalized axes so callers can inspect either one.
         backend::evaluate_response(matrix, grid.as_slice(), &normalized_omegas, settings)
     }
 }

@@ -1,28 +1,41 @@
 use crate::error::{MfsError, Result};
 
+/// Describes the physical topology of the filter being synthesized.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilterClass {
+    /// Low-pass response with a single upper cutoff.
     LowPass,
+    /// High-pass response with a single lower cutoff.
     HighPass,
+    /// Band-pass response around a center frequency.
     BandPass,
+    /// Band-stop response that rejects a finite band.
     BandStop,
+    /// Multi-band pass response with multiple passbands.
     MultiBandPass,
+    /// Duplexer-style network with multiple channels.
     Duplexer,
 }
 
+/// Backward-compatible alias kept for earlier API naming.
 pub type FilterType = FilterClass;
 
+/// Selects which approximation family defines the prototype polynomials.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApproximationFamily {
+    /// Equal-ripple Chebyshev response.
     Chebyshev,
 }
 
+/// Captures performance targets that are independent from topology.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PerformanceSpec {
+    /// Minimum return loss in dB across the passband.
     pub return_loss_db: f64,
 }
 
 impl PerformanceSpec {
+    /// Creates a validated performance specification.
     pub fn new(return_loss_db: f64) -> Result<Self> {
         if !return_loss_db.is_finite() || return_loss_db <= 0.0 {
             return Err(MfsError::InvalidReturnLoss { return_loss_db });
@@ -32,23 +45,31 @@ impl PerformanceSpec {
     }
 }
 
+/// Indicates whether a transmission zero is already normalized or still in Hz.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransmissionZeroDomain {
+    /// Zero is expressed in the normalized low-pass prototype domain.
     Normalized,
+    /// Zero is expressed in physical frequency units.
     PhysicalHz,
 }
 
+/// Defines one finite transmission zero for the target response.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransmissionZero {
+    /// Numeric value of the zero in the domain selected below.
     pub value: f64,
+    /// Domain that tells the synthesizer how to interpret `value`.
     pub domain: TransmissionZeroDomain,
 }
 
 impl TransmissionZero {
+    /// Creates a finite zero in normalized low-pass coordinates.
     pub fn finite(normalized_position: f64) -> Self {
         Self::normalized(normalized_position)
     }
 
+    /// Creates a zero that is already normalized.
     pub fn normalized(value: f64) -> Self {
         Self {
             value,
@@ -56,6 +77,7 @@ impl TransmissionZero {
         }
     }
 
+    /// Creates a zero specified in physical frequency units.
     pub fn physical_hz(value: f64) -> Self {
         Self {
             value,
@@ -64,16 +86,23 @@ impl TransmissionZero {
     }
 }
 
+/// Full user-facing synthesis input for a single filter design.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FilterSpec {
+    /// Number of resonators in the synthesized network.
     pub order: usize,
+    /// Desired physical filter topology.
     pub filter_class: FilterClass,
+    /// Approximation family used to build the prototype.
     pub approximation_family: ApproximationFamily,
+    /// Performance targets such as return loss.
     pub performance: PerformanceSpec,
+    /// Optional finite transmission zeros for generalized responses.
     pub transmission_zeros: Vec<TransmissionZero>,
 }
 
 impl FilterSpec {
+    /// Creates a validated filter specification with explicit semantic axes.
     pub fn new(
         order: usize,
         filter_class: FilterClass,
@@ -93,6 +122,7 @@ impl FilterSpec {
         })
     }
 
+    /// Convenience constructor for the common Chebyshev band-pass case.
     pub fn chebyshev(order: usize, return_loss_db: f64) -> Result<Self> {
         Self::new(
             order,
@@ -102,27 +132,33 @@ impl FilterSpec {
         )
     }
 
+    /// Returns a copy of the spec with a different filter class.
     pub fn with_filter_class(mut self, filter_class: FilterClass) -> Self {
         self.filter_class = filter_class;
         self
     }
 
+    /// Backward-compatible setter that mirrors the old `FilterType` naming.
     pub fn with_filter_type(self, filter_type: FilterType) -> Self {
         self.with_filter_class(filter_type)
     }
 
+    /// Returns the requested passband return loss in dB.
     pub fn return_loss_db(&self) -> f64 {
         self.performance.return_loss_db
     }
 
+    /// Backward-compatible accessor for the filter topology.
     pub fn filter_type(&self) -> FilterType {
         self.filter_class
     }
 
+    /// Returns the requested filter topology.
     pub fn filter_class(&self) -> FilterClass {
         self.filter_class
     }
 
+    /// Returns a copy of the spec with the provided transmission zeros.
     pub fn with_transmission_zeros(mut self, transmission_zeros: Vec<TransmissionZero>) -> Self {
         self.transmission_zeros = transmission_zeros;
         self

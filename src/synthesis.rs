@@ -5,19 +5,27 @@ use crate::matrix::{CouplingMatrix, CouplingMatrixSynthesizer};
 use crate::response::{ResponseSolver, SParameterResponse};
 use crate::spec::FilterSpec;
 
+/// Result of the synthesis stage before response evaluation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SynthesisOutcome {
+    /// Approximation-stage polynomial data.
     pub polynomials: PolynomialSet,
+    /// Coupling matrix synthesized from those polynomials.
     pub matrix: CouplingMatrix,
 }
 
+/// Result of the full synthesize-then-evaluate flow.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EvaluationOutcome {
+    /// Approximation-stage polynomial data.
     pub polynomials: PolynomialSet,
+    /// Coupling matrix synthesized from those polynomials.
     pub matrix: CouplingMatrix,
+    /// Sampled S-parameter response over the requested grid.
     pub response: SParameterResponse,
 }
 
+/// High-level orchestrator that ties together approximation, matrix synthesis, and response solving.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ChebyshevSynthesis {
     approximation: ChebyshevApproximation,
@@ -26,6 +34,7 @@ pub struct ChebyshevSynthesis {
 }
 
 impl ChebyshevSynthesis {
+    /// Synthesizes prototype polynomials and a coupling matrix from the input spec.
     pub fn synthesize(
         &self,
         spec: &FilterSpec,
@@ -39,6 +48,7 @@ impl ChebyshevSynthesis {
         })
     }
 
+    /// Synthesizes a design and immediately evaluates its response over a grid.
     pub fn synthesize_and_evaluate(
         &self,
         spec: &FilterSpec,

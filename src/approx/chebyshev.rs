@@ -5,6 +5,7 @@ use crate::spec::FilterSpec;
 use super::polynomial::{PolynomialSet, chebyshev_ripple_factor, monic_polynomial_from_real_roots};
 use super::{ApproximationEngine, PrototypePoint, synthesize_generalized_chebyshev_data};
 
+/// Baseline Chebyshev approximation engine for the current end-to-end pipeline.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ChebyshevApproximation;
 
@@ -21,8 +22,8 @@ impl ApproximationEngine for ChebyshevApproximation {
         e[0] = 1.0;
         f[0] = 1.0 / (1.0 + ripple_factor);
 
-        // Placeholder coefficients keep the stage boundaries realistic while
-        // the full synthesis equations are still being ported.
+        // These placeholder coefficients keep the rest of the pipeline testable
+        // until the full Chebyshev polynomial derivation is ported from Python.
         for (index, coeff) in e.iter_mut().enumerate().skip(1) {
             *coeff = ripple_factor * index as f64 / spec.order as f64;
         }
@@ -43,6 +44,7 @@ impl ApproximationEngine for ChebyshevApproximation {
         let finite_zeros = transmission_zeros_normalized
             .iter()
             .copied()
+            // Generalized Chebyshev helpers only operate on explicit finite zeros.
             .filter(|zero| zero.is_finite())
             .collect::<Vec<_>>();
         if !finite_zeros.is_empty() {

@@ -14,12 +14,17 @@ pub use generalized_chebyshev::{
 };
 pub use polynomial::{PolynomialSet, chebyshev_ripple_factor, monic_polynomial_from_real_roots};
 
+/// Generic point on a prototype response curve.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PrototypePoint {
+    /// Horizontal coordinate, typically normalized frequency.
     pub x: f64,
+    /// Vertical coordinate, typically amplitude or attenuation.
     pub y: f64,
 }
 
+/// Trait implemented by approximation engines that generate prototype polynomials.
 pub trait ApproximationEngine {
+    /// Synthesizes a polynomial set from a validated filter specification.
     fn synthesize(&self, spec: &FilterSpec, plan: &impl FrequencyPlan) -> Result<PolynomialSet>;
 }

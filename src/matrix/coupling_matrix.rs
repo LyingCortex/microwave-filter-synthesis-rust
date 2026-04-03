@@ -1,11 +1,15 @@
 use crate::error::{MfsError, Result};
 
+/// Simple shape metadata for a dense coupling matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MatrixShape {
+    /// Number of matrix rows.
     pub rows: usize,
+    /// Number of matrix columns.
     pub cols: usize,
 }
 
+/// Dense coupling matrix including source and load rows/columns.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CouplingMatrix {
     shape: MatrixShape,
@@ -13,6 +17,7 @@ pub struct CouplingMatrix {
 }
 
 impl CouplingMatrix {
+    /// Creates a coupling matrix from flattened row-major data.
     pub fn new(order: usize, data: Vec<f64>) -> Result<Self> {
         if order == 0 {
             return Err(MfsError::InvalidOrder { order });
@@ -36,6 +41,7 @@ impl CouplingMatrix {
         })
     }
 
+    /// Creates an identity matrix of the correct source-load augmented size.
     pub fn identity(order: usize) -> Result<Self> {
         if order == 0 {
             return Err(MfsError::InvalidOrder { order });
@@ -50,14 +56,17 @@ impl CouplingMatrix {
         Self::new(order, data)
     }
 
+    /// Returns the resonator count represented by this matrix.
     pub fn order(&self) -> usize {
         self.shape.rows - 2
     }
 
+    /// Returns the matrix dimensions.
     pub fn shape(&self) -> MatrixShape {
         self.shape
     }
 
+    /// Returns one matrix entry if the indices are in range.
     pub fn at(&self, row: usize, col: usize) -> Option<f64> {
         if row >= self.shape.rows || col >= self.shape.cols {
             return None;
@@ -66,20 +75,24 @@ impl CouplingMatrix {
         Some(self.data[row * self.shape.cols + col])
     }
 
+    /// Returns the underlying row-major storage.
     pub fn as_slice(&self) -> &[f64] {
         &self.data
     }
 
+    /// Returns the source-to-first-resonator coupling magnitude.
     pub fn source_coupling(&self) -> f64 {
         self.at(0, 1).unwrap_or_default().abs()
     }
 
+    /// Returns the last-resonator-to-load coupling magnitude.
     pub fn load_coupling(&self) -> f64 {
         self.at(self.order(), self.order() + 1)
             .unwrap_or_default()
             .abs()
     }
 
+    /// Returns the diagonal detuning term for one resonator.
     pub fn resonator_diagonal(&self, resonator_index: usize) -> Option<f64> {
         if resonator_index >= self.order() {
             return None;
@@ -88,6 +101,7 @@ impl CouplingMatrix {
         self.at(resonator_index + 1, resonator_index + 1)
     }
 
+    /// Returns the nearest-neighbor coupling magnitudes along the resonator chain.
     pub fn chain_couplings(&self) -> Vec<f64> {
         (0..self.order().saturating_sub(1))
             .filter_map(|step| self.at(step + 1, step + 2))

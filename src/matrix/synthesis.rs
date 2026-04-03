@@ -3,10 +3,12 @@ use crate::error::Result;
 
 use super::{CouplingMatrix, CouplingMatrixBuilder};
 
+/// Maps polynomial data into the placeholder coupling-matrix representation.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct CouplingMatrixSynthesizer;
 
 impl CouplingMatrixSynthesizer {
+    /// Produces a coupling matrix that is structurally compatible with the current pipeline.
     pub fn synthesize(&self, polynomials: &PolynomialSet) -> Result<CouplingMatrix> {
         let order = polynomials.order;
         let mut builder = CouplingMatrixBuilder::new(order)?;
@@ -18,6 +20,7 @@ impl CouplingMatrixSynthesizer {
             .unwrap_or(1.0)
             .abs()
             .max(1e-12);
+        // Keep the source/load couplings non-zero so the response matrix remains invertible.
         let load_coupling = polynomials
             .e
             .get(0)
@@ -47,6 +50,7 @@ impl CouplingMatrixSynthesizer {
                 .copied()
                 .unwrap_or_default()
                 .abs();
+            // Average the neighboring E/F coefficients to obtain a simple chain coupling.
             let coupling = ((e_coeff + f_coeff) / 2.0).max(1e-12);
             builder = builder.set_symmetric(step + 1, step + 2, coupling)?;
         }

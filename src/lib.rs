@@ -1,8 +1,9 @@
-//! Microwave filter synthesis core library.
+//! Core library for microwave filter synthesis experiments in Rust.
 //!
-//! This crate defines the base domain model for a future Rust rewrite of the
-//! Python prototype. The current implementation focuses on a stable module
-//! layout, typed specifications, and a minimal end-to-end synthesis pipeline.
+//! The crate is organized around a small end-to-end workflow:
+//! build a [`FilterSpec`], map physical frequencies through a [`FrequencyPlan`],
+//! synthesize prototype polynomials, convert them into a coupling matrix, and
+//! optionally evaluate the resulting S-parameter response on a frequency grid.
 
 pub mod approx;
 pub mod error;
@@ -23,7 +24,7 @@ pub use spec::{
 };
 pub use synthesis::{ChebyshevSynthesis, EvaluationOutcome, SynthesisOutcome};
 
-/// High-level helper that mirrors the intended synthesis workflow.
+/// Convenience helper that runs the current Chebyshev synthesis flow.
 pub fn synthesize_chebyshev(
     spec: &FilterSpec,
     plan: &impl FrequencyPlan,
@@ -32,7 +33,7 @@ pub fn synthesize_chebyshev(
     Ok((outcome.polynomials, outcome.matrix))
 }
 
-/// High-level helper that synthesizes a prototype and evaluates its response.
+/// Convenience helper that synthesizes a design and evaluates its response.
 pub fn synthesize_and_evaluate_chebyshev(
     spec: &FilterSpec,
     plan: &impl FrequencyPlan,

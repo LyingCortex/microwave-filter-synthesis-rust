@@ -3,6 +3,7 @@ use crate::matrix::CouplingMatrix;
 
 use super::{ResponseSample, ResponseSettings, SParameterResponse};
 
+/// Minimal complex number type used to keep the backend dependency-free.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 struct Complex64 {
     re: f64,
@@ -21,6 +22,7 @@ impl Complex64 {
         Self { re: value, im: 0.0 }
     }
 
+    /// Returns the squared magnitude, useful for pivot selection and power checks.
     fn norm_sqr(self) -> f64 {
         self.re * self.re + self.im * self.im
     }
@@ -89,6 +91,7 @@ impl std::ops::Neg for Complex64 {
     }
 }
 
+/// Evaluates a response when the supplied grid is already normalized.
 pub(super) fn evaluate_normalized_response(
     matrix: &CouplingMatrix,
     normalized_omegas: &[f64],
@@ -97,6 +100,7 @@ pub(super) fn evaluate_normalized_response(
     evaluate_response(matrix, normalized_omegas, normalized_omegas, settings)
 }
 
+/// Evaluates the response on paired physical and normalized frequency axes.
 pub(super) fn evaluate_response(
     matrix: &CouplingMatrix,
     frequencies_hz: &[f64],
@@ -133,6 +137,7 @@ pub(super) fn evaluate_response(
                 .zip(inverse.iter().map(|row| row[0]))
                 .fold(Complex64::ZERO, |acc, (lhs, rhs)| acc + lhs * rhs);
             let denominator = inverse[side - 1][0];
+            // This mirrors the current prototype's inexpensive group-delay estimate.
             let group_delay = if denominator.norm_sqr() <= 1e-18 {
                 0.0
             } else {
@@ -154,6 +159,7 @@ pub(super) fn evaluate_response(
     Ok(SParameterResponse { samples })
 }
 
+/// Validates normalized source and load terminations before solving.
 fn validate_settings(settings: ResponseSettings) -> Result<()> {
     if !settings.source_resistance.is_finite() || settings.source_resistance <= 0.0 {
         return Err(MfsError::InvalidFrequency(format!(
@@ -170,6 +176,7 @@ fn validate_settings(settings: ResponseSettings) -> Result<()> {
     Ok(())
 }
 
+/// Builds and inverts the linear response matrix for one frequency sample.
 fn invert_response_matrix(
     matrix: &CouplingMatrix,
     omega: f64,
@@ -184,6 +191,7 @@ fn invert_response_matrix(
             let mut value = Complex64::from_real(matrix.at(row, col).unwrap_or_default());
             if row == col {
                 if row != 0 && row != side - 1 {
+                    // Resonator diagonals are shifted by the normalized frequency sample.
                     value = value + Complex64::from_real(omega);
                 }
                 if row == 0 {
@@ -201,6 +209,7 @@ fn invert_response_matrix(
     Ok(inv)
 }
 
+/// Inverts a dense complex matrix with Gauss-Jordan elimination and pivoting.
 fn gauss_jordan_inverse(a: &mut [Vec<Complex64>], inv: &mut [Vec<Complex64>]) -> Result<()> {
     let n = a.len();
     for pivot_index in 0..n {
