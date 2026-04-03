@@ -21,6 +21,11 @@ impl ComplexCoefficient {
         Self { re: value, im: 0.0 }
     }
 
+    /// Returns the complex conjugate of the coefficient.
+    pub fn conjugate(self) -> Self {
+        Self::new(self.re, -self.im)
+    }
+
     /// Returns the magnitude of the coefficient.
     pub fn norm(self) -> f64 {
         (self.re * self.re + self.im * self.im).sqrt()
@@ -176,6 +181,61 @@ impl ComplexPolynomial {
         }
 
         Self::new(trim_trailing_complex_zeros(coefficients))
+    }
+
+    /// Subtracts another polynomial, padding the shorter one with implicit zeros.
+    pub fn sub(&self, rhs: &Self) -> Result<Self> {
+        let target_len = self.coefficients.len().max(rhs.coefficients.len());
+        let mut coefficients = vec![ComplexCoefficient::ZERO; target_len];
+
+        for (index, coefficient) in self.coefficients.iter().copied().enumerate() {
+            coefficients[index] += coefficient;
+        }
+        for (index, coefficient) in rhs.coefficients.iter().copied().enumerate() {
+            coefficients[index] += -coefficient;
+        }
+
+        Self::new(trim_trailing_complex_zeros(coefficients))
+    }
+
+    /// Returns the formal derivative of the polynomial.
+    pub fn derivative(&self) -> Result<Self> {
+        if self.coefficients.len() == 1 {
+            return Self::new(vec![ComplexCoefficient::ZERO]);
+        }
+
+        Self::new(
+            self.coefficients
+                .iter()
+                .copied()
+                .enumerate()
+                .skip(1)
+                .map(|(power, coefficient)| coefficient * power as f64)
+                .collect(),
+        )
+    }
+
+    /// Applies coefficient conjugation with alternating signs, equivalent to `Q(-s)^*`.
+    pub fn alternating_conjugate(&self) -> Result<Self> {
+        Self::new(
+            self.coefficients
+                .iter()
+                .copied()
+                .enumerate()
+                .map(|(power, coefficient)| {
+                    let sign = if power % 2 == 0 { 1.0 } else { -1.0 };
+                    coefficient.conjugate() * sign
+                })
+                .collect(),
+        )
+    }
+
+    /// Returns the leading non-zero coefficient in ascending-power storage.
+    pub fn leading_coefficient(&self) -> ComplexCoefficient {
+        self.coefficients
+            .last()
+            .copied()
+            .unwrap_or(ComplexCoefficient::ZERO)
     }
 
     /// Builds a monic polynomial whose roots are all real.

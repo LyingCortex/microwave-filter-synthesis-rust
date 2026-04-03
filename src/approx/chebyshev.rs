@@ -39,6 +39,8 @@ impl ApproximationEngine for ChebyshevApproximation {
         let mut polynomial_set = PolynomialSet::new(
             spec.order,
             ripple_factor,
+            ripple_factor,
+            1.0,
             transmission_zeros_normalized.clone(),
             e,
             f,
@@ -48,21 +50,15 @@ impl ApproximationEngine for ChebyshevApproximation {
         let finite_zeros = transmission_zeros_normalized
             .iter()
             .copied()
-            // Generalized Chebyshev helpers only operate on explicit finite zeros.
             .filter(|zero| zero.is_finite())
             .collect::<Vec<_>>();
-        if !finite_zeros.is_empty() {
-            match synthesize_generalized_chebyshev_data(
-                spec.order,
-                &finite_zeros,
-                spec.return_loss_db(),
-            ) {
-                Ok(generalized) => {
-                    polynomial_set = polynomial_set.with_generalized(generalized);
-                }
-                Err(MfsError::Unsupported(_)) => {}
-                Err(error) => return Err(error),
+        match synthesize_generalized_chebyshev_data(spec.order, &finite_zeros, spec.return_loss_db())
+        {
+            Ok(generalized) => {
+                polynomial_set = polynomial_set.with_generalized(generalized);
             }
+            Err(MfsError::Unsupported(_)) => {}
+            Err(error) => return Err(error),
         }
 
         Ok(polynomial_set)
@@ -98,6 +94,8 @@ mod tests {
             0.9891304347826066,
             1e-12,
         );
+        approx_eq(polys.eps, polys.ripple_factor, 1e-12);
+        approx_eq(polys.eps_r, 1.0, 1e-12);
         assert!(polys.generalized.is_none());
         Ok(())
     }
@@ -116,6 +114,8 @@ mod tests {
         approx_eq(polys.p[1], 0.5, 1e-12);
         approx_eq(polys.p[2], -3.0, 1e-12);
         assert!(polys.generalized.is_some());
+        assert!(polys.eps > 0.0);
+        assert!(polys.eps_r > 0.0);
         Ok(())
     }
 
@@ -126,7 +126,7 @@ mod tests {
 
         let polys = ChebyshevApproximation.synthesize(&spec, &mapping)?;
         approx_eq(polys.ripple_factor, 0.10050378152592121, 1e-12);
-        assert!(polys.generalized.is_none());
+        assert!(polys.generalized.is_some());
         Ok(())
     }
 }

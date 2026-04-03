@@ -16,7 +16,11 @@ pub mod synthesis;
 pub use approx::{ApproximationEngine, ChebyshevApproximation, PolynomialSet, PrototypePoint};
 pub use error::{MfsError, Result};
 pub use freq::{BandPassMapping, FrequencyGrid, FrequencyMapping, LowPassMapping, NormalizedSample};
-pub use matrix::{CouplingMatrix, CouplingMatrixBuilder, CouplingMatrixSynthesizer, MatrixShape};
+pub use matrix::{
+    AdmittancePolynomials, BandPassScaledCouplingMatrix, CouplingMatrix, CouplingMatrixBuilder,
+    CouplingMatrixSynthesizer, MatrixShape, MatrixSynthesisMethod, MatrixSynthesisOutcome,
+    MatrixTopology, ResidueExpansion, ResiduePole,
+};
 pub use response::{ResponseSample, ResponseSolver, SParameterResponse};
 pub use spec::{
     ApproximationFamily, FilterClass, FilterParameter, ReturnLossSpec, TransmissionZero, TransmissionZeroDomain,
@@ -56,6 +60,7 @@ mod tests {
         let (polynomials, matrix) = synthesize_chebyshev(&spec, &mapping)?;
         assert_eq!(polynomials.order, 4);
         assert_eq!(polynomials.transmission_zeros_normalized.len(), 1);
+        assert!(polynomials.generalized.is_some());
         assert_eq!(matrix.order(), 4);
         assert!(matrix.at(0, 1).unwrap_or_default() > 0.0);
         Ok(())

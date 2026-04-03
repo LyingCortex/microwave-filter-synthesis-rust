@@ -8,6 +8,10 @@ pub struct PolynomialSet {
     pub order: usize,
     /// Chebyshev ripple factor derived from return loss.
     pub ripple_factor: f64,
+    /// Generalized ripple parameter used by coupling-matrix synthesis formulas.
+    pub eps: f64,
+    /// Adjusted ripple parameter for all-finite-zero cases.
+    pub eps_r: f64,
     /// Finite transmission zeros expressed in normalized coordinates.
     pub transmission_zeros_normalized: Vec<f64>,
     /// Denominator-like polynomial coefficients.
@@ -25,6 +29,8 @@ impl PolynomialSet {
     pub fn new(
         order: usize,
         ripple_factor: f64,
+        eps: f64,
+        eps_r: f64,
         transmission_zeros_normalized: Vec<f64>,
         e: Vec<f64>,
         f: Vec<f64>,
@@ -33,6 +39,8 @@ impl PolynomialSet {
         let set = Self {
             order,
             ripple_factor,
+            eps,
+            eps_r,
             transmission_zeros_normalized,
             e,
             f,
@@ -45,6 +53,8 @@ impl PolynomialSet {
 
     /// Attaches generalized Chebyshev helper data to the bundle.
     pub fn with_generalized(mut self, generalized: GeneralizedChebyshevData) -> Self {
+        self.eps = generalized.eps;
+        self.eps_r = generalized.eps_r;
         self.generalized = Some(generalized);
         self
     }
@@ -57,6 +67,16 @@ impl PolynomialSet {
         if !self.ripple_factor.is_finite() || self.ripple_factor < 0.0 {
             return Err(MfsError::Unsupported(
                 "ripple factor must be finite and non-negative".to_string(),
+            ));
+        }
+        if !self.eps.is_finite() || self.eps <= 0.0 {
+            return Err(MfsError::Unsupported(
+                "eps must be finite and positive".to_string(),
+            ));
+        }
+        if !self.eps_r.is_finite() || self.eps_r <= 0.0 {
+            return Err(MfsError::Unsupported(
+                "eps_r must be finite and positive".to_string(),
             ));
         }
         if self.e.len() != self.order + 1 {
@@ -134,6 +154,9 @@ pub fn monic_polynomial_from_real_roots(roots: &[f64]) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::approx::{
+        ComplexCoefficient, ComplexPolynomial, GeneralizedChebyshevData,
+    };
 
     fn approx_eq(lhs: f64, rhs: f64, tol: f64) {
         let diff = (lhs - rhs).abs();
@@ -148,6 +171,8 @@ mod tests {
         let polynomials = PolynomialSet::new(
             3,
             0.1,
+            0.1,
+            1.0,
             vec![-1.0, 1.0],
             vec![1.0, 0.2, 0.3, 0.4],
             vec![0.8, 0.6, 0.4, 0.2],
@@ -158,13 +183,16 @@ mod tests {
         assert_eq!(polynomials.e_degree(), 3);
         assert_eq!(polynomials.f_degree(), 3);
         assert_eq!(polynomials.p_degree(), 1);
+        approx_eq(polynomials.eps, 0.1, 1e-12);
+        approx_eq(polynomials.eps_r, 1.0, 1e-12);
         assert!(polynomials.generalized.is_none());
     }
 
     #[test]
     fn polynomial_set_rejects_mismatched_coefficient_lengths() {
-        let error = PolynomialSet::new(3, 0.1, vec![], vec![1.0], vec![0.8, 0.6], vec![1.0])
-            .expect_err("mismatched coefficient lengths must fail");
+        let error =
+            PolynomialSet::new(3, 0.1, 0.1, 1.0, vec![], vec![1.0], vec![0.8, 0.6], vec![1.0])
+                .expect_err("mismatched coefficient lengths must fail");
 
         assert!(matches!(error, MfsError::DimensionMismatch { .. }));
     }
@@ -181,5 +209,34 @@ mod tests {
         approx_eq(coefficients[0], 1.0, 1e-12);
         approx_eq(coefficients[1], 0.5, 1e-12);
         approx_eq(coefficients[2], -3.0, 1e-12);
+    }
+
+    #[test]
+    fn generalized_attachment_overrides_eps_metadata() {
+        let generalized = GeneralizedChebyshevData {
+            padded_zeros: vec![2.0, f64::INFINITY, f64::INFINITY],
+            finite_zero_count: 1,
+            f_s: ComplexPolynomial::new(vec![ComplexCoefficient::ONE]).expect("valid polynomial"),
+            p_s: ComplexPolynomial::new(vec![ComplexCoefficient::ONE]).expect("valid polynomial"),
+            a_s: None,
+            e_s: None,
+            eps: 0.23,
+            eps_r: 1.7,
+        };
+        let polynomials = PolynomialSet::new(
+            3,
+            0.1,
+            0.1,
+            1.0,
+            vec![2.0],
+            vec![1.0, 0.2, 0.3, 0.4],
+            vec![0.8, 0.6, 0.4, 0.2],
+            vec![1.0, -2.0],
+        )
+        .expect("valid polynomial set")
+        .with_generalized(generalized);
+
+        approx_eq(polynomials.eps, 0.23, 1e-12);
+        approx_eq(polynomials.eps_r, 1.7, 1e-12);
     }
 }

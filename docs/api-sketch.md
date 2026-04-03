@@ -115,7 +115,9 @@ Expected public items:
 
 - `CouplingMatrix`
 - `CouplingMatrixBuilder`
-- future topology transforms
+- `MatrixSynthesisOutcome`
+- `MatrixSynthesisMethod`
+- topology transforms and structured extractions
 
 ### `mfs::response`
 
