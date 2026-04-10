@@ -26,7 +26,8 @@ The current crate has already moved in the intended direction:
 
 - transmission-zero normalization now lives in the frequency layer
 - matrix synthesis is separated from `CouplingMatrix` storage
-- `approx` has been split into directory modules with a polynomial submodule
+- `approx` has been split into directory modules with dedicated
+  `complex_poly`, `generalized_ops`, and `polynomial` submodules
 - `response` has been split into a public facade plus a private backend helper
 - the response backend now performs real complex matrix inversion for lossless
   S-parameter evaluation and group-delay extraction
@@ -162,21 +163,22 @@ src/
   approx/
     mod.rs
     chebyshev.rs
+    complex_poly.rs
+    generalized_ops.rs
     polynomial.rs
-    normalization.rs
   matrix/
     mod.rs
     coupling_matrix.rs
     builder.rs
     topology.rs
-    synthesis.rs
   response/
     mod.rs
     solver.rs
     sample.rs
-  workflow/
+  synthesis/
     mod.rs
-    chebyshev.rs
+    orchestration.rs
+    engine.rs
   adapters/
     mod.rs
     python.rs
@@ -190,7 +192,7 @@ This is not required immediately, but it is the shape to grow toward once
 
 The following ideas are worth keeping even if implementation details change:
 
-- typed `FilterParameter` rather than a mutable mega-object
+- typed `FilterSpec` rather than a mutable mega-object
 - a separate frequency-mapping concept
 - polynomial artifacts as explicit outputs
 - coupling matrix as a first-class domain artifact
@@ -205,7 +207,7 @@ Several current concepts are useful placeholders but should evolve.
 
 ### 1. `spec` should become more expressive
 
-Today `FilterParameter` mixes "family", "shape", and "band intent" in a compact
+Today `FilterSpec` carries "family", "shape", and "band intent" in a compact
 form. That is fine for now, but a better long-term model is:
 
 - `FilterClass`: low-pass, band-pass, band-stop, high-pass
@@ -245,9 +247,41 @@ That suggests a dedicated `approx::polynomial` module.
 Current status:
 
 - `PolynomialSet` now validates its base coefficient layout
-- `generalized_chebyshev` now holds richer complex-polynomial helper artifacts
+- `approx::complex_poly` now owns reusable complex-polynomial storage and
+  default root solving
+- `approx::generalized_ops` now owns generalized-path `w <-> s` transforms and
+  recurrence-side helpers
+- `generalized_chebyshev` now focuses on Cameron/generalized pipeline stages
 - the next step is deciding whether the generalized artifact should become the
   primary prototype representation rather than an optional attachment
+
+### Generalized Domain Convention
+
+The generalized Chebyshev path uses two polynomial domains on purpose:
+
+- public artifacts such as `F(s)`, `P(s)`, and `E(s)` are stored in the
+  Laplace-domain variable `s`
+- several Cameron-style helper formulas are written in the auxiliary variable
+  `w`
+
+The bridge between them is:
+
+`s = j w`
+
+That means:
+
+- the recurrence naturally produces `U(w)` and `V(w)` first
+- `F(s)` is obtained by converting the recurrence result from `w` into `s`
+- `A`-stage and `E`-stage algebra should be assembled in the `w` domain
+- roots solved in `w` must be rotated back into `s` before they are exposed
+
+This convention matters for literature validation. The JSON fixtures under
+`tests/filter_database.json` are treated as the gold standard, so a domain mix
+up is not a cosmetic issue: it changes coefficients, root locations, and
+eventually the synthesized matrix path. When `E/F/P` do not line up with the
+reference data, the first thing to check is whether a helper stage accidentally
+combined `s`-domain and `w`-domain quantities without the `s = j w`
+conversion.
 
 ### 4. matrix storage and matrix synthesis should be separated
 
@@ -259,7 +293,7 @@ Recommended split:
 
 - `CouplingMatrix`: validated storage and accessors only
 - `CouplingMatrixBuilder`: construction helper
-- `MatrixSynthesizer` or `CouplingSynthesizer`: turns polynomial artifacts into
+- `MatrixSynthesisEngine`: turns polynomial artifacts into
   a matrix
 - `TopologyTransform`: converts one equivalent form into another
 
@@ -294,7 +328,7 @@ This is for advanced users, testing, and future bindings.
 
 Examples:
 
-- construct `FilterParameter`
+- construct `FilterSpec`
 - construct frequency mappings
 - run an approximation engine directly
 - synthesize a coupling matrix explicitly

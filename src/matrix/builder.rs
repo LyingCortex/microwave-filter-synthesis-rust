@@ -1,11 +1,12 @@
 use crate::error::{MfsError, Result};
 
-use super::CouplingMatrix;
+use super::{CouplingMatrix, MatrixTopology};
 
 /// Builder for assembling a dense coupling matrix entry by entry.
 #[derive(Debug, Default)]
 pub struct CouplingMatrixBuilder {
     order: usize,
+    topology: MatrixTopology,
     data: Vec<f64>,
 }
 
@@ -19,8 +20,15 @@ impl CouplingMatrixBuilder {
         let side = order + 2;
         Ok(Self {
             order,
+            topology: MatrixTopology::Transversal,
             data: vec![0.0; side * side],
         })
+    }
+
+    /// Overrides the topology metadata attached to the built matrix.
+    pub fn topology(mut self, topology: MatrixTopology) -> Self {
+        self.topology = topology;
+        self
     }
 
     /// Sets one matrix entry.
@@ -44,6 +52,6 @@ impl CouplingMatrixBuilder {
 
     /// Finalizes the builder and validates the resulting matrix dimensions.
     pub fn build(self) -> Result<CouplingMatrix> {
-        CouplingMatrix::new(self.order, self.data)
+        CouplingMatrix::new_with_topology(self.order, self.topology, self.data)
     }
 }

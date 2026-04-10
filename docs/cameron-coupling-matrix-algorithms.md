@@ -4,7 +4,9 @@
 
 This note summarizes the coupling-matrix synthesis and reconfiguration flow
 described by Richard J. Cameron in the 2003 paper on advanced coupling matrix
-synthesis techniques for microwave filters.
+synthesis techniques for microwave filters, and supplements it with the 2011
+ZTE Communications overview article "Advanced Synthesis Techniques for
+Microwave Filters."
 
 The goal of this document is not to restate every derivation from the paper,
 but to capture the algorithmic steps clearly enough that we can:
@@ -28,6 +30,37 @@ It does not attempt to fully reproduce the polynomial-generation part of the
 paper. For the approximation side, Cameron's generalized Chebyshev recurrence
 and the earlier 1999 paper remain the primary references.
 
+The ZTE article is still useful here because it restates several points in a
+more implementation-oriented way:
+
+- why coupling-matrix methods displaced classical element extraction in
+  microwave filter work
+- how the canonical transversal matrix is obtained by equating two short-
+  circuit admittance descriptions of the same network
+- why folded and arrow forms are better treated as realizable descendants of
+  the transversal matrix rather than as unrelated matrix templates
+- how trisections, quartets, and box sections fit into a single dependency
+  chain
+
+## Historical and Engineering Context
+
+The ZTE article adds important background for why this whole workflow exists.
+
+Before the 1970s, most filter synthesis methods were based on extracting
+lumped elements or transmission-line sections directly from filtering
+polynomials. Cameron's summary explains that this became inadequate once
+satellite and terrestrial telecom systems pushed into more crowded spectrum
+with tighter requirements on:
+
+- close-to-band rejection
+- in-band insertion loss and group delay linearity
+- physically realizable microwave cross-couplings
+
+The coupling-matrix method became the preferred tool because it gives a direct
+correspondence between matrix entries and physical coupling elements, while
+also allowing the matrix to be reconfigured through similarity transforms
+without restarting the synthesis from scratch.
+
 ## Notation and Conventions
 
 The paper uses the normalized low-pass bandpass-prototype viewpoint:
@@ -40,12 +73,24 @@ The paper uses the normalized low-pass bandpass-prototype viewpoint:
 - diagonal terms: resonator frequency offsets / detunings
 - off-diagonal terms: couplings between source, load, and resonators
 
+In the ZTE article, the underlying prototype is described as a generalized
+multicoupled bandpass network. In its original form this gives an `N x N`
+coupling matrix for the resonator loops alone. Replacing the transformer model
+with immittance inverters and adding explicit input/output inverters extends
+the model to the familiar `(N + 2) x (N + 2)` microwave form.
+
 The canonical `N+2` matrix contains:
 
 - source couplings in the first row/column
 - load couplings in the last row/column
 - resonator self-couplings on the diagonal
 - optional direct source-load coupling `M_SL` for fully canonical responses
+
+For asymmetric filtering characteristics, the article also notes that each
+resonator loop may include a series frequency-invariant reactance (FIR). In
+software terms, this is a reminder that diagonal terms are not just nuisance
+detunings: they are part of the mechanism that lets the matrix represent
+asymmetric responses.
 
 For practical coding work, the most important distinction is the matrix form:
 
@@ -69,6 +114,16 @@ The paper's workflow can be summarized as:
    - from `arrow` to cascaded trisections
    - from adjacent trisections to quartets, quintets, or box sections
 5. Realize the final sparse topology in the physical microwave structure.
+
+The ZTE article makes the physical interpretation explicit:
+
+1. generate `S21(s)` and `S11(s)` polynomials from the electrical
+   specifications
+2. synthesize a canonical coupling matrix
+3. reconfigure the matrix until the non-zero entries match the couplings that
+   the chosen structure can actually realize
+4. compute the dimensions of the physical coupling elements from those matrix
+   values
 
 One key point from the paper is procedural:
 
@@ -101,11 +156,28 @@ admittance matrix in two ways:
 Then the two descriptions are equated, yielding the coupling values of the
 transversal matrix.
 
+The ZTE article gives a more concrete statement of this construction:
+
+- build the two-port short-circuit admittance matrix `[Y_N]` from the target
+  scattering-function polynomials
+- build the same `[Y_N]` from the transversal circuit made of parallel
+  first-order sections
+- equate the two forms to solve for `M_Sk`, `M_kL`, diagonal terms, and
+  optional `M_SL`
+
 For implementation work, the important takeaway is:
 
 - the transversal matrix is a synthesis target, not merely a placeholder shape
 - if we synthesize it through residues, the result still needs to obey the
   exact canonical sparsity pattern
+
+The article also re-emphasizes the minimum-path implication of `M_SL`:
+
+- the maximum number of finite-position transmission zeros is
+  `nfz_max = N - n_min`
+- `n_min` is the number of resonator nodes in the shortest source-to-load path
+- in a fully canonical network with direct source-load coupling,
+  `n_min = 0`, so up to `N` finite transmission zeros are realizable
 
 ## Step 2: Similarity Transformations
 
@@ -140,6 +212,12 @@ This is the fundamental mechanism used throughout the paper:
 
 This preservation property is essential. A correct topology transform should
 change sparsity, but not the ideal `S11` and `S21` produced by the matrix.
+
+The ZTE article phrases the same point in eigenstructure terms:
+
+- similarity transforms preserve the eigenvalues and eigenvectors of `M`
+- therefore the transformed matrix has the same ideal transfer and reflection
+  characteristics as the original one
 
 ## Step 3: Transversal to Folded
 
@@ -186,6 +264,13 @@ That means:
 - trisection generation is not a direct transform from an arbitrary matrix
 - the arrow matrix is the required intermediate form
 
+The ZTE article also gives a useful geometric description:
+
+- the main-line couplings form the rim of the "wheel"
+- source/load cross-couplings form the spokes
+- in matrix form, the cross-couplings gather in the last row and column,
+  producing the visual "arrow" shape
+
 ## Step 5: Trisection Synthesis in the Arrow Matrix
 
 A trisection is a three-node section able to realize one transmission zero.
@@ -223,6 +308,14 @@ equation:
 
 - first create the trisection in the arrow tail
 - then move it through the network by rotations
+
+The ZTE article makes two additional points worth keeping in mind:
+
+- a trisection can be internal, input-coupled, output-coupled, or degenerate
+  to the direct `M_SL` case in a degree-1 canonical network
+- each trisection realizes exactly one transmission zero by the minimum-path
+  rule, which is why trisection cascades are especially useful for asymmetric
+  characteristics
 
 ## Step 6: Merge Adjacent Trisections into Quartets or Higher Sections
 
@@ -271,6 +364,29 @@ The key point is the same as above:
 - the box section is derived from a trisection already embedded in the matrix
 - it is not synthesized as a standalone primitive from scratch
 
+The ZTE article adds two implementation-relevant details:
+
+- the basic box section is obtained by a cross-pivot rotation that annihilates
+  the second main-line coupling of the trisection
+- in the resulting box section, one coupling is always negative, regardless of
+  the sign of the original trisection cross-coupling
+
+It also notes why box sections are attractive in practice:
+
+- the basic box realizes one transmission zero without a diagonal cross-
+  coupling
+- this can be convenient for dual-mode technologies
+- complementary responses can be obtained by conjugating the self-couplings,
+  which in hardware corresponds to retuning resonators rather than rebuilding
+  couplings
+
+For extended box sections, the article gives a direct minimum-path rule:
+
+- 4th-degree extended box: up to 1 finite transmission zero
+- 6th-degree extended box: up to 2
+- 8th-degree extended box: up to 3
+- in general: up to `(N - 2) / 2`
+
 ## Minimum-Path Rule
 
 The paper repeatedly uses the minimum-path rule to reason about how many
@@ -287,6 +403,8 @@ Examples:
 - a fully canonical network with direct source-load coupling can realize up to
   `N` finite transmission zeros
 - each trisection realizes one transmission zero
+- a basic box section realizes one transmission zero
+- an extended box realizes up to `(N - 2) / 2` transmission zeros
 - larger sections inherit their capability from the number of embedded
   trisections and the resulting minimum path
 
@@ -349,5 +467,7 @@ For future review work in this repo, a practical mental map is:
    Techniques, vol. 47, no. 4, pp. 433-442, Apr. 1999. DOI:
    `10.1109/22.754877`
 3. Richard J. Cameron, "Advanced Synthesis Techniques for Microwave Filters,"
-   ZTE Communications, 2011. This is a useful secondary summary of the folded,
-   arrow, trisection, quartet, and box-section workflow.
+   ZTE Communications, 2011. This is a useful secondary summary of the
+   historical motivation, `N+2` matrix interpretation, short-circuit
+   admittance construction of the transversal matrix, and the folded, arrow,
+   trisection, quartet, and box-section workflow.

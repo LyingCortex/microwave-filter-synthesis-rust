@@ -1,5 +1,7 @@
 use crate::error::{MfsError, Result};
 
+use super::FilterSpecBuilder;
+
 /// Describes the physical topology of the filter being synthesized.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilterClass {
@@ -17,13 +19,13 @@ pub enum FilterClass {
     Duplexer,
 }
 
-/// Backward-compatible alias kept for earlier API naming.
-
 /// Selects which approximation family defines the prototype polynomials.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApproximationFamily {
     /// Equal-ripple Chebyshev response.
     Chebyshev,
+    /// Generalized Chebyshev response with finite-zero aware helper data.
+    GeneralizedChebyshev,
 }
 
 /// Captures the passband return-loss requirement for the design.
@@ -86,8 +88,12 @@ impl TransmissionZero {
 }
 
 /// Full parameter bundle required to define a synthesis prototype.
+///
+/// This type remains available for backward compatibility. New user-facing
+/// code should prefer the [`FilterSpec`] name, which reflects the role of this
+/// type more clearly in a library setting.
 #[derive(Debug, Clone, PartialEq)]
-pub struct FilterParameter {
+pub struct FilterSpec {
     /// Number of resonators in the synthesized network.
     pub order: usize,
     /// Desired physical filter topology.
@@ -100,7 +106,7 @@ pub struct FilterParameter {
     pub transmission_zeros: Vec<TransmissionZero>,
 }
 
-impl FilterParameter {
+impl FilterSpec {
     /// Creates a validated parameter bundle with explicit semantic axes.
     pub fn new(
         order: usize,
@@ -131,18 +137,31 @@ impl FilterParameter {
         )
     }
 
+    /// Convenience constructor for the common generalized Chebyshev band-pass case.
+    pub fn generalized_chebyshev(order: usize, return_loss_db: f64) -> Result<Self> {
+        Self::new(
+            order,
+            FilterClass::BandPass,
+            ApproximationFamily::GeneralizedChebyshev,
+            ReturnLossSpec::new(return_loss_db)?,
+        )
+    }
+
+    /// Starts a builder-based filter specification workflow.
+    pub fn builder() -> FilterSpecBuilder {
+        FilterSpecBuilder::default()
+    }
+
     /// Returns a copy of the spec with a different filter class.
     pub fn with_filter_class(mut self, filter_class: FilterClass) -> Self {
         self.filter_class = filter_class;
         self
     }
 
-
     /// Returns the requested passband return loss in dB.
     pub fn return_loss_db(&self) -> f64 {
         self.return_loss.return_loss_db
     }
-
 
     /// Returns the requested filter topology.
     pub fn filter_class(&self) -> FilterClass {
@@ -162,7 +181,7 @@ mod tests {
 
     #[test]
     fn chebyshev_spec_sets_independent_semantic_axes() -> Result<()> {
-        let spec = FilterParameter::chebyshev(4, 20.0)?;
+        let spec = FilterSpec::chebyshev(4, 20.0)?;
 
         assert_eq!(spec.order, 4);
         assert_eq!(spec.filter_class, FilterClass::BandPass);
@@ -173,7 +192,7 @@ mod tests {
 
     #[test]
     fn generic_constructor_supports_explicit_semantic_axes() -> Result<()> {
-        let spec = FilterParameter::new(
+        let spec = FilterSpec::new(
             5,
             FilterClass::LowPass,
             ApproximationFamily::Chebyshev,
@@ -191,5 +210,18 @@ mod tests {
     fn return_loss_spec_validates_return_loss() {
         let error = ReturnLossSpec::new(0.0).expect_err("return loss must be positive");
         assert!(matches!(error, MfsError::InvalidReturnLoss { .. }));
+    }
+
+    #[test]
+    fn builder_constructs_spec_with_transmission_zeros() -> Result<()> {
+        let spec = FilterSpec::builder()
+            .order(4)
+            .return_loss_db(20.0)
+            .transmission_zeros(vec![TransmissionZero::normalized(-1.5)])
+            .build()?;
+
+        assert_eq!(spec.order, 4);
+        assert_eq!(spec.transmission_zeros.len(), 1);
+        Ok(())
     }
 }

@@ -1,8 +1,8 @@
-use mfs::{BandPassMapping, ChebyshevSynthesis, FilterParameter, FrequencyGrid, TransmissionZero};
+use mfs::{BandPassMapping, ChebyshevSynthesis, FilterSpec, FrequencyGrid, TransmissionZero};
 
 fn main() -> mfs::Result<()> {
     // Define a small generalized Chebyshev-style example in normalized zero space.
-    let spec = FilterParameter::chebyshev(6, 23.0)?.with_transmission_zeros(vec![
+    let spec = FilterSpec::chebyshev(6, 23.0)?.with_transmission_zeros(vec![
         TransmissionZero::normalized(-2.0),
         TransmissionZero::normalized(-1.2),
         TransmissionZero::normalized(1.5),

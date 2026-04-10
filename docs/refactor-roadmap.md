@@ -32,10 +32,12 @@ responsibilities inside some of them.
 Completed in the current codebase:
 
 - transmission-zero normalization was moved out of `spec` and into `freq`
-- matrix synthesis was separated from `CouplingMatrix` into
-  `CouplingMatrixSynthesizer`
+- matrix synthesis was separated from `CouplingMatrix` into the `synthesis`
+  subsystem
 - `approx` was reshaped into directory modules with a dedicated polynomial
   boundary
+- `approx` now also has dedicated `complex_poly` and `generalized_ops`
+  submodules
 - `response` was reshaped into directory modules with a private backend helper
 - the response backend now performs real lossless S-parameter solves and group
   delay extraction
@@ -65,13 +67,13 @@ Why this matters:
 
 Current code points:
 
-- [src/spec.rs](/c:/Users/eynulai/Downloads/mfs/src/spec.rs)
+- [src/spec/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/spec/mod.rs)
 - [src/freq.rs](/c:/Users/eynulai/Downloads/mfs/src/freq.rs)
 
 ### 2. `matrix` used to mix storage with synthesis logic
 
-This was also addressed. Matrix synthesis now goes through
-`CouplingMatrixSynthesizer` instead of a constructor on `CouplingMatrix`.
+This was also addressed. Matrix synthesis now goes through the `synthesis`
+subsystem instead of a constructor on `CouplingMatrix`.
 
 Why this matters:
 
@@ -83,7 +85,7 @@ Current code point:
 
 - [src/matrix/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/matrix/mod.rs)
 - [src/matrix/coupling_matrix.rs](/c:/Users/eynulai/Downloads/mfs/src/matrix/coupling_matrix.rs)
-- [src/matrix/synthesis.rs](/c:/Users/eynulai/Downloads/mfs/src/matrix/synthesis.rs)
+- [src/synthesis/engine.rs](/c:/Users/eynulai/Downloads/mfs/src/synthesis/engine.rs)
 
 ### 3. `approx` now has richer rules, but the main approximation path is still partial
 
@@ -100,6 +102,8 @@ Why this matters:
 Current code point:
 
 - [src/approx/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/approx/mod.rs)
+- [src/approx/complex_poly.rs](/c:/Users/eynulai/Downloads/mfs/src/approx/complex_poly.rs)
+- [src/approx/generalized_ops.rs](/c:/Users/eynulai/Downloads/mfs/src/approx/generalized_ops.rs)
 - [src/approx/polynomial.rs](/c:/Users/eynulai/Downloads/mfs/src/approx/polynomial.rs)
 
 ### 4. `response` now has a real backend, but it is still an internal solver
@@ -122,12 +126,11 @@ Current code point:
 ### 5. `synthesis` is thin in a good way, but it depends on unstable seams
 
 `ChebyshevSynthesis` is already acting like the right orchestration layer.
-The problem is that it currently wires together pieces whose boundaries are not
-settled yet.
+The remaining work here is now more about feature depth than boundary cleanup.
 
 Current code point:
 
-- [src/synthesis.rs](/c:/Users/eynulai/Downloads/mfs/src/synthesis.rs)
+- [src/synthesis/orchestration.rs](/c:/Users/eynulai/Downloads/mfs/src/synthesis/orchestration.rs)
 
 ## Recommended Phases
 
@@ -210,8 +213,10 @@ Tasks:
 Suggested split:
 
 - `approx::chebyshev`
+- `approx::complex_poly`
+- `approx::generalized_ops`
 - `approx::polynomial`
-- `approx::normalization`
+- `approx::generalized_chebyshev`
 
 Exit criteria:
 
@@ -226,16 +231,16 @@ make coupling-matrix generation pluggable and easier to test
 Tasks:
 
 1. Remove synthesis logic from `CouplingMatrix`.
-2. Introduce `CouplingMatrixSynthesizer` or equivalent.
+2. Introduce or keep a dedicated synthesis-engine boundary outside `CouplingMatrix`.
 3. Keep `CouplingMatrixBuilder` focused on validated assembly only.
 4. Reserve `matrix` for artifact storage, builders, and transforms.
 
 Suggested direction:
 
 ```rust
-pub struct CouplingMatrixSynthesizer;
+pub struct MatrixSynthesisEngine;
 
-impl CouplingMatrixSynthesizer {
+impl MatrixSynthesisEngine {
     pub fn synthesize(&self, polynomials: &PolynomialSet) -> Result<CouplingMatrix> {
         // ...
     }
@@ -305,7 +310,7 @@ These are the highest-value next tasks, in order.
 ### Backlog A
 
 Move transmission-zero normalization out of
-[src/spec.rs](/c:/Users/eynulai/Downloads/mfs/src/spec.rs) and into
+[src/spec/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/spec/mod.rs) and into
 [src/freq.rs](/c:/Users/eynulai/Downloads/mfs/src/freq.rs) or a dedicated
 normalization helper.
 
@@ -322,7 +327,7 @@ Why first:
 
 Extract matrix synthesis from
 [src/matrix/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/matrix/mod.rs) and update
-[src/synthesis.rs](/c:/Users/eynulai/Downloads/mfs/src/synthesis.rs) to depend
+[src/synthesis/orchestration.rs](/c:/Users/eynulai/Downloads/mfs/src/synthesis/orchestration.rs) to depend
 on a synthesizer instead of `CouplingMatrix::from_polynomials(...)`.
 
 Status:
@@ -364,7 +369,7 @@ performance targets are represented independently.
 
 Suggested code points:
 
-- [src/spec.rs](/c:/Users/eynulai/Downloads/mfs/src/spec.rs)
+- [src/spec/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/spec/mod.rs)
 - [src/lib.rs](/c:/Users/eynulai/Downloads/mfs/src/lib.rs)
 
 Why next:
@@ -432,4 +437,4 @@ strengthen the domain model in `spec` so filter class, approximation family,
 and performance intent are separate concepts has already been completed.
 
 The highest-leverage remaining refactor is now integrating generalized
-Chebyshev helper outputs into the primary approximation pipeline.
+Chebyshev helper outputs more deeply into the primary approximation pipeline.

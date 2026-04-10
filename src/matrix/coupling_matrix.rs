@@ -4,9 +4,10 @@ use nalgebra::DMatrix;
 use num_complex::Complex64;
 
 /// Supported coupling-matrix topologies exposed by the library.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MatrixTopology {
     /// Standard transversal or otherwise untransformed matrix form.
+    #[default]
     Transversal,
     /// Folded topology obtained by similarity rotations.
     Folded,
@@ -29,6 +30,7 @@ pub struct MatrixShape {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CouplingMatrix {
     order: usize,
+    topology: MatrixTopology,
     data: Vec<f64>,
 }
 
@@ -60,6 +62,15 @@ impl BandPassScaledCouplingMatrix {
 impl CouplingMatrix {
     /// Creates a coupling matrix from flattened row-major data.
     pub fn new(order: usize, data: Vec<f64>) -> Result<Self> {
+        Self::new_with_topology(order, MatrixTopology::Transversal, data)
+    }
+
+    /// Creates a coupling matrix with an explicit topology label.
+    pub fn new_with_topology(
+        order: usize,
+        topology: MatrixTopology,
+        data: Vec<f64>,
+    ) -> Result<Self> {
         if order == 0 {
             return Err(MfsError::InvalidOrder { order });
         }
@@ -75,6 +86,7 @@ impl CouplingMatrix {
 
         Ok(Self {
             order,
+            topology,
             data,
         })
     }
@@ -97,6 +109,11 @@ impl CouplingMatrix {
     /// Returns the resonator count represented by this matrix.
     pub fn order(&self) -> usize {
         self.order
+    }
+
+    /// Returns the topology label currently attached to the matrix.
+    pub fn topology(&self) -> MatrixTopology {
+        self.topology
     }
 
     /// Returns the physical matrix side length including source and load nodes.
@@ -138,8 +155,12 @@ impl CouplingMatrix {
         match topology {
             MatrixTopology::Transversal => Ok(self.clone()),
             MatrixTopology::Folded => Ok(self.to_folded()),
-            // The Python prototype uses the same reduction for arrow and wheel forms.
-            MatrixTopology::Arrow | MatrixTopology::Wheel => Ok(self.to_arrow()),
+            MatrixTopology::Arrow => Ok(self.to_arrow()),
+            MatrixTopology::Wheel => {
+                let mut matrix = self.to_arrow();
+                matrix.topology = MatrixTopology::Wheel;
+                Ok(matrix)
+            }
         }
     }
 
@@ -147,7 +168,11 @@ impl CouplingMatrix {
     ///
     /// `center_resonator` uses 1-based resonator numbering, excluding source and load.
     /// For example, `center_resonator = 2` targets the resonator triplet `(1, 2, 3)`.
-    pub fn extract_triplet(&self, transmission_zero: f64, center_resonator: usize) -> Result<Self> {
+    pub(crate) fn extract_triplet(
+        &self,
+        transmission_zero: f64,
+        center_resonator: usize,
+    ) -> Result<Self> {
         validate_triplet_center(self.order, center_resonator)?;
         if !transmission_zero.is_finite() {
             return Err(MfsError::InvalidTransmissionZero(
@@ -190,7 +215,7 @@ impl CouplingMatrix {
     /// `position` matches the first triplet center in 1-based resonator numbering.
     /// `common_resonator` must be `1` or `4`, matching the two elimination formulas
     /// used by the Python prototype.
-    pub fn extract_quadruplet(
+    pub(crate) fn extract_quadruplet(
         &self,
         first_zero: f64,
         second_zero: f64,
@@ -237,11 +262,17 @@ impl CouplingMatrix {
     /// `zero_positions` uses 1-based resonator numbering and must span exactly
     /// one center resonator, for example `(2, 4)` to target a trisection centered
     /// on resonator `3`.
-    pub fn extract_trisection(
+    pub(crate) fn extract_trisection(
         &self,
         transmission_zero: f64,
         zero_positions: (usize, usize),
     ) -> Result<Self> {
+        if self.topology != MatrixTopology::Arrow {
+            return Err(MfsError::Unsupported(format!(
+                "trisection extraction requires Arrow input, got {:?}",
+                self.topology
+            )));
+        }
         validate_trisection_positions(self.order, zero_positions)?;
         if !transmission_zero.is_finite() {
             return Err(MfsError::InvalidTransmissionZero(
@@ -305,7 +336,7 @@ impl CouplingMatrix {
             }
         }
 
-        Self::new(self.order, data)
+        Self::new_with_topology(self.order, self.topology, data)
     }
 
     /// Converts a normalized matrix into a physical band-pass matrix plus port Q values.
@@ -357,7 +388,7 @@ impl CouplingMatrix {
             }
         }
 
-        Self::new(self.order, data)
+        Self::new_with_topology(self.order, self.topology, data)
     }
 
     /// Converts a physical band-pass matrix that stores external Q values back into normalized form.
@@ -468,6 +499,7 @@ impl CouplingMatrix {
         }
 
         matrix.clean_small_values();
+        matrix.topology = MatrixTopology::Folded;
         matrix
     }
 
@@ -488,6 +520,7 @@ impl CouplingMatrix {
         }
 
         matrix.clean_small_values();
+        matrix.topology = MatrixTopology::Arrow;
         matrix
     }
 
@@ -575,6 +608,7 @@ impl CouplingMatrix {
         }
         Self {
             order: self.order,
+            topology: self.topology,
             data,
         }
     }
@@ -589,6 +623,7 @@ impl CouplingMatrix {
         }
         Self {
             order: self.order,
+            topology: self.topology,
             data,
         }
     }

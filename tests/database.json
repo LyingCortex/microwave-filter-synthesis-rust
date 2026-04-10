@@ -1,0 +1,124 @@
+{
+  "schema_version": "1.0",
+  "metadata": {
+    "case_id": "cameron",
+    "category": "High_Order_Synthesis_with_NRN",
+    "paper": {
+      "title": "A Synthesis Framework for Microwave Filter Topologies Utilizing Predetermined Reconfiguration Path",
+      "authors": ["Guoqun Cao", "Yi Zeng", "Ming Yu"],
+      "year": 2024,
+      "doi": "10.1109/TMTT.2025.3559126",
+      "reference_anchor": "turn4search87"
+    },
+    "tags": ["NRN", "SMSD", "Fully_Canonical", "7-Pole"]
+  },
+
+  "spec": {
+    "filter_order": 7,
+    "passband_type": "bandpass",
+    "center_freq_ghz": 4.0, 
+    "fractional_bandwidth": 0.05,
+    "return_loss_db": 20.0,
+    "port_impedance": { "source": 1.0, "load": 1.0 },
+    
+    "transmission_zeros": [
+      { "val": { "re": 0.0, "im": -1.68 }, "type": "imag_axis", "impact": "lower_stopband" },
+      { "val": { "re": 0.0, "im": 1.31 }, "type": "imag_axis", "impact": "upper_stopband" },
+      { "val": { "re": 0.0, "im": 1.79 }, "type": "imag_axis", "impact": "upper_stopband" }
+    ],
+    
+    "complex_reflection_zeros": [
+      { "val": { "re": 0.1, "im": 0.5 }, "note": "Optional: used to eliminate negative couplings [7]" }
+    ],
+    
+    "topology_flags": {
+      "is_fully_canonical": true,
+      "has_nrn": true,
+      "is_fdc": false,
+      "is_symmetric": false
+    }
+  },
+
+  "mathematical_model": {
+    "polynomial_coefficients": {
+      "E": [1.9877, 3.2898, 3.6063, 2.2467, 1.0],
+      "F": [0.1580, 0.0, 1.0615, 0.0, 1.0],
+      "P": [ { "re": 0.0, "im": 65.6671 }, 1.4870 ],
+      "constants": { "e_R": 1.000456, "e": 33.140652 }
+    },
+    "spectral_data": {
+      "eigenvalues": [-1.3142, -0.7831, 0.8041, 1.2968],
+      "residues_r22k": [0.1326, 0.4273, 0.4459, 0.1178]
+    }
+  },
+
+  "synthesis_process": {
+    "initial_transversal_matrix": {
+      "matrix_format": "N+2",
+      "data": [ [0, 0.3641, 0], [0.3641, -1.3142, 0.5] ],
+      "source_anchor": { "page": 273, "figure": 7 }
+    },
+    
+    "transformation_log": [
+      {
+        "method": "SMSD_SVD_GE",
+        "purpose": "Predetermine_reconfiguration_path [8]",
+        "path_vectors": { "U": "matrix_data", "D": "scaling_data", "V": "matrix_data" }
+      },
+      {
+        "method": "Givens_Rotation",
+        "steps": [
+          { "step_id": 1, "pivot": [9, 10], "angle_deg": 52.17, "annihilated_element": "M24" }
+        ]
+      },
+      {
+        "method": "Householder_HT",
+        "description": "N-step HT reconfiguration [11]",
+        "steps": [
+          { "step_id": 1, "u_vector": [1.0, 0.5, 0.2], "purpose": "folded_reduction" }
+        ]
+      }
+    ],
+    
+    "optimization_constraints": [
+      { "type": "ALM_Uniformity", "target_elements": ["M23", "M45"], "variance_limit": 9e-4 },
+      { "type": "Determinant_TZ_Constraint", "tz_index": 1, "triplet_nodes": [9, 10, 12] }
+    ]
+  },
+
+  "final_realization": {
+    "topology": {
+      "type": "Extended_Box",
+      "node_definition": [
+        { "index": 0, "type": "Source" },
+        { "index": 1, "type": "Resonator" },
+        { "index": 5, "type": "NRN", "susceptance": 3.0 },
+        { "index": 8, "type": "Load" }
+      ],
+      "mask_TM": [ [13] ]
+    },
+    
+    "coupling_matrix": {
+      "is_fdc": true,
+      "matrix_constant_Mc": [ [0, 1.06, 0], [1.06, -0.002, 0.87] ],
+      "matrix_frequency_slope_Mf": [ [0, 0.41, 0], [0.41, 0, 0] ],
+      "sign_pattern": "all_positive_realizable"
+    }
+  },
+
+  "verification": {
+    "status": "passed",
+    "method": "S_parameter_reconstruction",
+    "metrics": {
+      "cost_function_error": 1e-10,
+      "max_S21_error_dB": 0.05
+    },
+    "script_ref": "verify_synthesis_v3.py"
+  },
+
+  "extensions": {
+    "alternative_solutions_count": 47,
+    "selected_solution_index": 1,
+    "tuning_labels": { "M23": "screw_height_sensitivity_high" }
+  }
+}
