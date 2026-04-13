@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use crate::error::{MfsError, Result};
 use crate::freq::{BandPassMapping, FrequencyGrid};
-use crate::spec::{FilterSpec, TransmissionZero};
+use crate::spec::FilterSpec;
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct FilterDatabaseDocument {
@@ -128,13 +128,12 @@ impl FilterDatabaseCase {
                             .to_string(),
                     ));
                 }
-                Ok(TransmissionZero::normalized(zero.value.im))
+                Ok(zero.value.im)
             })
             .collect::<Result<Vec<_>>>()?;
 
-        let spec =
-            FilterSpec::generalized_chebyshev(prototype_order, return_loss_db)?
-                .with_transmission_zeros(transmission_zeros);
+        let spec = FilterSpec::new(prototype_order, return_loss_db)?
+            .with_normalized_transmission_zeros(transmission_zeros);
         let mapping = BandPassMapping::new(center_hz, stop_hz - start_hz)?;
         let grid = FrequencyGrid::linspace(start_hz, stop_hz, 21)?;
 

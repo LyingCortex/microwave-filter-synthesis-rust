@@ -1,5 +1,15 @@
+//! Frequency-domain helpers for prototype and physical-frequency workflows.
+//!
+//! Convention:
+//! - transmission zeros stored in [`crate::spec::FilterSpec`] are already
+//!   normalized prototype values
+//! - [`FrequencyMapping`] is used to relate physical-frequency grids to the
+//!   normalized prototype axis
+//! - if your transmission zeros start in Hz, convert them before building a
+//!   spec instead of expecting synthesis to normalize them implicitly
+
 use crate::error::{MfsError, Result};
-use crate::spec::{TransmissionZero, TransmissionZeroDomain};
+use crate::spec::TransmissionZero;
 
 /// One sample expressed in the normalized prototype frequency domain.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -26,32 +36,23 @@ pub trait FrequencyMapping {
     }
 }
 
-/// Normalizes a single transmission zero according to the supplied mapping.
-pub fn normalize_transmission_zero(
-    zero: TransmissionZero,
-    mapping: &impl FrequencyMapping,
-) -> Result<f64> {
+/// Validates one normalized transmission zero and returns its stored coordinate.
+pub fn validated_transmission_zero(zero: TransmissionZero) -> Result<f64> {
     if !zero.value.is_finite() {
         return Err(MfsError::InvalidTransmissionZero(
             "transmission zero must be finite".to_string(),
         ));
     }
 
-    match zero.domain {
-        TransmissionZeroDomain::Normalized => Ok(zero.value),
-        TransmissionZeroDomain::PhysicalHz => Ok(mapping.map_hz_to_normalized(zero.value)?.omega),
-    }
+    Ok(zero.value)
 }
 
-/// Normalizes a list of transmission zeros according to the supplied mapping.
-pub fn normalize_transmission_zeros(
-    zeros: &[TransmissionZero],
-    mapping: &impl FrequencyMapping,
-) -> Result<Vec<f64>> {
+/// Collects and validates the normalized transmission zeros already stored in a spec.
+pub fn validated_transmission_zeros(zeros: &[TransmissionZero]) -> Result<Vec<f64>> {
     zeros
         .iter()
         .copied()
-        .map(|zero| normalize_transmission_zero(zero, mapping))
+        .map(validated_transmission_zero)
         .collect()
 }
 
@@ -270,19 +271,15 @@ mod tests {
     }
 
     #[test]
-    fn transmission_zero_normalization_uses_frequency_mapping() -> Result<()> {
-        let mapping = BandPassMapping::new(6.75e9, 300.0e6)?;
-        let normalized =
-            normalize_transmission_zero(TransmissionZero::physical_hz(6.9e9), &mapping)?;
-
+    fn validated_transmission_zero_returns_stored_value() -> Result<()> {
+        let normalized = validated_transmission_zero(TransmissionZero::normalized(0.9891304347826066))?;
         approx_eq(normalized, 0.9891304347826066, 1e-12);
         Ok(())
     }
 
     #[test]
-    fn transmission_zero_normalization_rejects_non_finite_values() {
-        let mapping = LowPassMapping::new(1.0).expect("valid mapping");
-        let error = normalize_transmission_zero(TransmissionZero::normalized(f64::NAN), &mapping)
+    fn validated_transmission_zero_rejects_non_finite_values() {
+        let error = validated_transmission_zero(TransmissionZero::normalized(f64::NAN))
             .expect_err("non-finite transmission zero must fail");
 
         assert!(matches!(error, MfsError::InvalidTransmissionZero(_)));

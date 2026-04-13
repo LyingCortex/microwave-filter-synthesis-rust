@@ -7,7 +7,19 @@ Repository:
 
 It is building a typed, testable synthesis core around this pipeline:
 
-`FilterSpec -> Normalization -> Approximation -> Canonical Matrix -> Transform -> Response`
+`Physical zeros (optional) -> normalize_transmission_zeros_hz(...) -> FilterSpec -> Approximation -> Canonical Matrix -> Transform -> Response`
+
+Frequency convention:
+
+- `FilterSpec` stores transmission zeros in normalized prototype coordinates
+- if your zeros start in physical Hz, convert them first with
+  `normalize_transmission_zeros_hz(...)`
+- the current generalized helper path expects real normalized zeros with
+  `|zero| >= 1`
+- frequency mappings are used for physical-grid evaluation and reporting, not
+  for implicit zero normalization inside synthesis
+- approximation reads and validates the normalized zeros already stored in the
+  spec; it does not normalize physical-frequency zeros itself
 
 The project is intended to become a reusable core for:
 
@@ -36,9 +48,8 @@ What exists today:
 
 - typed filter specifications and frequency plans
 - builder-style filter-spec construction
-- transmission-zero normalization
+- explicit normalized transmission-zero handling
 - validated polynomial and coupling-matrix artifacts
-- explicit Chebyshev and generalized-Chebyshev specification families
 - generalized Chebyshev helper routines and staged orchestration reporting
 - a separated approximation-internal structure with reusable complex-polynomial
   primitives and generalized-domain helper operations
@@ -58,22 +69,51 @@ What is still in progress:
 - broader advanced-topology coverage beyond folded and arrow
 - more benchmark and regression fixtures
 
+## Flow Coverage
+
+Relative to the standard generalized-Chebyshev workflow
+
+`E/F/P generation -> Y-parameter synthesis -> residue expansion -> transversal matrix -> topology transforms`
+
+the current codebase is best described as partially complete:
+
+- `P(s)` generation from normalized transmission zeros is implemented
+- generalized `F(s)` generation through Cameron-style recurrence is implemented
+- generalized `E(s)` recovery through the current helper-domain root workflow is implemented
+- generalized `E/F/P` generation is the only approximation path exposed by the crate
+- Y-parameter synthesis, residue expansion, and transversal-matrix recovery are implemented for the generalized helper path
+- the matrix stage can still fall back to a placeholder chain-style builder when the residue path is unavailable
+- topology conversion to folded, arrow, and wheel forms is implemented as an engineering backend, but the public API does not expose the full similarity-rotation sequence explicitly
+
+The broad pipeline now runs through the generalized-helper route only.
+
 ## Current Capabilities
 
-- Create typed filter specifications with explicit approximation family,
-  filter class, performance spec, and transmission zeros
+- Build normalized prototype specs with the short facade
+  `filter_spec(order, return_loss_db, zeros, unloaded_q)`
+- Build specs from physical-frequency zeros by normalizing first with
+  `normalize_transmission_zeros_hz(...)`
+- Synthesize the default normalized generalized-Chebyshev prototype and canonical matrix with `generalized_chebyshev(&spec)`
+- Inspect intermediate generalized-Chebyshev prototype polynomials only when needed with `generalized_chebyshev_polynomials(&spec)`
+- Add physical mappings only when needed through `lowpass(...)`,
+  `bandpass(...)`, and `generalized_chebyshev_with_response(...)`
 - Normalize physical frequencies and transmission zeros into prototype space
 - Build validated coupling-matrix artifacts and evaluate lossless response
+- Default unloaded Q is `2000.0` when `filter_spec` receives `None`.
 - Access generalized Chebyshev helper routines derived from the Python core
-- Run end-to-end orchestration through `ChebyshevSynthesis`
-- Observe orchestration-stage details such as `ApproximationStageKind` and
+- Run end-to-end orchestration through pure functions such as `generalized_chebyshev(...)`
+  and `generalized_chebyshev_with_response(...)`
+- Observe orchestration-stage details such as `approximation_kind()` and
   `MatrixSynthesisMethod`
+- Create typed filter specifications through `FilterSpec::builder()` and
+  related low-level APIs
 - Use higher-level facades such as `MatrixSynthesisEngine`,
   `CanonicalMatrixSynthesis`, `SectionSynthesis`, and `TransformEngine`
 - Use crate-level helpers such as `synthesize_canonical_matrix(...)` and
   `synthesize_matrix_with_topology(...)`
-- Use detail-preserving helpers such as `synthesize_chebyshev_with_details(...)`
-  and `synthesize_and_evaluate_chebyshev_with_details(...)`
+- Use `generalized_chebyshev(&spec)` for the detail-preserving synthesis outcome and
+  `synthesize_and_evaluate_generalized_chebyshev(...)` when you want the tuple-style
+  synthesize-plus-evaluate facade
 - Inspect generalized helper stage details such as `a_stage` and `e_stage`
   when the strict generalized path is used
 - Attach topology metadata to matrices and reject invalid advanced-transform inputs
@@ -97,29 +137,24 @@ Current local usage example:
 use mfs::prelude::*;
 
 fn main() -> mfs::Result<()> {
-    let spec = FilterSpec::generalized_chebyshev(6, 23.0)?
-        .with_transmission_zeros(vec![
-        TransmissionZero::normalized(-2.0),
-        TransmissionZero::normalized(-1.2),
-        TransmissionZero::normalized(1.5),
-    ]);
-
-    let mapping = BandPassMapping::new(6.75e9, 300.0e6)?;
+    // `filter_spec(...)` expects normalized prototype zeros.
+    let spec = filter_spec(6, 23.0, [-2.0, -1.2, 1.5], None)?;
+    let mapping = bandpass(6.75e9, 300.0e6)?;
     let grid = FrequencyGrid::linspace(6.0e9, 7.5e9, 201)?;
 
-    let outcome = synthesize_and_evaluate_chebyshev_with_details(
-        &spec,
-        &mapping,
-        &grid,
-    )?;
+    let outcome = generalized_chebyshev(&spec)?;
+    println!("prototype order: {}", outcome.polynomials.order);
     println!("matrix order: {}", outcome.matrix.order());
-    println!("samples: {}", outcome.response.samples.len());
-    println!("approximation stage: {:?}", outcome.approximation_kind);
-    println!("matrix method: {:?}", outcome.matrix_method);
+
+    let evaluated = generalized_chebyshev_with_response(&spec, &mapping, &grid)?;
+    let synthesis = &evaluated.synthesis;
+    println!("samples: {}", evaluated.response.samples.len());
+    println!("approximation stage: {}", synthesis.approximation_kind());
+    println!("matrix method: {:?}", synthesis.matrix_method);
 
     let normalized_grid = FrequencyGrid::linspace(-2.0, 2.0, 81)?;
     let transform = transform_matrix_with_response_check(
-        &outcome.matrix,
+        &synthesis.matrix,
         TopologyKind::Folded,
         &normalized_grid,
         ResponseTolerance::default(),
@@ -129,10 +164,39 @@ fn main() -> mfs::Result<()> {
 }
 ```
 
-`FilterSpec::chebyshev(...)` keeps the default path lightweight and only
-attaches generalized helper data when the current helper can support the
-normalized transmission-zero pattern. `FilterSpec::generalized_chebyshev(...)`
-requests the strict generalized path instead, with no silent fallback.
+The shortest facade keeps specification, approximation, and mapping concerns
+separate:
+
+- `filter_spec(...)` builds a normalized prototype spec
+- Normalize physical zeros with `normalize_transmission_zeros_hz(...)` before `filter_spec(...)`
+- `generalized_chebyshev(&spec)` synthesizes the default normalized generalized-Chebyshev prototype and matrix
+- `generalized_chebyshev_polynomials(&spec)` exposes the internal polynomial bundle when you want debug visibility
+- `bandpass(...)` or `lowpass(...)` become relevant only when you want a
+  physical mapping or response evaluation
+- `generalized_chebyshev_with_response(...)` evaluates the synthesized matrix on a physical
+  grid without changing the normalized-zero contract of `FilterSpec`
+
+Two common zero-input styles are both supported:
+
+```rust
+let normalized = filter_spec(4, 20.0, [-1.5, 2.0], None)?;
+let mapping = bandpass(6.75e9, 300.0e6)?;
+let physical_zeros = normalize_transmission_zeros_hz([6.72e9, 6.84e9], &mapping)?;
+let physical = filter_spec(4, 20.0, physical_zeros, None)?;
+```
+
+The lower-level `FilterSpec::builder()` entry point still exists when you want
+more explicit control over how normalized transmission zeros are attached:
+
+```rust
+let mapping = bandpass(6.75e9, 300.0e6)?;
+let zeros = normalize_transmission_zeros_hz([6.72e9, 6.84e9], &mapping)?;
+let spec = FilterSpec::builder()
+    .order(4)
+    .return_loss_db(20.0)
+    .normalized_transmission_zeros(zeros)
+    .build()?;
+```
 
 When the generalized helper path is active, the returned helper data now keeps
 not only the final `F/P/A/E` artifacts but also detailed `A`-stage and
@@ -186,8 +250,14 @@ Example command:
 ```powershell
 cargo run --example chebyshev_bandpass
 cargo run --example quickstart_prelude
+cargo run --example quickstart_report
 cargo run --example literature_fixtures
 ```
+
+Quickstart notes:
+
+- `quickstart_prelude` prints a compact formatted terminal summary.
+- `quickstart_report` generates `docs/quickstart_report_output.md`.
 
 See also:
 
@@ -197,6 +267,7 @@ See also:
 - [docs/literature-fixture-catalog.md](docs/literature-fixture-catalog.md)
 - [examples/chebyshev_bandpass.rs](examples/chebyshev_bandpass.rs)
 - [examples/quickstart_prelude.rs](examples/quickstart_prelude.rs)
+- [examples/quickstart_report.rs](examples/quickstart_report.rs)
 - [examples/literature_fixtures.rs](examples/literature_fixtures.rs)
 
 ## Project Layout

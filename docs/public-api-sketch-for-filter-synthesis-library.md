@@ -269,19 +269,18 @@ if let Some(comparison) = &outcome.report.response.comparison {
 ```
 
 The current crate also exposes detail-preserving orchestration helpers so
-callers can see whether a run stayed on the classical path, attached
-generalized helper data, or fell back to a placeholder matrix-construction
-path:
+callers can inspect the generalized approximation output and the matrix
+construction path:
 
 ```rust
-let outcome = synthesize_and_evaluate_chebyshev_with_details(
+let outcome = generalized_chebyshev_with_response(
     &spec,
     &mapping,
     &grid,
 )?;
 
-println!("{:?}", outcome.approximation_kind);
-println!("{:?}", outcome.matrix_method);
+println!("{}", outcome.synthesis.approximation_kind());
+println!("{:?}", outcome.synthesis.matrix_method);
 ```
 
 Internally, the current crate has also started to separate the approximation
@@ -624,12 +623,9 @@ let spec = FilterSpec::generalized_chebyshev(4, 20.0)?
     ]);
 
 let mapping = LowPassMapping::new(1.0)?;
-let outcome = synthesize_chebyshev_with_details(&spec, &mapping)?;
+let outcome = generalized_chebyshev(&spec)?;
 
-assert_eq!(
-    outcome.approximation_kind,
-    ApproximationStageKind::GeneralizedChebyshev,
-);
+assert_eq!(outcome.approximation_kind(), "GeneralizedChebyshev");
 println!("{:?}", outcome.matrix_method);
 ```
 

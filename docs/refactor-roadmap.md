@@ -125,8 +125,8 @@ Current code point:
 
 ### 5. `synthesis` is thin in a good way, but it depends on unstable seams
 
-`ChebyshevSynthesis` is already acting like the right orchestration layer.
-The remaining work here is now more about feature depth than boundary cleanup.
+The orchestration layer is now thin enough to live as pure helper functions.
+The remaining work here is more about feature depth than boundary cleanup.
 
 Current code point:
 
@@ -157,9 +157,7 @@ pub enum FilterClass {
     BandStop,
 }
 
-pub enum ApproximationFamily {
-    Chebyshev,
-}
+pub struct GeneralizedChebyshevApproximation;
 
 pub enum TransmissionZero {
     Normalized(f64),
@@ -212,7 +210,7 @@ Tasks:
 
 Suggested split:
 
-- `approx::chebyshev`
+- `approx::generalized_chebyshev` for the generalized-Chebyshev approximation facade
 - `approx::complex_poly`
 - `approx::generalized_ops`
 - `approx::polynomial`
@@ -396,9 +394,9 @@ Why next:
 ### Backlog G
 
 Integrate
-[src/approx/generalized_chebyshev.rs](/c:/Users/eynulai/Downloads/mfs/src/approx/generalized_chebyshev.rs)
+[src/approx/generalized_chebyshev_helpers.rs](/c:/Users/eynulai/Downloads/mfs/src/approx/generalized_chebyshev_helpers.rs)
 more deeply into
-[src/approx/chebyshev.rs](/c:/Users/eynulai/Downloads/mfs/src/approx/chebyshev.rs)
+[src/approx/generalized_chebyshev.rs](/c:/Users/eynulai/Downloads/mfs/src/approx/generalized_chebyshev.rs)
 so placeholder `e/f` coefficient generation can be replaced by real synthesis
 artifacts.
 

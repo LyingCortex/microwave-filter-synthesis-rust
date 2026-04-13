@@ -17,7 +17,7 @@ mod database;
 use crate::approx::PolynomialSet;
 use crate::error::Result;
 use crate::freq::{FrequencyGrid, LowPassMapping};
-use crate::spec::{FilterSpec, TransmissionZero};
+use crate::spec::FilterSpec;
 
 pub use database::{
     CaseSpecification, ComplexValue, EndToEndFixture, FilterDatabaseCase, FilterDatabaseDocument,
@@ -211,10 +211,9 @@ pub fn cameron_order3_generalized_pipeline_exact_case() -> ExactGeneralizedPipel
 
 /// Returns a low-order generalized-Chebyshev spec used across regression tests.
 pub fn cameron_generalized_order4_spec() -> Result<(FilterSpec, LowPassMapping)> {
-    let spec = FilterSpec::generalized_chebyshev(4, 20.0)?.with_transmission_zeros(vec![
-        TransmissionZero::normalized(-2.0),
-        TransmissionZero::normalized(1.5),
-    ]);
+    // Fixture specs follow the same contract as public specs: transmission zeros
+    // are already normalized prototype values.
+    let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros(vec![-2.0, 1.5]);
     let mapping = LowPassMapping::new(1.0)?;
     Ok((spec, mapping))
 }

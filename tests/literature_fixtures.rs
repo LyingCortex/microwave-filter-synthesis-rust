@@ -13,7 +13,7 @@ use mfs::fixtures::{
     literature_reference_grid, literature_reference_grid_info,
 };
 use mfs::synthesis::{MatrixSynthesisMethod, SectionSynthesis};
-use mfs::{ApproximationStageKind, synthesize_chebyshev_with_details};
+use mfs::generalized_chebyshev;
 use mfs::verify::ResponseTolerance;
 
 fn approx_eq(lhs: f64, rhs: f64, tol: f64) {
@@ -28,10 +28,10 @@ fn approx_eq(lhs: f64, rhs: f64, tol: f64) {
 fn literature_generalized_fixture_drives_generalized_main_flow() -> Result<()> {
     let case = load_filter_database_case_from_repo("Cameron_passband_symmetry_4_2")?;
     let fixture = load_filter_database_end_to_end_fixture("Cameron_passband_symmetry_4_2")?;
-    let outcome = synthesize_chebyshev_with_details(&fixture.spec, &fixture.mapping)?;
+    let outcome = generalized_chebyshev(&fixture.spec)?;
 
     assert!(case.case_id.contains("Cameron"));
-    assert_eq!(outcome.approximation_kind, ApproximationStageKind::GeneralizedChebyshev);
+    assert_eq!(outcome.approximation_kind(), "GeneralizedChebyshev");
     assert_eq!(outcome.matrix_method, MatrixSynthesisMethod::ResidueExpansion);
     Ok(())
 }

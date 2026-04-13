@@ -74,7 +74,7 @@ Current role:
 
 - defines `FilterSpec`
 - defines `FilterClass`
-- defines `ApproximationFamily`
+- defines approximation-specific spec inputs
 - defines return-loss and transmission-zero input types
 - provides `FilterSpecBuilder`
 
@@ -106,8 +106,7 @@ Assessment:
 
 - still one of the strongest matches to the target architecture
 - already serves as a stable approximation layer
-- now distinguishes between default classical flow and explicit
-  generalized-Chebyshev flow
+- now routes approximation through a generalized-Chebyshev-only flow
 - future work is mostly about deeper approximation coverage and richer
   generalized fidelity
 
@@ -165,14 +164,13 @@ Recommended next direction:
 
 Current role:
 
-- high-level orchestration through `ChebyshevSynthesis`
+- high-level orchestration through pure synthesis/evaluation helpers
 - canonical synthesis through `CanonicalMatrixSynthesis`
 - low-level synthesis execution through `MatrixSynthesisEngine`
 - residue/admittance helpers
 - placeholder construction
 - section-oriented synthesis through `SectionSynthesis`
-- stage reporting through `ApproximationStageKind` and
-  `MatrixSynthesisMethod`
+- stage reporting through `approximation_kind()` and `MatrixSynthesisMethod`
 
 Assessment:
 
@@ -310,9 +308,9 @@ Status:
 Current source:
 
 - `src/approx/mod.rs`
-- `src/approx/chebyshev.rs`
-- `src/approx/complex_poly.rs`
 - `src/approx/generalized_chebyshev.rs`
+- `src/approx/complex_poly.rs`
+- `src/approx/generalized_chebyshev_helpers.rs`
 - `src/approx/generalized_ops.rs`
 - `src/approx/polynomial.rs`
 

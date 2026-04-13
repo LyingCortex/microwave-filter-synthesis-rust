@@ -51,7 +51,7 @@ The crate follows a layered domain-core structure:
    Provides orchestration helpers that compose the lower-level stages.
 
 The top-level crate root exposes a thin facade over these modules, including
-`synthesize_chebyshev(...)` as a simple high-level entry point.
+`generalized_chebyshev(...)` and `generalized_chebyshev_with_response(...)` as simple high-level entry points.
 
 ## Module Responsibilities
 
@@ -117,7 +117,7 @@ Convert filter specifications into prototype polynomial objects.
 Current types:
 
 - `ApproximationEngine` trait
-- `ChebyshevApproximation`
+- `GeneralizedChebyshevApproximation`
 - `PolynomialSet`
 - `PrototypePoint`
 
@@ -128,8 +128,9 @@ Responsibilities:
 - Keep approximation methods swappable through trait-based APIs.
 
 Design note:
-The initial implementation uses placeholder coefficients. That is deliberate:
-the crate shape should stabilize before Cameron/Amari equations are ported in.
+The approximation layer now exposes only the generalized-Chebyshev-oriented
+path. Remaining gaps are about numerical coverage and coupling-matrix recovery,
+not about maintaining multiple approximation tracks.
 
 Future expansion:
 
@@ -230,11 +231,11 @@ The intended happy-path flow is:
 In code, the facade currently looks like this:
 
 ```rust
-let spec = FilterParameter::chebyshev(4, 20.0)?
-    .with_transmission_zeros(vec![TransmissionZero::finite(-1.25)]);
+let spec = filter_spec(4, 20.0, [-1.25], None)?;
 let mapping = BandPassMapping::new(6.75e9, 300.0e6)?;
 
-let (polynomials, matrix) = synthesize_chebyshev(&spec, &mapping)?;
+let synthesis = generalized_chebyshev(&spec)?;
+let matrix = synthesis.matrix.clone();
 let grid = FrequencyGrid::linspace(6.0e9, 7.0e9, 201)?;
 let response = ResponseSolver::default().evaluate_normalized(&matrix, &grid)?;
 ```
@@ -276,9 +277,9 @@ For advanced users and future internal composition:
 
 For common workflows:
 
-- `synthesize_chebyshev(...)`
-- `synthesize_and_evaluate_chebyshev_with_mapping(...)`
-- `ChebyshevSynthesis`
+- `generalized_chebyshev(...)`
+- `generalized_chebyshev_with_response(...)`
+- pure orchestration helpers such as `synthesize_generalized_chebyshev(...)`
 - future convenience functions for common prototype and topology patterns
 
 This split keeps the crate ergonomic without hiding important engineering
@@ -289,14 +290,14 @@ artifacts.
 The crate currently supports two ergonomic orchestration styles:
 
 ```rust
-let (polynomials, matrix) = mfs::synthesize_chebyshev(&spec, &mapping)?;
+let synthesis = mfs::generalized_chebyshev(&spec)?;
+let matrix = synthesis.matrix.clone();
 ```
 
 and
 
 ```rust
-let outcome = mfs::ChebyshevSynthesis::default()
-    .synthesize_and_evaluate_with_mapping(&spec, &mapping, &grid)?;
+let outcome = mfs::generalized_chebyshev_with_response(&spec, &mapping, &grid)?;
 ```
 
 The second form is the better long-term home for orchestration because it keeps
@@ -339,7 +340,7 @@ turn those stages into explicit modules with typed boundaries.
 ### Phase 1
 
 - finalize type layout and module ownership
-- keep placeholder algorithm implementations
+- keep generalized-only algorithm implementations simple while interfaces settle
 - add more unit tests for invariants and API behavior
 
 ### Phase 2

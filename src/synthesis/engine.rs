@@ -156,10 +156,10 @@ impl MatrixSynthesisEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::approx::{ApproximationEngine, ChebyshevApproximation, PolynomialSet};
+    use crate::approx::{ApproximationEngine, GeneralizedChebyshevApproximation, PolynomialSet};
     use crate::fixtures::load_filter_database_end_to_end_fixture;
-    use crate::freq::{BandPassMapping, LowPassMapping};
-    use crate::spec::{FilterSpec, TransmissionZero};
+    use crate::freq::BandPassMapping;
+    use crate::spec::FilterSpec;
 
     fn approx_eq(lhs: f64, rhs: f64, tol: f64) {
         let diff = (lhs - rhs).abs();
@@ -312,12 +312,8 @@ mod tests {
 
     #[test]
     fn matrix_synthesizer_can_build_admittance_polynomials_from_generalized_data() -> Result<()> {
-        let spec = FilterSpec::chebyshev(4, 20.0)?.with_transmission_zeros(vec![
-            TransmissionZero::normalized(-2.0),
-            TransmissionZero::normalized(1.5),
-        ]);
-        let mapping = LowPassMapping::new(1.0)?;
-        let polynomials = ChebyshevApproximation.synthesize(&spec, &mapping)?;
+        let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros(vec![-2.0, 1.5]);
+        let polynomials = GeneralizedChebyshevApproximation.synthesize(&spec)?;
 
         let admittance = MatrixSynthesisEngine.synthesize_admittance_polynomials(&polynomials)?;
         assert!(admittance.denominator.degree() >= 3);
@@ -330,12 +326,8 @@ mod tests {
 
     #[test]
     fn matrix_synthesizer_can_expand_admittance_residues() -> Result<()> {
-        let spec = FilterSpec::chebyshev(4, 20.0)?.with_transmission_zeros(vec![
-            TransmissionZero::normalized(-2.0),
-            TransmissionZero::normalized(1.5),
-        ]);
-        let mapping = LowPassMapping::new(1.0)?;
-        let polynomials = ChebyshevApproximation.synthesize(&spec, &mapping)?;
+        let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros(vec![-2.0, 1.5]);
+        let polynomials = GeneralizedChebyshevApproximation.synthesize(&spec)?;
 
         let (y11, y12, y22) = MatrixSynthesisEngine.synthesize_residue_expansions(&polynomials)?;
         assert_eq!(y11.residues.len(), 4);
@@ -348,7 +340,7 @@ mod tests {
     #[test]
     fn matrix_synthesizer_reports_residue_path_when_supported() -> Result<()> {
         let fixture = load_filter_database_end_to_end_fixture("Cameron_passband_symmetry_4_2")?;
-        let polynomials = ChebyshevApproximation.synthesize(&fixture.spec, &fixture.mapping)?;
+        let polynomials = GeneralizedChebyshevApproximation.synthesize(&fixture.spec)?;
 
         let outcome = MatrixSynthesisEngine.synthesize_with_details(&polynomials)?;
         assert_eq!(outcome.method, MatrixSynthesisMethod::ResidueExpansion);
@@ -357,17 +349,14 @@ mod tests {
     }
 
     #[test]
-    fn matrix_synthesizer_accepts_all_pole_chebyshev_without_generalized_metadata() -> Result<()> {
-        let spec = FilterSpec::chebyshev(3, 20.0)?;
-        let mapping = LowPassMapping::new(1.0)?;
-        let polynomials = ChebyshevApproximation.synthesize(&spec, &mapping)?;
+    fn matrix_synthesizer_accepts_all_pole_generalized_output() -> Result<()> {
+        let spec = FilterSpec::new(3, 20.0)?;
+        let polynomials = GeneralizedChebyshevApproximation.synthesize(&spec)?;
 
-        assert!(polynomials.generalized.is_none());
+        assert!(polynomials.generalized.is_some());
         let outcome = MatrixSynthesisEngine.synthesize_with_details(&polynomials)?;
-        assert_eq!(outcome.method, MatrixSynthesisMethod::PlaceholderFallback);
         assert_eq!(outcome.matrix.order(), 3);
-        assert!(outcome.matrix.at(0, 1).unwrap_or_default().abs() > 1e-6);
-        assert!(outcome.matrix.at(3, 4).unwrap_or_default().abs() > 1e-6);
+        assert_eq!(outcome.matrix.side(), 5);
         Ok(())
     }
 }

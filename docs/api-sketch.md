@@ -12,68 +12,32 @@ direction for implementation.
 
 ```rust
 use mfs::{
-    ApproximationFamily,
     BandPassMapping,
-    ChebyshevApproximation,
-    ChebyshevSynthesis,
-    CouplingMatrixSynthesizer,
-    FilterClass,
-    FilterParameter,
+    GeneralizedChebyshevApproximation,
     FrequencyGrid,
-    ReturnLossSpec,
-    ResponseSettings,
     ResponseSolver,
-    TransmissionZero,
+    filter_spec,
+    generalized_chebyshev_with_response,
 };
 ```
 
 ### Typical Workflow
 
 ```rust
-let spec = FilterParameter::chebyshev(6, 23.0)?
-    .with_transmission_zeros(vec![
-        TransmissionZero::finite(-2.0),
-        TransmissionZero::finite(-1.2),
-        TransmissionZero::finite(1.5),
-    ]);
+let spec = filter_spec(6, 23.0, [-2.0, -1.2, 1.5], None)?;
 
 let mapping = BandPassMapping::new(6.75e9, 300.0e6)?;
-let approximation = ChebyshevApproximation::default();
-let polynomials = approximation.synthesize(&spec, &mapping)?;
-
-let matrix = CouplingMatrixSynthesizer::default().synthesize(&polynomials)?;
+let approximation = GeneralizedChebyshevApproximation::default();
+let polynomials = approximation.synthesize(&spec)?;
+let matrix = mfs::synthesize_canonical_matrix(&polynomials)?;
 let grid = FrequencyGrid::linspace(6.0e9, 7.5e9, 2001)?;
-let response = ResponseSolver::default().evaluate_with_settings(
-    &matrix,
-    &grid,
-    &mapping,
-    ResponseSettings {
-        source_resistance: 1.0,
-        load_resistance: 1.0,
-    },
-)?;
-```
-
-### Explicit Semantic Construction
-
-```rust
-let spec = FilterParameter::new(
-    6,
-    FilterClass::BandPass,
-    ApproximationFamily::Chebyshev,
-    ReturnLossSpec::new(23.0)?,
-)?
-.with_transmission_zeros(vec![
-    TransmissionZero::finite(-2.0),
-    TransmissionZero::finite(1.5),
-]);
+let response = ResponseSolver::default().evaluate(&matrix, &grid, &mapping)?;
 ```
 
 ### Orchestrated Workflow
 
 ```rust
-let outcome = ChebyshevSynthesis::default()
-    .synthesize_and_evaluate_with_mapping(&spec, &mapping, &grid)?;
+let outcome = generalized_chebyshev_with_response(&spec, &mapping, &grid)?;
 
 println!("{}", outcome.response.samples.len());
 println!("{}", outcome.response.samples[0].group_delay);
@@ -85,10 +49,7 @@ println!("{}", outcome.response.samples[0].group_delay);
 
 Expected public items:
 
-- `FilterParameter`
-- `FilterClass`
-- `ApproximationFamily`
-- `ReturnLossSpec`
+- `FilterSpec`
 - `TransmissionZero`
 
 ### `mfs::freq`
@@ -105,9 +66,9 @@ Expected public items:
 Expected public items:
 
 - `ApproximationEngine`
-- `ChebyshevApproximation`
+- `GeneralizedChebyshevApproximation`
 - `PolynomialSet`
-- optional generalized Chebyshev helper artifacts for advanced workflows
+- generalized Chebyshev helper artifacts for advanced workflows
 
 ### `mfs::matrix`
 
@@ -132,7 +93,8 @@ Expected public items:
 
 Expected public items:
 
-- `ChebyshevSynthesis`
+- `synthesize_generalized_chebyshev(...)`
+- `synthesize_and_evaluate_with_mapping(...)`
 - `SynthesisOutcome`
 - `EvaluationOutcome`
 
@@ -141,12 +103,12 @@ Expected public items:
 The crate should also expose compact helpers for common workflows:
 
 ```rust
-let (polynomials, matrix) = mfs::synthesize_chebyshev(&spec, &mapping)?;
+let (polynomials, matrix) = mfs::synthesize_generalized_chebyshev(&spec)?;
 ```
 
 Possible future helpers:
 
-- `synthesize_chebyshev_matrix(...)`
+- `synthesize_canonical_matrix(...)`
 - `evaluate_bandpass_response(...)`
 - `folded_topology(...)`
 
@@ -155,12 +117,7 @@ Possible future helpers:
 For more advanced configuration, builder-style APIs may be useful:
 
 ```rust
-let spec = FilterParameter::chebyshev(8, 22.0)?
-    .with_filter_class(mfs::FilterClass::BandPass)
-    .with_transmission_zeros(vec![
-        TransmissionZero::finite(-1.8),
-        TransmissionZero::finite(1.8),
-    ]);
+let spec = filter_spec(8, 22.0, [-1.8, 1.8], None)?;
 ```
 
 This style keeps validation localized and avoids long argument lists.
@@ -191,14 +148,14 @@ Illustrative Python-facing API:
 ```python
 import mfs
 
-spec = mfs.FilterParameter.chebyshev(
+spec = mfs.filter_spec(
     order=6,
     return_loss_db=23.0,
-    transmission_zeros=[-2.0, -1.2, 1.5],
+    zeros=[-2.0, -1.2, 1.5],
 )
 
 mapping = mfs.BandPassMapping(center_hz=6.75e9, bandwidth_hz=300e6)
-polys, matrix = mfs.synthesize_chebyshev(spec, mapping)
+polys, matrix = mfs.synthesize_generalized_chebyshev(spec)
 response = mfs.ResponseSolver().evaluate(matrix, grid, mapping)
 ```
 
@@ -206,8 +163,7 @@ response = mfs.ResponseSolver().evaluate(matrix, grid, mapping)
 
 The following are likely to remain stable:
 
-- explicit `FilterParameter`
-- explicit filter-class / approximation-family split
+- explicit `FilterSpec`
 - explicit frequency-mapping types
 - explicit response solver stage
 - typed error returns

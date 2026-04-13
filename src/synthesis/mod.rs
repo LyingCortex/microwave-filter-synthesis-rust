@@ -10,7 +10,8 @@ pub use canonical::{
 };
 pub use engine::{MatrixSynthesisEngine, MatrixSynthesisMethod, MatrixSynthesisOutcome};
 pub use orchestration::{
-    ApproximationStageKind, ChebyshevSynthesis, EvaluationOutcome, SynthesisOutcome,
+    synthesize_and_evaluate_with_mapping, synthesize_generalized_chebyshev, EvaluationOutcome,
+    SynthesisOutcome,
 };
 pub use sections::SectionSynthesis;
 pub use sections::VerifiedSectionSynthesis;

@@ -22,8 +22,7 @@ these design notes.
 What is already reflected in `src/`:
 
 - `FilterSpec` and `FilterSpecBuilder` are the active spec entry points
-- `ApproximationFamily` now distinguishes explicit Chebyshev and generalized
-  Chebyshev requests
+- the approximation layer now exposes a generalized-only Chebyshev path
 - `approx` is now internally split into approximation engines, reusable
   complex-polynomial primitives, and generalized-domain helper modules
 - `synthesis` is a directory-based subsystem with canonical, section, residue,
@@ -32,7 +31,7 @@ What is already reflected in `src/`:
 - `verify` provides reusable response-invariance, section, and topology-shape checks
 - `matrix` has topology metadata and has been reduced toward a lower-level matrix-domain layer
 - transform workflows now emit minimal reports, with optional response-comparison summaries
-- orchestration outcomes now surface `ApproximationStageKind` and
+- orchestration outcomes now surface `approximation_kind()` and
   `MatrixSynthesisMethod`
 - `prelude` exposes a coherent high-level user workflow
 

@@ -1,16 +1,14 @@
-use mfs::approx::{ApproximationEngine, ChebyshevApproximation, PolynomialSet};
+use mfs::approx::{ApproximationEngine, GeneralizedChebyshevApproximation, PolynomialSet};
 use mfs::error::Result;
-use mfs::freq::{FrequencyGrid, LowPassMapping};
-use mfs::spec::{FilterSpec, TransmissionZero};
+use mfs::freq::FrequencyGrid;
+use mfs::spec::FilterSpec;
 use mfs::synthesis::SectionSynthesis;
 use mfs::verify::ResponseTolerance;
 
 #[test]
 fn section_synthesis_supports_triplet_workflow() -> Result<()> {
-    let spec = FilterSpec::chebyshev(5, 20.0)?
-        .with_transmission_zeros(vec![TransmissionZero::normalized(-1.3)]);
-    let mapping = LowPassMapping::new(1.0)?;
-    let polynomials = ChebyshevApproximation.synthesize(&spec, &mapping)?;
+    let spec = FilterSpec::new(5, 20.0)?.with_normalized_transmission_zeros(vec![-1.3]);
+    let polynomials = GeneralizedChebyshevApproximation.synthesize(&spec)?;
 
     let matrix = SectionSynthesis::default().synthesize_triplet(&polynomials, -1.3, 2)?;
     assert!(matrix.at(3, 5).unwrap_or_default().abs() <= 1e-6);

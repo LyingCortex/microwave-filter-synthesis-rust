@@ -1,27 +1,26 @@
-use mfs::{BandPassMapping, ChebyshevSynthesis, FilterSpec, FrequencyGrid, TransmissionZero};
+use mfs::{
+    bandpass, filter_spec, generalized_chebyshev_with_response, normalize_transmission_zeros_hz,
+    FrequencyGrid,
+};
 
 fn main() -> mfs::Result<()> {
-    // Define a small generalized Chebyshev-style example in normalized zero space.
-    let spec = FilterSpec::chebyshev(6, 23.0)?.with_transmission_zeros(vec![
-        TransmissionZero::normalized(-2.0),
-        TransmissionZero::normalized(-1.2),
-        TransmissionZero::normalized(1.5),
-    ]);
-
-    // Map the physical band into the low-pass prototype domain used by synthesis.
-    let mapping = BandPassMapping::new(6.75e9, 300.0e6)?;
+    // `FilterSpec` stores normalized prototype zeros, so physical Hz zeros
+    // must be mapped into the prototype domain before building the spec.
+    let mapping = bandpass(6.75e9, 300.0e6)?;
+    let zeros = normalize_transmission_zeros_hz([6.4e9, 6.5e9, 7.0e9], &mapping)?;
+    let spec = filter_spec(6, 23.0, zeros, None)?;
     let grid = FrequencyGrid::linspace(6.0e9, 7.5e9, 11)?;
 
     // Run the end-to-end flow and print a few representative outputs.
-    let outcome = ChebyshevSynthesis::default()
-        .synthesize_and_evaluate_with_mapping(&spec, &mapping, &grid)?;
+    let outcome = generalized_chebyshev_with_response(&spec, &mapping, &grid)?;
+    let synthesis = &outcome.synthesis;
 
-    println!("order: {}", outcome.polynomials.order);
+    println!("order: {}", synthesis.polynomials.order);
     println!(
         "normalized transmission zeros: {:?}",
-        outcome.polynomials.transmission_zeros_normalized
+        synthesis.polynomials.transmission_zeros_normalized
     );
-    println!("matrix shape: {:?}", outcome.matrix.shape());
+    println!("matrix shape: {:?}", synthesis.matrix.shape());
     println!("sample count: {}", outcome.response.samples.len());
     println!(
         "center sample s21 ~= {} + j{}",

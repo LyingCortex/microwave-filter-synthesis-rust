@@ -41,6 +41,141 @@ That means the remaining work is no longer about basic architectural cleanup.
 The next major gains come from deeper mathematical integration and a more
 complete coupling-matrix recovery path.
 
+## Workflow Coverage Against The Classical Literature Flow
+
+For orientation, the current crate can be compared against the common
+generalized-Chebyshev synthesis sequence:
+
+1. generate `E(s)`, `F(s)`, `P(s)`
+2. convert them into short-circuit `Y` parameters
+3. perform partial-fraction expansion
+4. recover an `N+2` transversal coupling matrix
+5. convert that matrix into a realizable topology through similarity transforms
+
+The short version is:
+
+- the crate follows this flow in shape
+- the crate now exposes only the generalized path
+- several stages are still engineered approximations or restricted implementations
+
+### Stage-by-Stage Status
+
+#### 1. Polynomial generation
+
+Current status: implemented on the generalized path
+
+- `P(s)` generation from normalized transmission zeros is implemented
+- generalized `F(s)` generation through Cameron recursion is implemented
+- generalized `E(s)` recovery through helper-domain root reflection and reconstruction is implemented
+- the crate no longer exposes a separate classical approximation path
+
+Practical meaning:
+
+- the approximation stage is now generalized-only
+- all-pole cases still work, but they are routed through the generalized helper
+  pipeline rather than through a separate classical implementation
+
+#### 2. Y-parameter synthesis
+
+Current status: implemented, but not in the exact published `m1/n1` form
+
+- the crate converts generalized polynomial artifacts into rational
+  `y11/y12/y22` forms
+- this is done through direct polynomial combinations of `E`, `F`, `P`, and
+  their alternating conjugates
+- the public implementation does not currently mirror the textbook odd/even
+  `m1(s)` and `n1(s)` formulas line by line
+
+Practical meaning:
+
+- there is a real Y-parameter synthesis stage in the code
+- but it should be viewed as the current engineering formulation of that stage,
+  not yet as a verbatim transcription of one specific textbook derivation
+
+#### 3. Partial-fraction expansion
+
+Current status: substantially implemented with restrictions
+
+- the code solves the common denominator roots
+- it computes residues using the standard `N(p_k) / D'(p_k)` pattern
+- it also preserves a constant term when present
+
+Current restrictions:
+
+- repeated poles are not yet supported
+- the current transversal reconstruction expects poles to lie close to the
+  imaginary axis
+
+Practical meaning:
+
+- this stage is mathematically real and not a placeholder
+- but the accepted design space is still narrower than a fully general
+  implementation
+
+#### 4. Transversal matrix construction
+
+Current status: implemented for the generalized residue path, with fallback
+
+- the code recovers self-couplings from pole locations
+- it recovers source/load couplings from residue data
+- it can attach a direct source-load term when the residue expansion exposes
+  one, or when the current all-finite-zero heuristic applies
+
+Important caveat:
+
+- if the generalized residue-driven path is unavailable, the crate falls back
+  to a placeholder chain-style matrix builder
+
+Practical meaning:
+
+- the transversal reconstruction is real on the generalized path
+- the overall crate should not yet be described as using residue-derived matrix
+  recovery for every synthesis case
+
+#### 5. Topology reconstruction and similarity transforms
+
+Current status: implemented as transform backends, but not exposed as an
+explicit rotation sequence API
+
+- folded, arrow, and wheel conversions are supported
+- response-invariance checks can be attached to those transforms
+- section-extraction workflows for triplet, quadruplet, and trisection cases
+  are also available
+
+What is not exposed yet:
+
+- the public API does not currently walk the caller through pivot selection,
+  rotation angles, and annihilation sequence steps as explicit first-class
+  artifacts
+
+Practical meaning:
+
+- the functionality is there
+- the implementation is packaged as topology-conversion helpers rather than as
+  a pedagogical step-by-step similarity-transform toolkit
+
+### Summary Table
+
+| Literature stage | Current status | Notes |
+| --- | --- | --- |
+| `P(s)` generation | Implemented | Uses normalized transmission zeros already stored in `FilterSpec` |
+| generalized `F(s)` generation | Implemented | Cameron-style recurrence is present |
+| generalized `E(s)` generation | Implemented | Uses helper-domain root reflection and reconstruction |
+| Y-parameter synthesis | Implemented | Engineering form exists, but not the exact textbook `m1/n1` presentation |
+| partial-fraction expansion | Implemented with limits | No repeated-pole support yet |
+| transversal matrix recovery | Implemented with fallback | The generalized path is real; matrix construction can still fall back when residue reconstruction is unavailable |
+| topology transforms | Implemented | Public API exposes transform helpers, not full rotation-sequence artifacts |
+
+### Recommended Wording
+
+When describing the current codebase, the most accurate short wording is:
+
+- "The crate already supports an end-to-end generalized-Chebyshev-oriented
+  synthesis flow."
+- "The generalized helper path is the approximation path exposed by the
+  implementation."
+- "Some matrix-recovery cases still use simplified or fallback logic."
+
 ## Product View
 
 The library should own one narrow responsibility:
@@ -115,7 +250,7 @@ This layer composes kernels into ergonomic use cases.
 
 Examples:
 
-- `ChebyshevSynthesis`
+- pure orchestration helpers such as `synthesize_generalized_chebyshev(...)`
 - convenience end-to-end helpers
 - future recipe-style builders
 
@@ -162,9 +297,10 @@ src/
     topology.rs
   approx/
     mod.rs
-    chebyshev.rs
+    generalized_chebyshev.rs
     complex_poly.rs
     generalized_ops.rs
+    generalized_chebyshev_helpers.rs
     polynomial.rs
   matrix/
     mod.rs
@@ -211,7 +347,6 @@ Today `FilterSpec` carries "family", "shape", and "band intent" in a compact
 form. That is fine for now, but a better long-term model is:
 
 - `FilterClass`: low-pass, band-pass, band-stop, high-pass
-- `ApproximationFamily`: Chebyshev, Butterworth, elliptic, ...
 - `PerformanceSpec`: return loss, ripple, attenuation targets
 - `TransmissionZeros`: explicit typed set with domain-aware constructors
 
@@ -341,9 +476,9 @@ This is for the common "give me a filter flow" use case.
 
 Examples:
 
-- `synthesize_chebyshev(...)`
-- `synthesize_and_evaluate_chebyshev_with_mapping(...)`
-- orchestration structs such as `ChebyshevSynthesis`
+- `synthesize_generalized_chebyshev(...)`
+- `generalized_chebyshev_with_response(...)`
+- orchestration helpers such as `generalized_chebyshev(...)`
 
 Guideline:
 

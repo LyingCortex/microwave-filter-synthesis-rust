@@ -4,16 +4,15 @@ use mfs::fixtures::{
     cameron_style_trisection_request, literature_reference_grid,
 };
 use mfs::prelude::*;
-use mfs::synthesize_chebyshev_with_details;
 
 fn main() -> Result<()> {
     let generalized_info = cameron_generalized_order4_info();
-    let (spec, mapping) = cameron_generalized_order4_spec()?;
-    let synthesis = synthesize_chebyshev_with_details(&spec, &mapping)?;
+    let (spec, _) = cameron_generalized_order4_spec()?;
+    let synthesis = generalized_chebyshev(&spec)?;
 
     println!("fixture: {}", generalized_info.key);
     println!("reference: {}", generalized_info.source);
-    println!("approximation stage: {:?}", synthesis.approximation_kind);
+    println!("approximation stage: {}", synthesis.approximation_kind());
     println!("matrix method: {:?}", synthesis.matrix_method);
     println!("matrix order: {}", synthesis.matrix.order());
 

@@ -32,10 +32,10 @@ intended boundaries have already landed:
 
 In particular, `approx` is no longer a single flat file. It already contains:
 
-- `chebyshev.rs`
+- `generalized_chebyshev.rs`
 - `complex_poly.rs`
 - `generalized_ops.rs`
-- `generalized_chebyshev.rs`
+- `generalized_chebyshev_helpers.rs`
 - `polynomial.rs`
 
 So this document should be read as:
@@ -123,8 +123,8 @@ crates/filter-synthesis-core/
    │  └─ builder.rs
    ├─ approx/
    │  ├─ mod.rs
-   │  ├─ chebyshev.rs
    │  ├─ generalized_chebyshev.rs
+   │  ├─ generalized_chebyshev_helpers.rs
    │  ├─ generalized_ops.rs
    │  ├─ complex_poly.rs
    │  └─ polynomial.rs
