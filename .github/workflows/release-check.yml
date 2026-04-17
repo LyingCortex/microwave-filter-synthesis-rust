@@ -32,7 +32,7 @@ jobs:
           echo "PACKAGE_FILE=$(ls target/package/*.crate | head -n 1)" >> "$GITHUB_ENV"
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           body_path: docs/first-github-release-notes.md
           files: |
