@@ -64,9 +64,9 @@ What exists today:
 
 What is still in progress:
 
-- deeper generalized Chebyshev approximation fidelity beyond the current helper-backed path
-- coupling-matrix recovery from richer prototype artifacts
-- broader advanced-topology coverage beyond folded and arrow
+- broader validation of generalized Chebyshev approximation fidelity against literature and benchmark fixtures
+- coupling-matrix recovery for every supported prototype case without falling back to the chain-style builder
+- explicit topology rotation-sequence artifacts beyond the current folded, arrow, wheel, and section facades
 - more benchmark and regression fixtures
 
 ## Flow Coverage
@@ -81,7 +81,8 @@ the current codebase is best described as partially complete:
 - generalized `F(s)` generation through Cameron-style recurrence is implemented
 - generalized `E(s)` recovery through the current helper-domain root workflow is implemented
 - generalized `E/F/P` generation is the only approximation path exposed by the crate
-- Y-parameter synthesis, residue expansion, and transversal-matrix recovery are implemented for the generalized helper path
+- generalized helper outputs are attached to the primary approximation artifact and drive the main `E/F/P` coefficients
+- Y-parameter synthesis, residue expansion, and transversal-matrix recovery are implemented for the generalized helper path, with current restrictions such as no repeated-pole support
 - the matrix stage can still fall back to a placeholder chain-style builder when the residue path is unavailable
 - topology conversion to folded, arrow, and wheel forms is implemented as an engineering backend, but the public API does not expose the full similarity-rotation sequence explicitly
 

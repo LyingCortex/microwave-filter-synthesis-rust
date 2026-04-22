@@ -34,8 +34,8 @@ The current crate has already moved in the intended direction:
 - a generalized Chebyshev helper layer now exists for padded transmission
   zeros, Cameron recursion, `P/F/A/E`-related polynomial steps, and epsilon
   calculation
-- the high-level approximation output can carry optional generalized
-  polynomial data when the zero set fits the currently supported helper domain
+- the high-level approximation output attaches generalized polynomial data for
+  the supported helper domain and uses it as the primary `E/F/P` artifact
 
 That means the remaining work is no longer about basic architectural cleanup.
 The next major gains come from deeper mathematical integration and a more
@@ -505,7 +505,8 @@ Avoid introducing:
 ## Error Model
 
 The current unified error type is the right idea. The next refinement should be
-more structured categories, not more string payloads.
+more structured categories where caller behavior should differ, while keeping
+simple validation failures straightforward.
 
 Recommended categories:
 
@@ -530,12 +531,13 @@ Recommended policy:
 3. introduce a backend only when a real solver or transform needs it
 4. keep backend use internal unless there is a compelling API reason
 
-Most likely path:
+Current path:
 
-- stay with plain `Vec<f64>` for storage while synthesis is immature
-- adopt a mature dense linear algebra backend when response solving becomes
-  real
-- consider complex arithmetic entering only at the solver boundary
+- public storage remains crate-owned and backend-neutral
+- `nalgebra` and complex arithmetic are used behind solver and synthesis
+  boundaries where real matrix operations require them
+- future backend changes should remain internal unless callers need direct
+  access to a new artifact type
 
 ## Testing Strategy
 
@@ -598,36 +600,34 @@ an architectural template.
 
 ## Recommended Development Order
 
-If we want the cleanest path with the least rework, the implementation order
-should be:
+The original architectural cleanup has mostly landed. The current development
+order should be:
 
-1. finalize domain vocabulary and constructors
-2. finish frequency mapping and zero-normalization semantics
-3. build robust polynomial infrastructure
-4. integrate generalized Chebyshev helper outputs into the main approximation
-   path
-5. split matrix storage from matrix synthesis
-6. add topology transforms
-7. implement a real response solver
-8. add adapters such as Python bindings
+1. tighten domain vocabulary around filter class, approximation family, and
+   normalized prototype intent
+2. expand polynomial validation and coefficient-convention tests
+3. broaden generalized Chebyshev literature fixtures and benchmark cases
+4. remove or narrow the matrix-synthesis placeholder fallback
+5. expose topology rotation reports only when their artifact shape is stable
+6. add adapters such as Python bindings after the Rust artifact model settles
 
-This order keeps dependencies flowing one way and prevents backend details from
-shaping the top-level API too early.
+This keeps dependencies flowing one way while acknowledging the current crate
+already has real response solving and topology transform facades.
 
 ## Concrete Near-Term Refactors
 
 These are the most worthwhile refactors before the crate becomes larger:
 
-1. Move `TransmissionZero` normalization policy into a more explicit domain API.
-2. Keep matrix synthesis outside `CouplingMatrix` itself and evolve the
-   synthesizer boundary as algorithms become more realistic.
-3. Let `response` expose only evaluated response types and keep backend details
-   private.
-4. Keep expanding the generalized Chebyshev helper layer until it can replace
-   placeholder approximation coefficients in the main path.
-5. Continue using directory modules such as `src/approx/` and `src/response/`
-   once a subsystem has multiple responsibilities, and apply the same pattern
-   to `matrix` or `spec` when it meaningfully reduces coupling.
+1. Make the domain vocabulary more explicit: `FilterSpec` is currently a
+   normalized-prototype spec, not a full filter-class model.
+2. Keep matrix synthesis outside `CouplingMatrix` itself and reduce the cases
+   that fall back to `MatrixSynthesisMethod::PlaceholderFallback`.
+3. Continue keeping response backend details private while adding regression
+   coverage for physically meaningful responses.
+4. Promote generalized Chebyshev artifacts from "debuggable helper output" into
+   fully documented prototype artifacts with stable coefficient conventions.
+5. Add explicit topology rotation/report artifacts only after their invariants
+   are clear enough to keep public.
 
 ## Coding Guidelines
 

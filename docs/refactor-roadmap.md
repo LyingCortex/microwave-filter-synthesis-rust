@@ -22,10 +22,14 @@ The crate already has a healthy top-level split:
 - `matrix`
 - `response`
 - `synthesis`
+- `transform`
+- `verify`
+- `output`
 - `error`
 
-That is a good start. The main issue is not missing modules, but mixed
-responsibilities inside some of them.
+That is a good foundation. The main issue is no longer basic module layout;
+the remaining work is tightening semantics and replacing restricted or fallback
+algorithm paths.
 
 ## Progress Status
 
@@ -43,14 +47,23 @@ Completed in the current codebase:
   delay extraction
 - generalized Chebyshev helper routines from the Python core have been ported
   into `approx::generalized_chebyshev`
+- generalized helper outputs are attached to `PolynomialSet` and drive the main
+  `E/F/P` artifacts for the supported generalized path
+- Y-parameter synthesis, residue expansion, and transversal reconstruction are
+  implemented for the generalized residue path
+- folded, arrow, wheel, and section transform facades exist with optional
+  response-invariance checks
 
 Still pending:
 
-- full integration of generalized Chebyshev helper outputs into the main
-  approximation coefficients
-- stronger polynomial validation and normalization rules
-- topology-specific matrix transforms
-- coupling-matrix recovery and optimization logic from the Python core
+- richer domain vocabulary for filter class and approximation family beyond
+  the current normalized-prototype `FilterSpec`
+- stronger polynomial validation, normalization, and coefficient-convention
+  documentation
+- removal or narrowing of the placeholder matrix fallback path
+- explicit topology rotation-sequence artifacts, if they become part of the
+  public debugging/reporting API
+- broader coupling-matrix recovery and optimization logic from the Python core
 
 ## Main Architectural Tensions
 
@@ -67,8 +80,8 @@ Why this matters:
 
 Current code points:
 
-- [src/spec/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/spec/mod.rs)
-- [src/freq.rs](/c:/Users/eynulai/Downloads/mfs/src/freq.rs)
+- [src/spec/mod.rs](../src/spec/mod.rs)
+- [src/freq.rs](../src/freq.rs)
 
 ### 2. `matrix` used to mix storage with synthesis logic
 
@@ -83,28 +96,31 @@ Why this matters:
 
 Current code point:
 
-- [src/matrix/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/matrix/mod.rs)
-- [src/matrix/coupling_matrix.rs](/c:/Users/eynulai/Downloads/mfs/src/matrix/coupling_matrix.rs)
-- [src/synthesis/engine.rs](/c:/Users/eynulai/Downloads/mfs/src/synthesis/engine.rs)
+- [src/matrix/mod.rs](../src/matrix/mod.rs)
+- [src/matrix/coupling_matrix.rs](../src/matrix/coupling_matrix.rs)
+- [src/synthesis/engine.rs](../src/synthesis/engine.rs)
 
-### 3. `approx` now has richer rules, but the main approximation path is still partial
+### 3. `approx` now uses generalized artifacts, but conventions need hardening
 
-`PolynomialSet` is now validated, and generalized Chebyshev helpers exist for
-complex-polynomial stages, but the main approximation output still uses
-placeholder `e/f` coefficient generation.
+`PolynomialSet` is validated, generalized Chebyshev helpers exist for
+complex-polynomial stages, and helper outputs now replace the primary `E/F/P`
+artifacts for the supported generalized path. The remaining work is to make
+coefficient ordering, normalization, and supported domains explicit enough for
+broader fixture coverage.
 
 Why this matters:
 
 - polynomial degree and coefficient conventions need explicit validation
 - real and complex coefficient handling may diverge later
-- the generalized Chebyshev implementation will need helper utilities
+- the generalized Chebyshev implementation now depends on helper utilities, so
+  their domain conventions must be stable
 
 Current code point:
 
-- [src/approx/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/approx/mod.rs)
-- [src/approx/complex_poly.rs](/c:/Users/eynulai/Downloads/mfs/src/approx/complex_poly.rs)
-- [src/approx/generalized_ops.rs](/c:/Users/eynulai/Downloads/mfs/src/approx/generalized_ops.rs)
-- [src/approx/polynomial.rs](/c:/Users/eynulai/Downloads/mfs/src/approx/polynomial.rs)
+- [src/approx/mod.rs](../src/approx/mod.rs)
+- [src/approx/complex_poly.rs](../src/approx/complex_poly.rs)
+- [src/approx/generalized_ops.rs](../src/approx/generalized_ops.rs)
+- [src/approx/polynomial.rs](../src/approx/polynomial.rs)
 
 ### 4. `response` now has a real backend, but it is still an internal solver
 
@@ -120,17 +136,19 @@ Why this matters:
 
 Current code point:
 
-- [src/response/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/response/mod.rs)
-- [src/response/backend.rs](/c:/Users/eynulai/Downloads/mfs/src/response/backend.rs)
+- [src/response/mod.rs](../src/response/mod.rs)
+- [src/response/backend.rs](../src/response/backend.rs)
 
-### 5. `synthesis` is thin in a good way, but it depends on unstable seams
+### 5. `synthesis` is thin in a good way, but fallback behavior is still important
 
 The orchestration layer is now thin enough to live as pure helper functions.
-The remaining work here is more about feature depth than boundary cleanup.
+The remaining work here is more about feature depth than boundary cleanup:
+`MatrixSynthesisMethod` should keep making it obvious when a result came from
+residue expansion versus `PlaceholderFallback`.
 
 Current code point:
 
-- [src/synthesis/orchestration.rs](/c:/Users/eynulai/Downloads/mfs/src/synthesis/orchestration.rs)
+- [src/synthesis/orchestration.rs](../src/synthesis/orchestration.rs)
 
 ## Recommended Phases
 
@@ -139,13 +157,19 @@ Current code point:
 Goal:
 clarify the meaning of current input types before deeper algorithms land
 
+Status:
+partially complete; normalization has moved out of `spec`, but the public
+domain vocabulary still needs a clearer split between filter class,
+approximation family, and normalized prototype intent
+
 Tasks:
 
 1. Separate filter shape from approximation family in the spec model.
 2. Make transmission-zero semantics more explicit than `(value, domain)`.
-3. Decide whether normalized zeros are always low-pass prototype values.
-4. Move zero normalization policy out of `TransmissionZero` methods and into a
-   dedicated helper or domain service.
+3. Keep documenting that current `FilterSpec` zeros are normalized low-pass
+   prototype values.
+4. Keep zero normalization policy in `freq` helpers rather than in
+   `TransmissionZero` methods.
 
 Suggested target shape:
 
@@ -175,12 +199,16 @@ Exit criteria:
 Goal:
 make `freq` the authoritative place for domain mapping rules
 
+Status:
+mostly complete for current low-pass and band-pass flows; branch-sensitive
+reverse-mapping semantics can still become more explicit
+
 Tasks:
 
 1. Keep `FrequencyMapping` as the only place that knows how physical frequencies
    map to normalized coordinates.
-2. Add explicit helpers for zero normalization rather than calling back from
-   `spec`.
+2. Keep explicit helpers such as `normalize_transmission_zeros_hz(...)` rather
+   than calling back from `spec`.
 3. Decide whether reverse mapping should always return a single value or expose
    branch-aware behavior for band-pass and band-stop transforms.
 4. Add tests for invalid physical-domain edge cases.
@@ -198,15 +226,18 @@ Exit criteria:
 ## Phase 3: Promote Polynomial Infrastructure
 
 Goal:
-prepare `approx` for real generalized Chebyshev logic
+keep `approx` ready for broader generalized Chebyshev validation
+
+Status:
+mostly complete; continue hardening validation and conventions
 
 Tasks:
 
-1. Extract polynomial helpers into a dedicated submodule.
-2. Introduce validation helpers for degree and coefficient layout.
+1. Keep polynomial helpers in dedicated submodules.
+2. Expand validation helpers for degree, coefficient layout, and normalization.
 3. Clarify coefficient ordering conventions in docs and tests.
-4. Keep `PolynomialSet` as an artifact, but stop treating it as an unvalidated
-   bag of vectors.
+4. Treat `PolynomialSet` as a meaningful approximation artifact, not a raw
+   vector bundle.
 
 Suggested split:
 
@@ -214,7 +245,6 @@ Suggested split:
 - `approx::complex_poly`
 - `approx::generalized_ops`
 - `approx::polynomial`
-- `approx::generalized_chebyshev`
 
 Exit criteria:
 
@@ -226,10 +256,14 @@ Exit criteria:
 Goal:
 make coupling-matrix generation pluggable and easier to test
 
+Status:
+complete as an architectural boundary; future work should improve synthesis
+coverage inside the boundary
+
 Tasks:
 
-1. Remove synthesis logic from `CouplingMatrix`.
-2. Introduce or keep a dedicated synthesis-engine boundary outside `CouplingMatrix`.
+1. Keep synthesis logic out of `CouplingMatrix`.
+2. Keep the dedicated synthesis-engine boundary outside `CouplingMatrix`.
 3. Keep `CouplingMatrixBuilder` focused on validated assembly only.
 4. Reserve `matrix` for artifact storage, builders, and transforms.
 
@@ -250,16 +284,21 @@ Exit criteria:
 - `CouplingMatrix` no longer owns approximation-to-matrix logic
 - synthesis strategies can vary without changing the matrix artifact type
 
-## Phase 5: Prepare For Topology Work
+## Phase 5: Extend Topology Work
 
 Goal:
-make room for equivalent-network transforms without overloading core storage
+grow equivalent-network transforms without overloading core storage
+
+Status:
+folded, arrow, wheel, and section facades exist; explicit rotation-sequence
+artifacts are still future work
 
 Tasks:
 
-1. Introduce a topology-focused module once a second transform exists.
-2. Represent transform operations separately from the base matrix type.
-3. Keep topology equivalence testing at the response or invariant level.
+1. Keep transform operations separate from the base matrix type.
+2. Keep topology equivalence testing at the response or invariant level.
+3. Decide whether pivot/rotation/annihilation sequences should become public
+   report artifacts.
 
 Exit criteria:
 
@@ -271,13 +310,18 @@ Exit criteria:
 Goal:
 allow numerical backend upgrades without API churn
 
+Status:
+complete as a boundary; the solver now uses real complex matrix operations
+behind public response artifacts
+
 Tasks:
 
 1. Keep `ResponseSample` and `SParameterResponse` as public output artifacts.
-2. Move backend-specific numeric implementation behind private helpers or
+2. Keep backend-specific numeric implementation behind private helpers or
    internal modules.
-3. Decide when complex arithmetic enters the system.
-4. Add regression tests once response values become physically meaningful.
+3. Keep complex arithmetic behind solver and synthesis boundaries unless a
+   stable public artifact requires it.
+4. Add more regression tests for physically meaningful response values.
 
 Exit criteria:
 
@@ -290,12 +334,15 @@ Goal:
 convert the current flat file layout into ownership-based directories only when
 the module contents justify it
 
+Status:
+mostly complete for active subsystems; future splitting should be driven by
+new semantic weight, not symmetry
+
 Recommended order:
 
-1. split `approx.rs`
-2. split `matrix`
-3. split `response.rs`
-4. split `spec.rs` and `freq.rs` into a future `domain/` area if the semantic
+1. keep `approx/`, `matrix/`, `response/`, `synthesis/`, `transform/`, and
+   `verify/` as ownership-based directories
+2. split `spec.rs` and `freq.rs` into a future `domain/` area only if the semantic
    model becomes richer
 
 Do not restructure too early just for aesthetics. Split when it removes real
@@ -308,8 +355,8 @@ These are the highest-value next tasks, in order.
 ### Backlog A
 
 Move transmission-zero normalization out of
-[src/spec/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/spec/mod.rs) and into
-[src/freq.rs](/c:/Users/eynulai/Downloads/mfs/src/freq.rs) or a dedicated
+[src/spec/mod.rs](../src/spec/mod.rs) and into
+[src/freq.rs](../src/freq.rs) or a dedicated
 normalization helper.
 
 Status:
@@ -324,8 +371,8 @@ Why first:
 ### Backlog B
 
 Extract matrix synthesis from
-[src/matrix/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/matrix/mod.rs) and update
-[src/synthesis/orchestration.rs](/c:/Users/eynulai/Downloads/mfs/src/synthesis/orchestration.rs) to depend
+[src/matrix/mod.rs](../src/matrix/mod.rs) and update
+[src/synthesis/orchestration.rs](../src/synthesis/orchestration.rs) to depend
 on a synthesizer instead of `CouplingMatrix::from_polynomials(...)`.
 
 Status:
@@ -339,7 +386,7 @@ Why second:
 ### Backlog C
 
 Split polynomial helpers out of
-[src/approx/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/approx/mod.rs) before adding
+[src/approx/mod.rs](../src/approx/mod.rs) before adding
 real generalized Chebyshev math.
 
 Status:
@@ -347,13 +394,14 @@ completed
 
 Why third:
 
-- current placeholder logic is still small
-- moving now avoids a harder refactor later
+- polynomial conventions now affect the primary generalized path
+- keeping helpers isolated avoids coupling validation, root solving, and
+  Cameron-stage logic in one file
 
 ### Backlog D
 
 Refactor
-[src/response/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/response/mod.rs) so the
+[src/response/mod.rs](../src/response/mod.rs) so the
 public sample types remain stable while solver internals become private helper
 functions or a backend module.
 
@@ -367,8 +415,8 @@ performance targets are represented independently.
 
 Suggested code points:
 
-- [src/spec/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/spec/mod.rs)
-- [src/lib.rs](/c:/Users/eynulai/Downloads/mfs/src/lib.rs)
+- [src/spec/mod.rs](../src/spec/mod.rs)
+- [src/lib.rs](../src/lib.rs)
 
 Why next:
 
@@ -376,12 +424,14 @@ Why next:
 - future approximation families will otherwise force avoidable API churn
 
 Status:
-completed
+partially complete; `FilterSpec` is currently a normalized-prototype spec and
+still needs richer filter-class vocabulary before more approximation families
+are added
 
 ### Backlog F
 
 Add stronger polynomial validation and normalization rules around
-[src/approx/polynomial.rs](/c:/Users/eynulai/Downloads/mfs/src/approx/polynomial.rs).
+[src/approx/polynomial.rs](../src/approx/polynomial.rs).
 
 Status:
 started
@@ -394,17 +444,20 @@ Why next:
 ### Backlog G
 
 Integrate
-[src/approx/generalized_chebyshev_helpers.rs](/c:/Users/eynulai/Downloads/mfs/src/approx/generalized_chebyshev_helpers.rs)
+[src/approx/generalized_chebyshev_helpers.rs](../src/approx/generalized_chebyshev_helpers.rs)
 more deeply into
-[src/approx/generalized_chebyshev.rs](/c:/Users/eynulai/Downloads/mfs/src/approx/generalized_chebyshev.rs)
-so placeholder `e/f` coefficient generation can be replaced by real synthesis
-artifacts.
+[src/approx/generalized_chebyshev.rs](../src/approx/generalized_chebyshev.rs)
+so generalized helper outputs stay the source of truth for `E/F/P` artifacts
+and can be validated against broader literature fixtures.
+
+Status:
+implemented for the supported generalized-helper domain; needs broader
+fixture-backed validation and clearer coefficient-convention documentation
 
 Why next:
 
-- the generalized helper chain now exists
-- the remaining gap is in connecting helper outputs to the main approximation
-  artifact model
+- the generalized helper chain now drives the main approximation artifact
+- the remaining gap is confidence across more published and edge-case designs
 
 ### Backlog H
 
@@ -431,8 +484,8 @@ For each phase, aim to produce:
 
 If starting today, the single best next step is:
 
-strengthen the domain model in `spec` so filter class, approximation family,
-and performance intent are separate concepts has already been completed.
+make the domain model in `spec` more explicit so filter class, approximation
+family, and performance intent are separate concepts.
 
-The highest-leverage remaining refactor is now integrating generalized
-Chebyshev helper outputs more deeply into the primary approximation pipeline.
+The highest-leverage algorithm work is reducing the matrix placeholder fallback
+and expanding fixture-backed validation of the generalized Chebyshev pipeline.
