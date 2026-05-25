@@ -389,6 +389,70 @@ impl FilterDesign {
         ResponseSolver.evaluate(matrix, grid, mapping)
     }
 
+    // ─── Lossy response ──────────────────────────────────────────────────
+
+    /// Evaluates S-parameters with finite unloaded Q (lossy response).
+    ///
+    /// This predicts the actual filter response including insertion loss
+    /// caused by resonator dissipation.
+    ///
+    /// ```rust
+    /// # use mfs::prelude::*;
+    /// let d = FilterDesign::bandpass(4, 20.0, 6.75e9, 300e6).synthesize()?;
+    /// let lossy = d.response_lossy(6.5e9, 7.0e9, 201, 3000.0)?;
+    /// // lossy.samples[100].s21_db() will show insertion loss
+    /// # Ok::<(), MfsError>(())
+    /// ```
+    pub fn response_lossy(
+        &self,
+        start_hz: f64,
+        stop_hz: f64,
+        points: usize,
+        unloaded_q: f64,
+    ) -> Result<SParameterResponse> {
+        use crate::response::ResponseSettings;
+
+        let center = self.center_hz.ok_or_else(|| {
+            crate::error::MfsError::PreconditionViolation(
+                "response_lossy() requires band-pass parameters".into(),
+            )
+        })?;
+        let bw = self.bandwidth_hz.unwrap_or(0.0);
+        let mapping = BandPassMapping::new(center, bw)?;
+        let grid = FrequencyGrid::linspace(start_hz, stop_hz, points)?;
+
+        // In normalized prototype domain, the dissipation per resonator is:
+        //   δ = f₀ / (Qu × BW)
+        // This converts physical Qu to the normalized loss term.
+        let normalized_dissipation_q = unloaded_q * bw / center;
+
+        let settings = ResponseSettings {
+            source_resistance: 1.0,
+            load_resistance: 1.0,
+            unloaded_q: normalized_dissipation_q,
+        };
+        ResponseSolver.evaluate_with_settings(&self.matrix, &grid, &mapping, settings)
+    }
+
+    /// Evaluates lossy response on a normalized frequency grid.
+    pub fn response_lossy_normalized(
+        &self,
+        start: f64,
+        stop: f64,
+        points: usize,
+        unloaded_q: f64,
+    ) -> Result<SParameterResponse> {
+        use crate::response::ResponseSettings;
+
+        let grid = FrequencyGrid::linspace(start, stop, points)?;
+        let settings = ResponseSettings {
+            source_resistance: 1.0,
+            load_resistance: 1.0,
+            unloaded_q,
+        };
+        ResponseSolver.evaluate_normalized_with_settings(&self.matrix, &grid, settings)
+    }
+
     // ─── Band-pass scaling ───────────────────────────────────────────────
 
     /// Scales the transversal matrix to physical band-pass units (Hz).
@@ -751,6 +815,59 @@ mod tests {
                 assert!(rel_err < 1e-3, "S21 mismatch at ω={:.3}: LU={lu_s21:.6e}, pole={pole_s21:.6e}, rel_err={rel_err:.2e}",
                     lu.normalized_omega);
             }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn lossy_response_has_insertion_loss() -> Result<()> {
+        let d = FilterDesign::bandpass(4, 20.0, 6.75e9, 300e6).synthesize()?;
+
+        let lossless = d.response(6.5e9, 7.0e9, 21)?;
+        let lossy = d.response_lossy(6.5e9, 7.0e9, 21, 200.0)?; // Qu=200 (moderate loss)
+
+        // At center frequency, lossy S21 should be lower than lossless
+        let center_idx = 10;
+        let lossless_s21 = lossless.samples[center_idx].s21_db();
+        let lossy_s21 = lossy.samples[center_idx].s21_db();
+
+        // Lossy should have more insertion loss (more negative dB)
+        // For order 4, Qu=200, BW/f0=0.044: IL ≈ 4.343*4/(200*0.044) ≈ 2.0 dB
+        assert!(lossy_s21 < lossless_s21 - 0.5,
+            "lossy S21 ({lossy_s21:.2} dB) should be noticeably less than lossless ({lossless_s21:.2} dB)");
+
+        // Power should NOT be conserved for lossy (|S11|² + |S21|² < 1)
+        let s = &lossy.samples[center_idx];
+        let power = s.s11_mag().powi(2) + s.s21_mag().powi(2);
+        assert!(power < 0.99, "lossy power sum should be < 1, got {power:.4}");
+
+        Ok(())
+    }
+
+    #[test]
+    fn lossy_normalized_response() -> Result<()> {
+        let d = FilterDesign::prototype(4, 20.0).synthesize()?;
+
+        let lossless = d.response_normalized(-2.0, 2.0, 41)?;
+        let lossy = d.response_lossy_normalized(-2.0, 2.0, 41, 5.0)?; // Very low normalized Q
+
+        // Center point: lossy should have more insertion loss
+        let center = 20;
+        assert!(lossy.samples[center].s21_db() < lossless.samples[center].s21_db() - 0.1,
+            "lossy={:.2} dB, lossless={:.2} dB",
+            lossy.samples[center].s21_db(), lossless.samples[center].s21_db());
+        Ok(())
+    }
+
+    #[test]
+    fn infinite_q_equals_lossless() -> Result<()> {
+        let d = FilterDesign::prototype(4, 20.0).synthesize()?;
+
+        let lossless = d.response_normalized(-2.0, 2.0, 11)?;
+        let inf_q = d.response_lossy_normalized(-2.0, 2.0, 11, f64::INFINITY)?;
+
+        for (a, b) in lossless.samples.iter().zip(inf_q.samples.iter()) {
+            assert!((a.s21_mag() - b.s21_mag()).abs() < 1e-10);
         }
         Ok(())
     }

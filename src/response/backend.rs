@@ -104,7 +104,7 @@ fn validate_settings(settings: ResponseSettings) -> Result<()> {
     Ok(())
 }
 
-/// Builds the frequency-independent base matrix (coupling matrix + port terminations).
+/// Builds the frequency-independent base matrix (coupling matrix + port terminations + loss).
 /// The resonator diagonal shift (omega) is applied separately per frequency point.
 fn build_base_matrix(
     matrix: &CouplingMatrix,
@@ -116,6 +116,18 @@ fn build_base_matrix(
     // Add port terminations (frequency-independent imaginary parts)
     response[(0, 0)] += Complex64::new(0.0, -settings.source_resistance);
     response[(side - 1, side - 1)] += Complex64::new(0.0, -settings.load_resistance);
+
+    // Add dissipation loss to resonator diagonals: delta = j/Qu (imaginary part)
+    // This models the finite unloaded Q of each resonator.
+    // The response matrix becomes: A(ω) = (jω + j/Qu)I_r + M - jR_S·e₀e₀ᵀ - jR_L·eₙeₙᵀ
+    // The j/Qu term shifts the poles off the imaginary axis, causing dissipation.
+    if settings.unloaded_q.is_finite() && settings.unloaded_q > 0.0 {
+        let dissipation = 1.0 / settings.unloaded_q;
+        for index in 1..(side - 1) {
+            response[(index, index)] += Complex64::new(0.0, -dissipation);
+        }
+    }
+
     response
 }
 
