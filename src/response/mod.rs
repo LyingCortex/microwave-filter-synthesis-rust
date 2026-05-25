@@ -67,13 +67,15 @@ pub struct SParameterResponse {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ResponseSolver;
 
-/// Source/load terminations used by the response backend.
+/// Source/load terminations and loss parameters used by the response backend.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResponseSettings {
     /// Source resistance in normalized units.
     pub source_resistance: f64,
     /// Load resistance in normalized units.
     pub load_resistance: f64,
+    /// Unloaded Q factor for all resonators (0 or infinity = lossless).
+    pub unloaded_q: f64,
 }
 
 impl Default for ResponseSettings {
@@ -81,6 +83,7 @@ impl Default for ResponseSettings {
         Self {
             source_resistance: 1.0,
             load_resistance: 1.0,
+            unloaded_q: f64::INFINITY,
         }
     }
 }
