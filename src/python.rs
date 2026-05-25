@@ -169,6 +169,58 @@ impl PyFilterDesign {
             ),
         }
     }
+
+    /// Returns the Touchstone-formatted string.
+    #[pyo3(signature = (freq_unit="GHz", format="RI", impedance=50.0, version=1))]
+    fn to_touchstone(&self, freq_unit: &str, format: &str, impedance: f64, version: u8) -> PyResult<String> {
+        use crate::touchstone::{FreqUnit, DataFormat, TouchstoneVersion, TouchstoneConfig};
+
+        let fu = match freq_unit.to_uppercase().as_str() {
+            "HZ" => FreqUnit::Hz,
+            "KHZ" => FreqUnit::KHz,
+            "MHZ" => FreqUnit::MHz,
+            "GHZ" | _ => FreqUnit::GHz,
+        };
+        let df = match format.to_uppercase().as_str() {
+            "MA" => DataFormat::MA,
+            "DB" => DataFormat::DB,
+            "RI" | _ => DataFormat::RI,
+        };
+        let ver = if version >= 2 { TouchstoneVersion::V2 } else { TouchstoneVersion::V1 };
+
+        let response = self.inner.default_response()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let mut config = TouchstoneConfig { freq_unit: fu, format: df, impedance, version: ver, comments: Vec::new() };
+        config.comments = self.inner.auto_comments();
+        crate::touchstone::to_touchstone_string(&response, &config)
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
+    /// Saves the Touchstone file to disk.
+    #[pyo3(signature = (path, freq_unit="GHz", format="RI", impedance=50.0, version=1))]
+    fn save_touchstone(&self, path: &str, freq_unit: &str, format: &str, impedance: f64, version: u8) -> PyResult<()> {
+        use crate::touchstone::{FreqUnit, DataFormat, TouchstoneVersion, TouchstoneConfig};
+
+        let fu = match freq_unit.to_uppercase().as_str() {
+            "HZ" => FreqUnit::Hz,
+            "KHZ" => FreqUnit::KHz,
+            "MHZ" => FreqUnit::MHz,
+            _ => FreqUnit::GHz,
+        };
+        let df = match format.to_uppercase().as_str() {
+            "MA" => DataFormat::MA,
+            "DB" => DataFormat::DB,
+            _ => DataFormat::RI,
+        };
+        let ver = if version >= 2 { TouchstoneVersion::V2 } else { TouchstoneVersion::V1 };
+
+        let response = self.inner.default_response()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let mut config = TouchstoneConfig { freq_unit: fu, format: df, impedance, version: ver, comments: Vec::new() };
+        config.comments = self.inner.auto_comments();
+        crate::touchstone::write_touchstone(&response, &config, path)
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -426,6 +426,148 @@ impl FilterDesign {
         let mapping = BandPassMapping::new(center_hz, bandwidth_hz)?;
         matrix.denormalize_bandpass(&mapping)
     }
+
+    // ─── Touchstone export ───────────────────────────────────────────────
+
+    /// Saves the S-parameter response to a Touchstone .s2p file.
+    ///
+    /// Uses default config (GHz, RI format, 50Ω). For band-pass designs,
+    /// automatically computes the response over the design bandwidth.
+    ///
+    /// ```no_run
+    /// # use mfs::prelude::*;
+    /// let d = FilterDesign::bandpass(4, 20.0, 6.75e9, 300e6).synthesize()?;
+    /// d.save_touchstone("filter.s2p")?;
+    /// # Ok::<(), MfsError>(())
+    /// ```
+    pub fn save_touchstone(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
+        use crate::touchstone::{write_touchstone, TouchstoneConfig};
+
+        let response = self.default_response()?;
+        let mut config = TouchstoneConfig::default();
+        config.comments = self.auto_comments();
+        write_touchstone(&response, &config, path)
+    }
+
+    /// Returns a `TouchstoneBuilder` for configuring the export.
+    ///
+    /// ```no_run
+    /// # use mfs::prelude::*;
+    /// # use mfs::touchstone::{FreqUnit, DataFormat};
+    /// let d = FilterDesign::bandpass(4, 20.0, 6.75e9, 300e6).synthesize()?;
+    /// d.to_touchstone()
+    ///     .freq_unit(FreqUnit::MHz)
+    ///     .format(DataFormat::DB)
+    ///     .save("filter.s2p")?;
+    /// # Ok::<(), MfsError>(())
+    /// ```
+    pub fn to_touchstone(&self) -> TouchstoneBuilder<'_> {
+        TouchstoneBuilder {
+            design: self,
+            config: crate::touchstone::TouchstoneConfig::default(),
+            start_hz: None,
+            stop_hz: None,
+            points: None,
+        }
+    }
+
+    pub(crate) fn default_response(&self) -> Result<SParameterResponse> {
+        if let (Some(center), Some(bw)) = (self.center_hz, self.bandwidth_hz) {
+            let start = center - bw;
+            let stop = center + bw;
+            self.response_bandpass(center, bw, start, stop, 201)
+        } else {
+            self.response_normalized(-3.0, 3.0, 201)
+        }
+    }
+
+    pub(crate) fn auto_comments(&self) -> Vec<String> {
+        let mut comments = vec![
+            format!("MFS v{} - Generalized Chebyshev filter", env!("CARGO_PKG_VERSION")),
+            format!("Order: {}, Return Loss: {:.1} dB", self.order(), self.spec.return_loss_db),
+        ];
+        if let (Some(c), Some(bw)) = (self.center_hz, self.bandwidth_hz) {
+            comments.push(format!("Center: {:.6} GHz, BW: {:.3} MHz", c / 1e9, bw / 1e6));
+        }
+        comments
+    }
+}
+
+/// Builder for configuring Touchstone export.
+pub struct TouchstoneBuilder<'a> {
+    design: &'a FilterDesign,
+    config: crate::touchstone::TouchstoneConfig,
+    start_hz: Option<f64>,
+    stop_hz: Option<f64>,
+    points: Option<usize>,
+}
+
+impl<'a> TouchstoneBuilder<'a> {
+    /// Sets the frequency unit.
+    pub fn freq_unit(mut self, unit: crate::touchstone::FreqUnit) -> Self {
+        self.config.freq_unit = unit;
+        self
+    }
+
+    /// Sets the data format.
+    pub fn format(mut self, fmt: crate::touchstone::DataFormat) -> Self {
+        self.config.format = fmt;
+        self
+    }
+
+    /// Sets the reference impedance.
+    pub fn impedance(mut self, z0: f64) -> Self {
+        self.config.impedance = z0;
+        self
+    }
+
+    /// Sets the Touchstone version (V1 or V2).
+    pub fn version(mut self, v: crate::touchstone::TouchstoneVersion) -> Self {
+        self.config.version = v;
+        self
+    }
+
+    /// Sets the frequency range for the export.
+    pub fn freq_range(mut self, start_hz: f64, stop_hz: f64, points: usize) -> Self {
+        self.start_hz = Some(start_hz);
+        self.stop_hz = Some(stop_hz);
+        self.points = Some(points);
+        self
+    }
+
+    /// Adds a comment line.
+    pub fn comment(mut self, text: impl Into<String>) -> Self {
+        self.config.comments.push(text.into());
+        self
+    }
+
+    /// Builds the Touchstone string.
+    pub fn build(self) -> Result<String> {
+        let response = self.get_response()?;
+        let mut config = self.config;
+        config.comments.extend(self.design.auto_comments());
+        crate::touchstone::to_touchstone_string(&response, &config)
+    }
+
+    /// Saves to a file.
+    pub fn save(self, path: impl AsRef<std::path::Path>) -> Result<()> {
+        let response = self.get_response()?;
+        let mut config = self.config;
+        config.comments.extend(self.design.auto_comments());
+        crate::touchstone::write_touchstone(&response, &config, path)
+    }
+
+    fn get_response(&self) -> Result<SParameterResponse> {
+        if let (Some(start), Some(stop), Some(pts)) = (self.start_hz, self.stop_hz, self.points) {
+            if let (Some(center), Some(bw)) = (self.design.center_hz, self.design.bandwidth_hz) {
+                self.design.response_bandpass(center, bw, start, stop, pts)
+            } else {
+                self.design.response_normalized(start, stop, pts)
+            }
+        } else {
+            self.design.default_response()
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
