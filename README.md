@@ -87,6 +87,20 @@ for s in &response.samples {
 }
 ```
 
+### Touchstone (.s2p) export
+
+```rust
+// One-line save (default: GHz, RI, 50Ω)
+design.save_touchstone("filter.s2p")?;
+
+// With configuration
+use mfs::touchstone::{FreqUnit, DataFormat};
+design.to_touchstone()
+    .freq_unit(FreqUnit::MHz)
+    .format(DataFormat::DB)
+    .save("filter.s2p")?;
+```
+
 ## Python Bindings
 
 ```bash
@@ -102,6 +116,10 @@ design = mfs.bandpass(order=6, rl=23.0, center=6.75e9, bw=300e6,
 
 freq, s21, s11 = design.response(6.0e9, 7.5e9, 501)
 m = design.folded()   # coupling matrix as 2D list
+
+# Touchstone export
+design.save_touchstone("filter.s2p")
+design.save_touchstone("filter.s2p", freq_unit="MHz", format="DB")
 ```
 
 ## Examples
