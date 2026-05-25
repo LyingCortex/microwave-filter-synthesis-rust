@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.2.0] — 2025-05-25
+
+### Added
+
+- **Touchstone (.s2p) file export** — `design.save_touchstone("filter.s2p")`
+  - Supports v1.0 and v2.0 formats
+  - Supports RI, MA, DB data formats
+  - Supports Hz, kHz, MHz, GHz frequency units
+  - Configurable reference impedance
+  - Auto-generated comment headers with design metadata
+  - Round-trip verified (export → import → compare)
+- Touchstone file import via `touchstone::read_touchstone(path)`
+- `FilterDesign::to_touchstone()` builder for configured export
+- Python `save_touchstone()` and `to_touchstone()` methods
+- `TouchstoneVersion::V2` support with `[Network Data]`/`[End]` markers
+
+### Dependencies
+
+- Added `touchstone` v0.12.1 (for file parsing only)
+
 ## [0.1.0] — 2025-05-25
 
 ### Added

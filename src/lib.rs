@@ -28,6 +28,8 @@ pub mod matrix;
 pub mod prelude;
 /// S-parameter response evaluation.
 pub mod response;
+/// Touchstone (.s2p) file export and import.
+pub mod touchstone;
 
 // ─── Advanced modules (for power users) ──────────────────────────────────────
 
