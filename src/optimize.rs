@@ -493,4 +493,30 @@ mod tests {
             "cost={:.2e}, iterations={}", result.cost, result.iterations);
         Ok(())
     }
+
+    #[test]
+    fn tune_folded_matrix() -> Result<()> {
+        // Synthesize and convert to folded
+        let design = FilterDesign::prototype(4, 20.0)
+            .zeros([-1.5, 1.5])
+            .synthesize()?;
+        let folded = design.to_folded()?;
+        let grid = FrequencyGrid::linspace(-2.0, 2.0, 21)?;
+        let target = ResponseSolver.evaluate_normalized(&folded, &grid)?;
+
+        // Verify folded matrix has inter-resonator couplings
+        let config = OptimizeConfig::default();
+        let params = extract_parameters(&folded, &config);
+        assert!(params.len() > 4, "folded should have inter-resonator params, got {}", params.len());
+
+        // Perturb and tune
+        let mut perturbed_params = params.clone();
+        perturbed_params[0] *= 1.03;
+        let perturbed = rebuild_matrix(&folded, &perturbed_params, &config)?;
+
+        let result = optimize_matrix(&perturbed, &target, &grid, &config)?;
+        assert!(result.cost < 1e-3,
+            "folded tune cost={:.2e}, iterations={}", result.cost, result.iterations);
+        Ok(())
+    }
 }

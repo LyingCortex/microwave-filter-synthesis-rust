@@ -221,6 +221,80 @@ impl PyFilterDesign {
         crate::touchstone::write_touchstone(&response, &config, path)
             .map_err(|e| PyValueError::new_err(e.to_string()))
     }
+
+    /// Computes lossy S-parameter response with finite unloaded Q.
+    ///
+    /// Returns (frequencies, s21_db, s11_db).
+    #[pyo3(signature = (start, stop, points=201, q=1000.0))]
+    fn response_lossy(&self, start: f64, stop: f64, points: usize, q: f64) -> PyResult<(Vec<f64>, Vec<f64>, Vec<f64>)> {
+        let resp = if self.inner.center_hz().is_some() {
+            self.inner.response_lossy(start, stop, points, q)
+        } else {
+            self.inner.response_lossy_normalized(start, stop, points, q)
+        };
+        let resp = resp.map_err(|e| PyValueError::new_err(e.to_string()))?;
+
+        let freq: Vec<f64> = resp.samples.iter().map(|s| s.frequency_hz).collect();
+        let s21: Vec<f64> = resp.samples.iter().map(|s| s.s21_db()).collect();
+        let s11: Vec<f64> = resp.samples.iter().map(|s| s.s11_db()).collect();
+        Ok((freq, s21, s11))
+    }
+
+    /// Tunes the coupling matrix to match a target response.
+    ///
+    /// target_s21 and target_s11 are lists of complex values (re, im) pairs
+    /// at the same frequency points as the grid.
+    ///
+    /// Returns a dict with: matrix (2D list), cost (float), iterations (int), converged (bool).
+    #[pyo3(signature = (freqs, target_s21_re, target_s21_im, target_s11_re, target_s11_im, max_iter=200))]
+    fn tune(
+        &self,
+        py: Python<'_>,
+        freqs: Vec<f64>,
+        target_s21_re: Vec<f64>,
+        target_s21_im: Vec<f64>,
+        target_s11_re: Vec<f64>,
+        target_s11_im: Vec<f64>,
+        max_iter: usize,
+    ) -> PyResult<PyObject> {
+        use pyo3::types::{PyDict, PyList};
+        use crate::response::{ResponseSample, SParameterResponse};
+        use crate::freq::FrequencyGrid;
+        use crate::optimize::{tune_matrix, OptimizeConfig, optimize_matrix};
+
+        if freqs.len() != target_s21_re.len() {
+            return Err(PyValueError::new_err("all arrays must have the same length"));
+        }
+
+        let target = SParameterResponse {
+            samples: freqs.iter().enumerate().map(|(i, &f)| ResponseSample {
+                frequency_hz: f,
+                normalized_omega: f,
+                group_delay: 0.0,
+                s11_re: target_s11_re[i],
+                s11_im: target_s11_im[i],
+                s21_re: target_s21_re[i],
+                s21_im: target_s21_im[i],
+            }).collect(),
+        };
+
+        let grid = FrequencyGrid::linspace(
+            *freqs.first().unwrap_or(&-2.0),
+            *freqs.last().unwrap_or(&2.0),
+            freqs.len(),
+        ).map_err(|e| PyValueError::new_err(e.to_string()))?;
+
+        let config = OptimizeConfig { max_iterations: max_iter, ..Default::default() };
+        let result = optimize_matrix(self.inner.matrix(), &target, &grid, &config)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+
+        let dict = PyDict::new_bound(py);
+        dict.set_item("matrix", matrix_to_pylist(py, &result.matrix)).unwrap();
+        dict.set_item("cost", result.cost).unwrap();
+        dict.set_item("iterations", result.iterations).unwrap();
+        dict.set_item("converged", result.converged).unwrap();
+        Ok(dict.into())
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
