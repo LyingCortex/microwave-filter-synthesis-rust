@@ -24,6 +24,8 @@ pub mod design;
 pub mod error;
 /// Coupling matrix types and operations.
 pub mod matrix;
+/// Coupling matrix optimization and extraction.
+pub mod optimize;
 /// Prelude for convenient imports.
 pub mod prelude;
 /// S-parameter response evaluation.
