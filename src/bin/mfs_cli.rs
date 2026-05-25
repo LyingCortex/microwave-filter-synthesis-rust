@@ -31,31 +31,75 @@ use mfs::pipeline::{
 /// MFS — Microwave Filter Synthesis CLI
 ///
 /// Runs the full synthesis pipeline from a JSON request and outputs the result.
+/// Also supports a quick `design` subcommand for direct command-line usage.
 #[derive(Parser, Debug)]
 #[command(name = "mfs_cli", version, about)]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+
     /// JSON input file path. Reads from stdin if omitted.
-    #[arg(short, long, value_name = "FILE")]
+    #[arg(short, long, value_name = "FILE", global = true)]
     input: Option<PathBuf>,
 
     /// Output format: json (default) or table.
-    #[arg(short, long, value_name = "FORMAT", default_value = "json")]
+    #[arg(short, long, value_name = "FORMAT", default_value = "json", global = true)]
     format: OutputFormat,
 
-    /// Execute only this pipeline stage. Outputs only that stage's artifact.
-    /// Valid values: approximation, matrix_synthesis, topology_transform, response_evaluation
-    #[arg(short, long, value_name = "STAGE")]
+    /// Execute only this pipeline stage.
+    #[arg(short, long, value_name = "STAGE", global = true)]
     stage: Option<StageName>,
 
     /// Resume from a previously saved SynthesisContext JSON file.
-    /// Loads the context and continues from the last completed stage.
-    /// Can be combined with --stage to run just one more stage from the saved state.
-    #[arg(short, long, value_name = "FILE")]
+    #[arg(long, value_name = "FILE", global = true)]
     resume: Option<PathBuf>,
 
     /// Positional input file (alternative to --input).
     #[arg(value_name = "INPUT_FILE")]
     input_file: Option<PathBuf>,
+}
+
+/// Subcommands for quick usage without JSON.
+#[derive(Debug, clap::Subcommand)]
+enum Command {
+    /// Quick filter design from command-line parameters.
+    Design {
+        /// Filter order (number of resonators).
+        #[arg(short = 'n', long)]
+        order: usize,
+
+        /// Return loss in dB.
+        #[arg(short = 'r', long, alias = "rl")]
+        return_loss: f64,
+
+        /// Center frequency in Hz (enables bandpass mode).
+        #[arg(short, long)]
+        center: Option<f64>,
+
+        /// Bandwidth in Hz.
+        #[arg(short, long)]
+        bandwidth: Option<f64>,
+
+        /// Transmission zeros (comma-separated, in Hz if bandpass, normalized otherwise).
+        #[arg(short, long, value_delimiter = ',', allow_hyphen_values = true)]
+        zeros: Option<Vec<f64>>,
+
+        /// Unloaded Q factor.
+        #[arg(short, long)]
+        q: Option<f64>,
+
+        /// Output topology: transversal, folded, arrow.
+        #[arg(short, long, default_value = "folded")]
+        topology: String,
+
+        /// Number of frequency points for response.
+        #[arg(long, default_value = "201")]
+        points: usize,
+
+        /// Export Touchstone file to this path.
+        #[arg(long, value_name = "FILE")]
+        s2p: Option<PathBuf>,
+    },
 }
 
 /// Valid pipeline stage names for the --stage flag.
@@ -121,6 +165,11 @@ fn main() {
 }
 
 fn run(cli: &Cli) -> Result<(), CliRunError> {
+    // Handle subcommands first
+    if let Some(Command::Design { order, return_loss, center, bandwidth, zeros, q, topology, points, s2p }) = &cli.command {
+        return run_design(*order, *return_loss, *center, *bandwidth, zeros.as_deref(), *q, topology, *points, s2p.as_deref(), &cli.format);
+    }
+
     // Determine execution mode based on flags
     match (&cli.resume, &cli.stage) {
         // --resume with optional --stage: load context and continue
@@ -168,6 +217,175 @@ fn run(cli: &Cli) -> Result<(), CliRunError> {
                         .map_err(|e| CliRunError::InputParse(e.to_string()))?;
                     let ctx = run_full_pipeline(request).map_err(CliRunError::Pipeline)?;
                     print_table_output(&ctx);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Runs the quick `design` subcommand.
+fn run_design(
+    order: usize,
+    return_loss: f64,
+    center: Option<f64>,
+    bandwidth: Option<f64>,
+    zeros: Option<&[f64]>,
+    q: Option<f64>,
+    topology: &str,
+    points: usize,
+    s2p: Option<&std::path::Path>,
+    format: &OutputFormat,
+) -> Result<(), CliRunError> {
+    use mfs::design::FilterDesign;
+    use mfs::matrix::MatrixTopology;
+    use mfs::touchstone::{self, FreqUnit, DataFormat, TouchstoneConfig, TouchstoneVersion};
+
+    // Build the design
+    let design = if let (Some(c), Some(bw)) = (center, bandwidth) {
+        let mut builder = FilterDesign::bandpass(order, return_loss, c, bw);
+        if let Some(z) = zeros {
+            builder = builder.zeros_hz(z.iter().copied());
+        }
+        if let Some(q_val) = q {
+            builder = builder.unloaded_q(q_val);
+        }
+        builder.synthesize().map_err(CliRunError::Pipeline)?
+    } else {
+        let mut builder = FilterDesign::prototype(order, return_loss);
+        if let Some(z) = zeros {
+            builder = builder.zeros(z.iter().copied());
+        }
+        if let Some(q_val) = q {
+            builder = builder.unloaded_q(q_val);
+        }
+        builder.synthesize().map_err(CliRunError::Pipeline)?
+    };
+
+    // Get topology matrix
+    let topo = match topology.to_lowercase().as_str() {
+        "arrow" => MatrixTopology::Arrow,
+        "transversal" => MatrixTopology::Transversal,
+        _ => MatrixTopology::Folded,
+    };
+    let matrix = design.to_topology(topo).map_err(CliRunError::Pipeline)?;
+
+    // Get response
+    let response = if let (Some(c), Some(bw)) = (center, bandwidth) {
+        let start = c - bw;
+        let stop = c + bw;
+        if let Some(q_val) = q {
+            design.response_lossy(start, stop, points, q_val).map_err(CliRunError::Pipeline)?
+        } else {
+            design.response(start, stop, points).map_err(CliRunError::Pipeline)?
+        }
+    } else {
+        if let Some(q_val) = q {
+            design.response_lossy_normalized(-3.0, 3.0, points, q_val).map_err(CliRunError::Pipeline)?
+        } else {
+            design.response_normalized(-3.0, 3.0, points).map_err(CliRunError::Pipeline)?
+        }
+    };
+
+    // Export Touchstone if requested
+    if let Some(s2p_path) = s2p {
+        let config = TouchstoneConfig {
+            freq_unit: FreqUnit::GHz,
+            format: DataFormat::RI,
+            impedance: 50.0,
+            version: TouchstoneVersion::V1,
+            comments: design.auto_comments(),
+        };
+        touchstone::write_touchstone(&response, &config, s2p_path)
+            .map_err(CliRunError::Pipeline)?;
+        eprintln!("Touchstone file written to: {}", s2p_path.display());
+    }
+
+    // Output
+    match format {
+        OutputFormat::Json => {
+            let side = matrix.side();
+            let matrix_data: Vec<Vec<f64>> = (0..side)
+                .map(|r| (0..side).map(|c| matrix.at(r, c).unwrap_or(0.0)).collect())
+                .collect();
+            let samples: Vec<serde_json::Value> = response.samples.iter().map(|s| {
+                serde_json::json!({
+                    "frequency_hz": s.frequency_hz,
+                    "s11_db": s.s11_db(),
+                    "s21_db": s.s21_db(),
+                    "s11_phase_deg": s.s11_phase_deg(),
+                    "s21_phase_deg": s.s21_phase_deg(),
+                })
+            }).collect();
+
+            let output = serde_json::json!({
+                "order": order,
+                "return_loss_db": return_loss,
+                "topology": topology,
+                "matrix": matrix_data,
+                "response": {
+                    "points": response.samples.len(),
+                    "samples": samples,
+                },
+            });
+            println!("{}", serde_json::to_string_pretty(&output)
+                .map_err(|e| CliRunError::Serialization(e.to_string()))?);
+        }
+        OutputFormat::Table => {
+            println!("── Filter Design ──");
+            println!("  Order:       {order}");
+            println!("  Return Loss: {return_loss:.1} dB");
+            if let (Some(c), Some(bw)) = (center, bandwidth) {
+                println!("  Center:      {:.6} GHz", c / 1e9);
+                println!("  Bandwidth:   {:.3} MHz", bw / 1e6);
+            }
+            if let Some(z) = zeros {
+                let zs: Vec<String> = z.iter().map(|v| format!("{v:.4}")).collect();
+                println!("  Zeros:       [{}]", zs.join(", "));
+            }
+            if let Some(q_val) = q {
+                println!("  Unloaded Q:  {q_val:.0}");
+            }
+            println!("  Topology:    {topology}");
+            println!();
+
+            // Matrix
+            let side = matrix.side();
+            if side <= 10 {
+                println!("── Coupling Matrix ({topology}) ──");
+                for i in 0..side {
+                    let row: Vec<String> = (0..side)
+                        .map(|j| format!("{:>8.4}", matrix.at(i, j).unwrap_or(0.0)))
+                        .collect();
+                    println!("  [{}]", row.join(" "));
+                }
+                println!();
+            }
+
+            // Response summary
+            println!("── S-Parameter Response ({} points) ──", response.samples.len());
+            println!("  {:>12} {:>10} {:>10}", "Freq", "S21 (dB)", "S11 (dB)");
+            println!("  {:>12} {:>10} {:>10}", "────────", "────────", "────────");
+            let n = response.samples.len();
+            let show = 5.min(n);
+            for s in response.samples.iter().take(show) {
+                let freq_label = if center.is_some() {
+                    format!("{:.4} GHz", s.frequency_hz / 1e9)
+                } else {
+                    format!("{:.4}", s.frequency_hz)
+                };
+                println!("  {:>12} {:>10.3} {:>10.3}", freq_label, s.s21_db(), s.s11_db());
+            }
+            if n > show * 2 { println!("  {:>12}", "..."); }
+            if n > show {
+                for s in response.samples.iter().skip(n - show) {
+                    let freq_label = if center.is_some() {
+                        format!("{:.4} GHz", s.frequency_hz / 1e9)
+                    } else {
+                        format!("{:.4}", s.frequency_hz)
+                    };
+                    println!("  {:>12} {:>10.3} {:>10.3}", freq_label, s.s21_db(), s.s11_db());
                 }
             }
         }

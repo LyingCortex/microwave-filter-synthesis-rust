@@ -545,7 +545,8 @@ impl FilterDesign {
         }
     }
 
-    pub(crate) fn auto_comments(&self) -> Vec<String> {
+    /// Generates auto-comment lines for Touchstone export.
+    pub fn auto_comments(&self) -> Vec<String> {
         let mut comments = vec![
             format!("MFS v{} - Generalized Chebyshev filter", env!("CARGO_PKG_VERSION")),
             format!("Order: {}, Return Loss: {:.1} dB", self.order(), self.spec.return_loss_db),

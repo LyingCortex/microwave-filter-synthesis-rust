@@ -9,7 +9,7 @@
 use crate::error::{MfsError, Result};
 use crate::freq::FrequencyGrid;
 use crate::matrix::{CouplingMatrix, CouplingMatrixBuilder};
-use crate::response::{ResponseSolver, ResponseSettings, SParameterResponse, ResponseSample};
+use crate::response::{ResponseSolver, ResponseSettings, SParameterResponse};
 
 /// Configuration for the optimization engine.
 #[derive(Debug, Clone)]
