@@ -1,0 +1,51 @@
+[package]
+name = "mfs"
+version = "0.1.0"
+edition = "2021"
+description = "Microwave filter synthesis core library in Rust"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/LyingCortex/microwave-filter-synthesis-rust"
+homepage = "https://github.com/LyingCortex/microwave-filter-synthesis-rust"
+documentation = "https://docs.rs/mfs"
+keywords = ["microwave", "filter", "rf", "synthesis", "coupling-matrix"]
+categories = ["science", "mathematics"]
+rust-version = "1.75"
+include = [
+    "Cargo.toml",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "CHANGELOG.md",
+    "src/**",
+    "examples/**",
+    "tests/**",
+    "docs/**",
+]
+
+[package.metadata.docs.rs]
+all-features = false
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"], optional = true }
+nalgebra = "0.33"
+num-complex = "0.4"
+pyo3 = { version = "0.22", features = ["extension-module"], optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+proptest = { version = "1.6", default-features = false, features = ["std"] }
+
+[features]
+cli = ["clap"]
+python = ["pyo3"]
+
+[lib]
+name = "mfs"
+
+[[bin]]
+name = "mfs_cli"
+path = "src/bin/mfs_cli.rs"
+required-features = ["cli"]

@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "case": [
+      {
+        "case_id": "Cameron_passband_symmetry_4_2",
+	    
+ 	    "filter_type": "bandpass",
+	    
+        "source": {
+            "title": "Advanced Filter Synthesis",
+            "authors": "Richard J. Cameron",
+            "year": 2011,
+            "doi": "10.1109/MMM.2011.942007",
+            "reference_anchor": "Table1.4"
+         },
+        
+        
+         "specification": {
+            "filter_order": 4,       
+            "center_freq": { "value": 3500, "unit": "MHz" }, 
+            "start_freq": {"value": 3400, "unit": "MHz"},
+ 	        "stop_freq": {"value": 3600, "unit": "MHz"},
+            "return_loss": {"value": 22, "unit": "dB"},
+            "port_impedance": {
+                "source": { "value": 1.0, "unit": "ohm" },
+                "load": { "value": 1.0, "unit": "ohm" }
+            },
+            "normalized_transmission_zeros": [
+                { "value": { "re": 0.0, "im": 1.3217 }, "unit": "rad/s", "type": "pure_imag", "domain": "s"},
+                { "value": { "re": 0.0, "im": 1.8082 }, "unit": "rad/s", "type": "pure_imag", "domain": "s"}
+             ]  
+         },
+	    
+         "mathematical_model": {
+ 	         "domain": "s",
+             "polynomial_coefficients": {
+                 "E": [ { "re": -0.1268, "im": -2.0658 }, { "re": 2.4874, "im": -3.6255 }, { "re": 3.6706, "im": -2.1950 }, { "re": 2.4015, "im": -0.7591}, { "re": 1.0, "im": 0.0}],
+                 "F": [ { "re": 0.0208, "im": 0.0 }, { "re": 0.0, "im": -0.5432 }, { "re": 0.7869, "im": 0.0 }, { "re": 0.0, "im": -0.7591 }, { "re": 1.0, "im": 0.0 }],
+                 "P": [ { "re": 0.0, "im": -2.3899 }, { "re": 3.1299, "im": 0.0}, { "re": 0.0, "im": 1.0 }]
+             },
+             "singularities": {
+ 	    	        "epsilon_R": 1.0,
+ 	    	        "epsilon": 1.1548,
+ 	    	        "reflection_zeros": [ { "re": 0.0, "im": -0.8593 }, { "re": 0.0, "im": -0.0365}, { "re": 0.0, "im": 0.6845 }, { "re": 0.0, "im": 0.9705 }],
+ 	    	        "reflection_poles": [ { "re": -0.7437, "im": -1.4178 }, { "re": -1.1031, "im": 0.1267}, { "re": -0.4571, "im": 0.9526 }, { "re": -0.0977, "im": 1.0976} ]  
+ 	         }
+         },
+         
+           
+         "coupling_matrix": {
+             "is_fdc": false,
+ 	    	 "is_all_positive": false,
+			 "format":"arrow",
+             "matrix_value": [ [0.0,    0.9221,  0.5921,  0,       0,       0     ], 
+			                   [0.9221, -0.8333, 0.6259,  0,       0,       0     ], 
+							   [0.5921, 0.6259,  0.6022,  0.8634,  0,       0     ],
+							   [0,      0,       0.8634,  0.5812,  0.2590,  0.8471],
+							   [0,      0,       0,       0.2590, -1.1092,  0.6952],
+							   [0,      0,       0,       0.8471, 0.6952,   0.0   ]
+							 ]
+             
+         }
+    }
+  ]
+}
