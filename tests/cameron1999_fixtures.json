@@ -1,0 +1,140 @@
+{
+  "schema_version": "1.0",
+  "extracted_from": "Cameron - 1999 - General coupling matrix synthesis methods for Chebyshev filtering functions",
+  "case": [
+    {
+      "case_id": "Cameron1999_4th_order_asymmetric_2TZ",
+      "source": {
+        "title": "General Coupling Matrix Synthesis Methods for Chebyshev Filtering Functions",
+        "authors": "Richard J. Cameron",
+        "journal": "IEEE Trans. Microwave Theory Tech.",
+        "year": 1999,
+        "vol": 47,
+        "no": 4,
+        "pages": "433-442",
+        "doi": "10.1109/22.754877",
+        "table": "Table I",
+        "figure": "Fig. 1"
+      },
+      "specification": {
+        "filter_order": 4,
+        "return_loss": {"value": 22, "unit": "dB"},
+        "termination": "double",
+        "normalized_transmission_zeros": [
+          {"value": {"re": 0.0, "im": 1.3217}, "domain": "s", "type": "pure_imag"},
+          {"value": {"re": 0.0, "im": 1.8082}, "domain": "s", "type": "pure_imag"}
+        ],
+        "notes": "Two TZs on upper side giving 30 dB attenuation lobes each"
+      },
+      "mathematical_model": {
+        "domain": "s",
+        "singularities": {
+          "reflection_zeros": [
+            {"re": 0.0, "im": -0.8593},
+            {"re": 0.0, "im": -0.0365},
+            {"re": 0.0, "im": 0.6845},
+            {"re": 0.0, "im": 0.9705}
+          ],
+          "transmission_reflection_poles": [
+            {"re": -0.7437, "im": -1.4178},
+            {"re": -1.1031, "im": 0.1267},
+            {"re": -0.4571, "im": 0.9526},
+            {"re": -0.0977, "im": 1.0976}
+          ],
+          "in_band_reflection_maxima": [
+            {"re": 0.0, "im": -0.4936},
+            {"re": 0.0, "im": 0.3796},
+            {"re": 0.0, "im": 0.8732}
+          ]
+        }
+      }
+    },
+    {
+      "case_id": "Cameron1999_7th_order_asymmetric_GDE_1TZ",
+      "source": {
+        "title": "General Coupling Matrix Synthesis Methods for Chebyshev Filtering Functions",
+        "authors": "Richard J. Cameron",
+        "journal": "IEEE Trans. Microwave Theory Tech.",
+        "year": 1999,
+        "vol": 47,
+        "no": 4,
+        "pages": "433-442",
+        "doi": "10.1109/22.754877",
+        "tables": ["Table III", "Table IV", "Table V"],
+        "figures": ["Fig. 6", "Fig. 7"]
+      },
+      "specification": {
+        "filter_order": 7,
+        "return_loss": {"value": 23, "unit": "dB"},
+        "termination": "single",
+        "port_impedance": {"R1": 0.7220, "RN": 2.2354},
+        "normalized_transmission_zeros": [
+          {"value": {"re": 0.9218, "im": -0.1546}, "domain": "s", "type": "complex", "purpose": "group_delay_equalization"},
+          {"value": {"re": -0.9218, "im": -0.1546}, "domain": "s", "type": "complex", "purpose": "group_delay_equalization"},
+          {"value": {"re": 0.0, "im": 1.2576}, "domain": "s", "type": "pure_imag", "purpose": "upper_stopband_30dB"}
+        ],
+        "notes": "Complex TZ pair for 60% bandwidth GDE, single imag TZ for 30 dB upper rejection"
+      },
+      "mathematical_model": {
+        "domain": "s",
+        "epsilon": 6.0251,
+        "polynomial_coefficients": {
+          "P_N": [
+            {"re": 0.0, "im": 1.0987},
+            {"re": -0.4847, "im": 0.0},
+            {"re": 0.0, "im": -0.9483},
+            {"re": 1.0, "im": 0.0}
+          ],
+          "F_N": [
+            {"re": 0.0, "im": -0.0081},
+            {"re": 0.0793, "im": 0.0},
+            {"re": 0.0, "im": -0.1861},
+            {"re": 0.7435, "im": 0.0},
+            {"re": 0.0, "im": -0.5566},
+            {"re": 1.6401, "im": 0.0},
+            {"re": 0.0, "im": -0.3961},
+            {"re": 1.0, "im": 0.0}
+          ],
+          "E_N": [
+            {"re": 0.1378, "im": -0.1197},
+            {"re": 0.8102, "im": -0.5922},
+            {"re": 2.2507, "im": -1.3346},
+            {"re": 3.9742, "im": -1.7853},
+            {"re": 4.6752, "im": -1.6517},
+            {"re": 4.1387, "im": -0.9326},
+            {"re": 2.2354, "im": -0.3961},
+            {"re": 1.0, "im": 0.0}
+          ]
+        }
+      },
+      "coupling_matrix": {
+        "before_reduction": {
+          "topology": "full",
+          "R1": 0.7220,
+          "RN": 2.2354,
+          "data": [
+            [0.0586, -0.0147, -0.2374, -0.0578, 0.4314, -0.4385, 0],
+            [-0.0147, -0.0810, 0.4825, 0.3890, 0.6585, 0.0952, -1.3957],
+            [-0.2374, 0.4825, 0.2431, -0.0022, 0.3243, -0.2075, 0.1484],
+            [-0.0578, 0.3890, -0.0022, -0.0584, -0.3047, 0.4034, -0.0953],
+            [0.4314, 0.6585, 0.3243, -0.3047, 0.0053, -0.5498, -0.1628],
+            [-0.4385, 0.0952, -0.2075, 0.4034, -0.5498, -0.5848, -0.1813],
+            [0, -1.3957, 0.1484, -0.0953, -0.1628, -0.1813, 0.0211]
+          ]
+        },
+        "after_reduction": {
+          "topology": "folded",
+          "data": [
+            [0.0586, 0.6621, 0, 0, 0, 0, 0],
+            [0.6221, 0.0750, 0.5977, 0, 0, 0.1382, 0],
+            [0, 0.5977, 0.0900, 0.4890, 0.2420, 0.0866, 0],
+            [0, 0, 0.4890, -0.6120, 0.5038, 0, 0],
+            [0, 0, 0.2420, 0.5038, -0.0518, 0.7793, 0],
+            [0, 0.1382, 0.0866, 0, 0.7793, 0.0229, 1.4278],
+            [0, 0, 0, 0, 0, 1.4278, 0.0211]
+          ]
+        }
+      }
+    }
+  ]
+}
