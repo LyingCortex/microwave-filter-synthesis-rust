@@ -1,0 +1,126 @@
+{
+  "schema_version": "1.0",
+  "extracted_from": "Cameron - 2011 - Advanced Filter Synthesis, IEEE Microwave Magazine",
+  "case": [
+    {
+      "case_id": "Cameron2011_4_2_asymmetric_trisection",
+      "source": {
+        "title": "Advanced Filter Synthesis",
+        "authors": "Richard J. Cameron",
+        "journal": "IEEE Microwave Magazine",
+        "year": 2011,
+        "doi": "10.1109/MMM.2011.942007",
+        "figure": "Figure 21",
+        "table": "Table 1"
+      },
+      "specification": {
+        "filter_order": 4,
+        "return_loss": {"value": 22, "unit": "dB"},
+        "termination": "double",
+        "normalized_transmission_zeros": [
+          {"value": {"re": 0.0, "im": 1.3217}, "domain": "s", "type": "pure_imag"},
+          {"value": {"re": 0.0, "im": 1.8082}, "domain": "s", "type": "pure_imag"}
+        ],
+        "notes": "Two TZs on upper side giving 30 dB rejection lobes each"
+      },
+      "mathematical_model": {
+        "domain": "s",
+        "epsilon": 1.1548,
+        "epsilon_r": 1.0,
+        "polynomial_coefficients": {
+          "E": [
+            {"re": -0.1268, "im": -2.0658},
+            {"re": 2.4874, "im": -3.6255},
+            {"re": 3.6706, "im": -2.1950},
+            {"re": 2.4015, "im": -0.7591},
+            {"re": 1.0, "im": 0.0}
+          ],
+          "F": [
+            {"re": 0.0208, "im": 0.0},
+            {"re": 0.0, "im": -0.5432},
+            {"re": 0.7869, "im": 0.0},
+            {"re": 0.0, "im": -0.7591},
+            {"re": 1.0, "im": 0.0}
+          ],
+          "P": [
+            {"re": 0.0, "im": -2.3899},
+            {"re": 3.1299, "im": 0.0},
+            {"re": 0.0, "im": 1.0}
+          ]
+        },
+        "singularities": {
+          "reflection_zeros": [
+            {"re": 0.0, "im": -0.8593},
+            {"re": 0.0, "im": -0.0365},
+            {"re": 0.0, "im": 0.6845},
+            {"re": 0.0, "im": 0.9705}
+          ],
+          "transmission_reflection_poles": [
+            {"re": -0.7437, "im": -1.4178},
+            {"re": -1.1031, "im": 0.1267},
+            {"re": -0.4571, "im": 0.9526},
+            {"re": -0.0977, "im": 1.0976}
+          ]
+        }
+      },
+      "coupling_matrix": {
+        "topology": "trisection_cascade",
+        "format": "N+2",
+        "trisections": ["S-1-2 (omega_01=1.8082)", "3-4-L (omega_02=1.3217)"],
+        "data": [
+          [0.0, 0.9221, 0.5921, 0, 0, 0],
+          [0.9221, -0.8333, 0.6259, 0, 0, 0],
+          [0.5921, 0.6259, 0.6022, 0.8634, 0, 0],
+          [0, 0, 0.8634, 0.5812, 0.2590, 0.8471],
+          [0, 0, 0, 0.2590, -1.1092, 0.6952],
+          [0, 0, 0, 0.8471, 0.6952, 0.0]
+        ]
+      }
+    },
+    {
+      "case_id": "Cameron2011_10_5_dual_band_symmetric",
+      "source": {
+        "title": "Advanced Filter Synthesis",
+        "authors": "Richard J. Cameron",
+        "journal": "IEEE Microwave Magazine",
+        "year": 2011,
+        "doi": "10.1109/MMM.2011.942007",
+        "figure": "Figure 25"
+      },
+      "specification": {
+        "filter_order": 10,
+        "return_loss": {"value": 22, "unit": "dB"},
+        "termination": "double",
+        "type": "dual_band_symmetric",
+        "lower_band": {"start": -1.0, "stop": -0.35},
+        "upper_band": {"start": 0.35, "stop": 1.0},
+        "transmission_zeros": [
+          {"position": "outer_lower", "rejection_db": 30},
+          {"position": "outer_upper", "rejection_db": 30},
+          {"position": "between_bands", "value": 0.0, "rejection_db": 20},
+          {"position": "between_bands", "rejection_db": 20},
+          {"position": "between_bands", "rejection_db": 20}
+        ],
+        "notes": "5 TZs total: 2 outer (30 dB) + 3 between bands (20 dB, one at omega=0)"
+      },
+      "coupling_matrix": {
+        "topology": "trisection_cascade_with_extracted_zero",
+        "format": "N+2",
+        "data": [
+          [0, 0.8388, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0.8388, 0, 0.7144, 0, -0.3894, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0.7144, 0, 0.7832, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0.7832, 0, 0.5052, 0, 0, 0, 0, 0, 0, 0],
+          [0, -0.3894, 0, 0.5052, 0, 0.4423, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0.4423, 0, 0.5174, 0.4206, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0.5174, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0.4206, 0, 0, 0.4574, 0, -0.7156, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0.4574, 0, 0.1590, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0.1590, 0, 0.3871, 0],
+          [0, 0, 0, 0, 0, 0, 0, -0.7156, 0, 0.3871, 0, 0.8388],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.8388, 0]
+        ]
+      }
+    }
+  ]
+}
