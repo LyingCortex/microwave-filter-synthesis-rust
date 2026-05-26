@@ -1,0 +1,6 @@
+# Python dependencies for PDF data extraction
+# Install with: pip install -r tests/requirements_extract.txt
+
+pymupdf>=1.23.0      # PDF text extraction
+tabula-py>=2.8.0     # PDF table extraction (requires Java)
+pandas>=2.0.0        # Table data handling
