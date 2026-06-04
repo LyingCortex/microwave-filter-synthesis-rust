@@ -16,6 +16,7 @@
 //! - [`crate::verify`] helpers for structural and response checks
 
 mod builder;
+mod cascade;
 mod core;
 pub(crate) mod rotations;
 mod scaling;

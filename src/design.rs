@@ -241,6 +241,22 @@ impl FilterDesign {
         MatrixSynthesisEngine.synthesize_with_topology(&self.polynomials, MatrixTopology::Arrow)
     }
 
+    /// Converts to Cascaded Trisection (CT) topology.
+    ///
+    /// Each transmission zero is realized by one trisection section.
+    /// The zeros are assigned from load end towards source end.
+    pub fn to_ct(&self, zeros: &[f64]) -> Result<CouplingMatrix> {
+        self.matrix.to_cascaded_trisections(zeros)
+    }
+
+    /// Converts to Cascaded Quadruplet (CQ) topology.
+    ///
+    /// Zero pairs are merged into quartet sections. For symmetric pairs (±ω),
+    /// the diagonal coupling within each quartet will be zero.
+    pub fn to_cq(&self, zero_pairs: &[(f64, f64)]) -> Result<CouplingMatrix> {
+        self.matrix.to_cascaded_quadruplets(zero_pairs)
+    }
+
     /// Converts to a specific topology.
     pub fn to_topology(&self, topology: MatrixTopology) -> Result<CouplingMatrix> {
         MatrixSynthesisEngine.synthesize_with_topology(&self.polynomials, topology)
