@@ -20,6 +20,8 @@
 
 /// High-level filter design API (start here).
 pub mod design;
+/// Duplexer synthesis and analysis.
+pub mod duplexer;
 /// Error types.
 pub mod error;
 /// Coupling matrix types and operations.
