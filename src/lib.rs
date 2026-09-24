@@ -20,6 +20,10 @@
 
 /// High-level filter design API (start here).
 pub mod design;
+/// Duplexer synthesis and analysis.
+pub mod duplexer;
+/// Multiplexer (N-channel) synthesis and analysis.
+pub mod multiplexer;
 /// Error types.
 pub mod error;
 /// Coupling matrix types and operations.
@@ -32,6 +36,8 @@ pub mod prelude;
 pub mod response;
 /// Touchstone (.s2p) file export and import.
 pub mod touchstone;
+/// Spectral factorization methods (cepstrum + balanced companion matrix).
+pub mod spectral;
 
 // ─── Advanced modules (for power users) ──────────────────────────────────────
 
@@ -64,6 +70,10 @@ pub use design::FilterDesign;
 pub use error::{MfsError, Result};
 pub use matrix::{CouplingMatrix, MatrixTopology};
 pub use response::{ResponseSample, SParameterResponse};
+pub use duplexer::{ChannelSpec, JunctionType};
+pub use multiplexer::{
+    Multiplexer, MultiplexerResponse, MultiplexerSynthesis, MultiplexerSynthesisResult,
+};
 
 // ─── Legacy free functions (kept for backward compatibility) ─────────────────
 

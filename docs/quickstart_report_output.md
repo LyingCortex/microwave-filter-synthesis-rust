@@ -58,9 +58,9 @@
 - source_topology: `Transversal`
 - result_topology: `Folded`
 - pattern_verified: `true`
-- response_check_passed: `true`
-- overall_passed: `true`
-- notes: `["used the current folded reduction backend", "response invariance check passed on the supplied normalized grid"]`
+- response_check_passed: `false`
+- overall_passed: `false`
+- notes: `["used the current folded reduction backend", "response invariance check failed on the supplied normalized grid"]`
 
 ```text
 ┌───┬─────────┬─────────┬─────────┬─────────┬─────────┬─────────┐
@@ -68,9 +68,9 @@
 ├───┼─────────┼─────────┼─────────┼─────────┼─────────┼─────────┤
 │ S │ +0      │ +1.0324 │ +0      │ +0      │ +0      │ +0      │
 │ 1 │ +1.0324 │ -0.0631 │ +0.9089 │ +0      │ +0      │ +0      │
-│ 2 │ +0      │ +0.9089 │ -0.1085 │ +0.5659 │ -0.4903 │ +0      │
+│ 2 │ +0      │ +0.9089 │ +0.1085 │ +0.5659 │ -0.4903 │ +0      │
 │ 3 │ +0      │ +0      │ +0.5659 │ +0.6166 │ +0.7653 │ +0      │
-│ 4 │ +0      │ +0      │ -0.4903 │ +0.7653 │ -0.0631 │ +1.0324 │
+│ 4 │ +0      │ +0      │ -0.4903 │ +0.7653 │ +0.0631 │ +1.0324 │
 │ L │ +0      │ +0      │ +0      │ +0      │ +1.0324 │ +0      │
 └───┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┘
 ```
@@ -81,6 +81,6 @@
 
 | sample | frequency_hz | normalized_omega | s11 | s21 | group_delay |
 | --- | --- | --- | --- | --- | --- |
-| 0 | 0.5 | +0.5 | -0.0199 - j0.0853 | -0.9702 + j0.226 | +2.9934 |
-| 10 | 1 | +1 | +0.0967 + j0.0255 | -0.2536 + j0.9621 | +3.4824 |
-| 20 | 1.5 | +1.5 | +0.3527 - j0.723 | +0.5338 + j0.2604 | +2.9027 |
+| 0 | 0.5 | +0.5 | +0.042 - j0.0185 | -0.9029 + j0.4274 | +3.0778 |
+| 10 | 1 | +1 | +0.3313 + j0.0045 | +0.058 + j0.9417 | +3.4731 |
+| 20 | 1.5 | +1.5 | +0.2617 - j0.8482 | +0.4464 + j0.1132 | +2.5872 |

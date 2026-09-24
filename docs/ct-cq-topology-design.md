@@ -1,0 +1,277 @@
+# CT/CQ 拓扑提取算法设计 (mfs Rust实现)
+
+## 概述
+
+在mfs中实现经典Givens旋转法的CT（Cascaded Trisection）和CQ（Cascaded Quadruplet）拓扑变换。
+
+**输入**：Transversal或Arrow耦合矩阵 + 传输零点列表 + 目标位置  
+**输出**：CT或CQ形式的耦合矩阵（特定稀疏模式）
+
+---
+
+## 算法详述
+
+### 1. Trisection提取 (单个零点)
+
+**输入**: Arrow矩阵M (N+2×N+2), 传输零点Ωz, 目标位置pos  
+**输出**: 含一个trisection交叉耦合的矩阵
+
+**步骤**:
+
+```
+Step 1: 计算旋转角度θ
+  - 末端旋转消除Arrow最后一列
+  - θ = atan(M[N, N-1] / (Ωz + M[N, N]))
+  - 旋转pivot: (N-1, N)，即最后两个谐振器
+
+Step 2: 应用Givens相似变换
+  - R[N-1,N-1] = cos(θ),  R[N-1,N] = -sin(θ)
+  - R[N,N-1]   = sin(θ),  R[N,N]   = cos(θ)  
+  - M' = R × M × R^T
+
+Step 3: Pull操作（移动trisection到目标位置）
+  - 需要 (N-1-pos) 次旋转
+  - 每次消零: 将交叉耦合从位置k移到k-1
+  - 旋转消除: M'[k, k-2] 元素，pivot=(k-2, k-1)
+  - 方向: "row" 旋转，θ = atan(M[k-2, col] / M[k-1, col])
+```
+
+**结果矩阵模式** (N=6, 零点在pos=2):
+```
+     S   1   2   3   4   L
+S [  0  Ms1  0   0   0   0  ]
+1 [ Ms1  0  M12  0   0   0  ]
+2 [  0  M12  0  M23 M24  0  ]  ← M24是交叉耦合(跳过节点3)
+3 [  0   0  M23  0  M34  0  ]
+4 [  0   0  M24 M34  0  MnL ]
+L [  0   0   0   0  MnL  0  ]
+```
+
+### 2. Cascade Trisection (多个零点)
+
+**输入**: Arrow矩阵M, 零点列表[Ω1, Ω2, ...], 位置列表[(p1_from, p1_to), ...]  
+**输出**: 含多个trisection的矩阵
+
+**步骤**:
+```
+for each (Ωz, pos) in zip(zeros, positions):
+    M = extract_trisection(M, Ωz, pos)
+```
+
+每次提取后Arrow结构缩短一列（已提取的trisection不再参与后续旋转）。
+
+### 3. Cascade Quadruplet (零点成对)
+
+**输入**: Arrow矩阵M, 零点对[(Ω1,Ω2), (Ω3,Ω4), ...], 位置列表  
+**输出**: 含quadruplet块的矩阵
+
+**步骤**:
+```
+i = 0
+position = 1
+while i < num_zeros - 1:
+    # Step A: 提取第一个trisection
+    M = extract_trisection(M, zeros[i], position)
+    
+    # Step B: 提取第二个trisection (紧邻位置)
+    M = extract_trisection(M, zeros[i+1], position+1)
+    
+    # Step C: 交叉旋转合并为quadruplet
+    # 消除 M[position, position+3] 使其变为box/quadruplet结构
+    M = merge_to_quadruplet(M, position)
+    
+    position += 4
+    i += 2
+
+# 剩余奇数零点作为单独trisection
+if i < num_zeros:
+    M = extract_trisection(M, zeros[i], position)
+```
+
+**Quadruplet结果模式** (4个谐振器块):
+```
+[  0   M12   0   M14 ]
+[ M12   0   M23   0  ]
+[  0   M23   0   M34 ]
+[ M14   0   M34   0  ]
+```
+对角线M14是quadruplet的交叉耦合，实现一对传输零点。
+
+---
+
+## Rust实现架构
+
+### 文件位置
+`src/transform/sections.rs` (已存在，追加新函数)
+
+### 公共API
+
+```rust
+/// 从Arrow矩阵提取单个trisection (CT)
+pub fn extract_trisection_at(
+    matrix: &CouplingMatrix,
+    transmission_zero: f64,
+    target_position: usize,  // 1-indexed resonator position
+) -> Result<CouplingMatrix>;
+
+/// 从Arrow矩阵提取多个trisection (完整CT)
+pub fn extract_cascade_trisections(
+    matrix: &CouplingMatrix,
+    zeros: &[f64],
+    positions: &[[usize; 2]],  // [from_node, to_node] per zero
+) -> Result<CouplingMatrix>;
+
+/// 从Arrow矩阵提取cascade quadruplets (CQ)
+pub fn extract_cascade_quadruplets(
+    matrix: &CouplingMatrix,
+    zeros: &[f64],
+    positions: &[[usize; 2]],
+) -> Result<CouplingMatrix>;
+```
+
+### 内部辅助函数
+
+```rust
+/// 末端旋转锁定零点
+fn trisection_end_rotation(matrix: &mut CouplingMatrix, tz: f64);
+
+/// Pull操作：将交叉耦合从末端移到目标位置
+fn pull_trisection(matrix: &mut CouplingMatrix, from: usize, to: usize);
+
+/// 合并两个相邻trisection为quadruplet
+fn merge_to_quadruplet(matrix: &mut CouplingMatrix, position: usize);
+```
+
+### Python绑定扩展
+
+```rust
+// FilterDesign新增方法
+impl PyFilterDesign {
+    fn ct(&self, positions: Vec<[usize; 2]>) -> PyResult<PyObject>;
+    fn cq(&self, positions: Vec<[usize; 2]>) -> PyResult<PyObject>;
+}
+```
+
+---
+
+## 验证计划
+
+1. 4阶2零点CT vs Python `TrisectionExtractList` → folded CM一致
+2. 6阶3零点CT vs Python → S参数一致
+3. 8阶4零点CQ vs Python `CascadeQuartets` → folded CM一致
+4. 对称零点验证矩阵对称性保持
+5. S参数验证：CT/CQ矩阵产生的响应与transversal矩阵相同
+
+---
+
+## 依赖
+- `apply_givens_similarity_inplace` (已有)
+- `to_arrow()` (已有)
+- `safe_angle()` (已有)
+- 无新外部依赖
+
+## 预计代码量
+~200行Rust
+
+---
+
+## 第二阶段：Householder变换框架 (后续实现)
+
+### 核心优势
+- 数值稳定性远高于Givens旋转序列
+- 最多N步完成任意拓扑（vs Givens需要O(N²)次旋转）
+- 统一框架覆盖CT/CQ/BOX/EB/任意自定义拓扑
+
+### 数学基础
+
+```
+H = I - 2·u·uᵀ/(uᵀ·u)
+
+矩阵重构: M_N = (∏ Hᵢ)ᵀ · M₀ · (∏ Hᵢ)
+```
+
+u的格式: `uᵀ = [0, ũᵀ, 0]` → 保持源/负载不变
+
+### 算法A：解析重构（Folded/Arrow）
+
+```
+输入: 横向矩阵 M₀
+for i = 1 to N-1:
+    x = 当前待消列向量
+    z = 目标单位向量方向
+    u = x - |x|·z
+    H_i = I - 2·u·uᵀ/(uᵀ·u)
+    M = Hᵢᵀ · M · Hᵢ
+输出: 标准拓扑矩阵
+```
+
+### 算法B：指定传输零点 (CT/CQ直接分配)
+
+```
+Step 1: h₁ = (Mc + ωz·I)⁻¹·a₁ / ‖(Mc + ωz·I)⁻¹·a₁‖
+  - Mc: 核心矩阵区 (N×N内部)
+  - a₁: 源端耦合向量
+  - ωz: 目标传输零点
+
+Step 2: u = e₁ - h₁
+
+Step 3: M₁ = H₁·M₀·H₁ → 在指定位置建立线性相关性
+
+后续HT步骤直接形成CT/CQ块。
+```
+
+### 算法C：优化重构 (EB等复杂拓扑)
+
+```
+目标函数: L(U) = ½·‖T ∘ M_N(U)‖²_F
+  - T: 掩码矩阵(应为零的位置=1)
+  - ∘: Hadamard积
+
+梯度: ∂L/∂uᵢ = 8·[(uᵢᵀRᵢuᵢ)/(uᵢᵀuᵢ)²·uᵢ - Rᵢuᵢ/(uᵢᵀuᵢ)]
+  - Rᵢ: 中间矩阵(块结构加速计算)
+
+优化器: L-BFGS 或 Adam, 收敛条件 L < 1e-8
+初始化: 拉丁超立方采样(LHS)覆盖高维空间
+```
+
+### Rust实现规划
+
+```rust
+// src/transform/householder.rs (新文件)
+
+/// 解析HT：Transversal → Folded/Arrow (N-1步)
+pub fn householder_to_folded(matrix: &CouplingMatrix) -> Result<CouplingMatrix>;
+pub fn householder_to_arrow(matrix: &CouplingMatrix) -> Result<CouplingMatrix>;
+
+/// 零点指定HT：直接分配TZ到CT/CQ位置
+pub fn householder_assign_zero(
+    matrix: &CouplingMatrix,
+    zero: f64,
+    target_position: usize,
+) -> Result<CouplingMatrix>;
+
+/// 优化HT：任意拓扑mask → 梯度优化
+pub fn householder_optimize_topology(
+    matrix: &CouplingMatrix,
+    topology_mask: &[Vec<bool>],  // true=应为零
+    zeros: &[f64],                // 需要保持的TZ
+    max_iter: usize,
+) -> Result<CouplingMatrix>;
+
+/// WY加速：累积多次HT为单次矩阵运算
+fn wy_accumulate(householder_vectors: &[Vec<f64>]) -> (DMatrix<f64>, DMatrix<f64>);
+```
+
+### 依赖
+- `nalgebra` 或 `faer`: 矩阵求逆(算法B的(Mc+ωzI)⁻¹)
+- 优化器: 自研L-BFGS或复用`optimize.rs`
+
+### 预计代码量
+~400行Rust
+
+### 优先级
+在Givens法CT/CQ验证通过后实现。对于标准CT/CQ Givens法已足够，
+HT主要用于：
+1. Extended Box等无解析路径的拓扑
+2. 需要更好数值稳定性的高阶(N>12)场景
+3. 多解搜索（配合LHS初始化）

@@ -141,8 +141,18 @@ impl FilterDesign {
 
     /// Band-pass filter design with physical frequency parameters.
     ///
-    /// This is the most common entry point. Transmission zeros can be specified
-    /// in Hz via `.zeros_hz(...)`.
+    /// `center_hz` is the geometric center frequency used in the lowpass-to-bandpass
+    /// frequency transformation: `Ω = (1/FBW) × (f/f0 - f0/f)` where `f0 = center_hz`
+    /// and `FBW = bandwidth_hz / center_hz`.
+    ///
+    /// For the passband edges to map exactly to Ω = ±1, `center_hz` must be
+    /// the geometric mean of the band edges: `center_hz = √(f_low × f_high)`.
+    /// The bandwidth is then `bandwidth_hz = f_high - f_low`.
+    ///
+    /// If you have band edge frequencies, prefer [`bandpass_edges()`] which
+    /// computes the correct geometric center automatically.
+    ///
+    /// Transmission zeros can be specified in Hz via `.zeros_hz(...)`.
     ///
     /// ```rust
     /// # use mfs::prelude::*;
@@ -157,6 +167,39 @@ impl FilterDesign {
         center_hz: f64,
         bandwidth_hz: f64,
     ) -> FilterDesignBuilder {
+        FilterDesignBuilder {
+            order,
+            return_loss_db,
+            center_hz: Some(center_hz),
+            bandwidth_hz: Some(bandwidth_hz),
+            zeros_normalized: Vec::new(),
+            zeros_hz: Vec::new(),
+            unloaded_q: None,
+        }
+    }
+
+    /// Band-pass filter design specified by passband edge frequencies.
+    ///
+    /// This is an alternative to `bandpass()` for engineers who think in terms
+    /// of passband start/stop rather than center/bandwidth.
+    ///
+    /// ```rust
+    /// # use mfs::prelude::*;
+    /// // 6.6 GHz to 6.9 GHz passband → center=√(6.6e9×6.9e9), BW=300 MHz
+    /// let d = FilterDesign::bandpass_edges(6, 23.0, 6.6e9, 6.9e9)
+    ///     .zeros_hz([6.4e9, 7.0e9])
+    ///     .synthesize()?;
+    /// # Ok::<(), MfsError>(())
+    /// ```
+    pub fn bandpass_edges(
+        order: usize,
+        return_loss_db: f64,
+        f_start_hz: f64,
+        f_stop_hz: f64,
+    ) -> FilterDesignBuilder {
+        // Geometric mean ensures Ω(f_start)=-1 and Ω(f_stop)=+1 exactly.
+        let center_hz = (f_start_hz * f_stop_hz).sqrt();
+        let bandwidth_hz = f_stop_hz - f_start_hz;
         FilterDesignBuilder {
             order,
             return_loss_db,
@@ -209,6 +252,31 @@ impl FilterDesign {
         })
     }
 
+    /// Creates a design from pre-computed polynomials and coupling matrix.
+    ///
+    /// Used internally by the duplexer synthesis to construct filter designs
+    /// from modified polynomial sets.
+    pub(crate) fn from_polynomials_and_matrix(
+        order: usize,
+        return_loss_db: f64,
+        center_hz: f64,
+        bandwidth_hz: f64,
+        polynomials: PolynomialSet,
+        matrix: CouplingMatrix,
+    ) -> Self {
+        // Build a minimal spec matching the design parameters
+        let spec = FilterSpec::new(order, return_loss_db)
+            .unwrap_or_else(|_| FilterSpec::new(order, 20.0).unwrap());
+
+        Self {
+            spec,
+            polynomials,
+            matrix,
+            center_hz: Some(center_hz),
+            bandwidth_hz: Some(bandwidth_hz),
+        }
+    }
+
     // ─── Basic info ──────────────────────────────────────────────────────
 
     /// Filter order (number of resonators).
@@ -217,6 +285,10 @@ impl FilterDesign {
     /// The transversal coupling matrix.
     pub fn matrix(&self) -> &CouplingMatrix { &self.matrix }
 
+    /// Returns normalized transmission zeros (Omega values).
+    pub fn transmission_zeros_normalized(&self) -> Vec<f64> {
+        self.spec.transmission_zeros.iter().filter(|tz| tz.value.is_finite()).map(|tz| tz.value).collect()
+    }
     /// The prototype polynomials (E, F, P).
     pub fn polynomials(&self) -> &PolynomialSet { &self.polynomials }
 
@@ -229,6 +301,22 @@ impl FilterDesign {
     /// Bandwidth in Hz (if band-pass design).
     pub fn bandwidth_hz(&self) -> Option<f64> { self.bandwidth_hz }
 
+    /// Lower passband edge in Hz (if band-pass design).
+    pub fn f_start_hz(&self) -> Option<f64> {
+        match (self.center_hz, self.bandwidth_hz) {
+            (Some(c), Some(bw)) => Some(c - bw / 2.0),
+            _ => None,
+        }
+    }
+
+    /// Upper passband edge in Hz (if band-pass design).
+    pub fn f_stop_hz(&self) -> Option<f64> {
+        match (self.center_hz, self.bandwidth_hz) {
+            (Some(c), Some(bw)) => Some(c + bw / 2.0),
+            _ => None,
+        }
+    }
+
     // ─── Topology ────────────────────────────────────────────────────────
 
     /// Converts to folded coupling matrix.
@@ -239,6 +327,22 @@ impl FilterDesign {
     /// Converts to arrow coupling matrix.
     pub fn to_arrow(&self) -> Result<CouplingMatrix> {
         MatrixSynthesisEngine.synthesize_with_topology(&self.polynomials, MatrixTopology::Arrow)
+    }
+
+    /// Converts to Cascaded Trisection (CT) topology.
+    ///
+    /// Each transmission zero is realized by one trisection section.
+    /// The zeros are assigned from load end towards source end.
+    pub fn to_ct(&self, zeros: &[f64]) -> Result<CouplingMatrix> {
+        self.matrix.to_cascaded_trisections(zeros)
+    }
+
+    /// Converts to Cascaded Quadruplet (CQ) topology.
+    ///
+    /// Zero pairs are merged into quartet sections. For symmetric pairs (±ω),
+    /// the diagonal coupling within each quartet will be zero.
+    pub fn to_cq(&self, zero_pairs: &[(f64, f64)]) -> Result<CouplingMatrix> {
+        self.matrix.to_cascaded_quadruplets(zero_pairs)
     }
 
     /// Converts to a specific topology.
@@ -320,6 +424,24 @@ impl FilterDesign {
         })?;
         let bw = self.bandwidth_hz.unwrap_or(0.0);
         self.response_bandpass(center, bw, start_hz, stop_hz, points)
+    }
+
+    /// Evaluates S-parameters over a default frequency range.
+    ///
+    /// For bandpass designs: covers center ± 1.5×bandwidth (201 points).
+    /// For prototype designs: covers normalized ω = -3 to +3 (201 points).
+    ///
+    /// This is a convenience method when you just want a quick look at the response.
+    ///
+    /// ```rust
+    /// # use mfs::prelude::*;
+    /// let d = FilterDesign::bandpass(4, 20.0, 6.75e9, 300e6).synthesize()?;
+    /// let r = d.response_default()?;
+    /// assert_eq!(r.samples.len(), 201);
+    /// # Ok::<(), MfsError>(())
+    /// ```
+    pub fn response_default(&self) -> Result<SParameterResponse> {
+        self.default_response()
     }
 
     /// Evaluates S-parameters with explicit band-pass parameters.
@@ -537,8 +659,9 @@ impl FilterDesign {
 
     pub(crate) fn default_response(&self) -> Result<SParameterResponse> {
         if let (Some(center), Some(bw)) = (self.center_hz, self.bandwidth_hz) {
-            let start = center - bw;
-            let stop = center + bw;
+            // Default range: center ± 1.5*bw covers passband + nearby stopband
+            let start = center - 1.5 * bw;
+            let stop = center + 1.5 * bw;
             self.response_bandpass(center, bw, start, stop, 201)
         } else {
             self.response_normalized(-3.0, 3.0, 201)
@@ -667,6 +790,39 @@ mod tests {
         assert_eq!(d.order(), 6);
         assert_eq!(d.center_hz(), Some(6.75e9));
         assert_eq!(d.bandwidth_hz(), Some(300e6));
+        Ok(())
+    }
+
+    #[test]
+    fn bandpass_edges_equivalent() -> Result<()> {
+        // bandpass_edges(6.6e9, 6.9e9) should equal bandpass(6.75e9, 300e6)
+        let d1 = FilterDesign::bandpass(4, 20.0, 6.75e9, 300e6).synthesize()?;
+        let d2 = FilterDesign::bandpass_edges(4, 20.0, 6.6e9, 6.9e9).synthesize()?;
+        assert_eq!(d2.center_hz(), Some(6.75e9));
+        assert_eq!(d2.bandwidth_hz(), Some(300e6));
+        assert_eq!(d2.f_start_hz(), Some(6.6e9));
+        assert_eq!(d2.f_stop_hz(), Some(6.9e9));
+        // Coupling matrices should be identical
+        let m1 = d1.matrix();
+        let m2 = d2.matrix();
+        for i in 0..m1.side() {
+            for j in 0..m1.side() {
+                let v1 = m1.at(i, j).unwrap_or(0.0);
+                let v2 = m2.at(i, j).unwrap_or(0.0);
+                assert!((v1 - v2).abs() < 1e-12, "mismatch at ({i},{j}): {v1} vs {v2}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn response_default_works() -> Result<()> {
+        let d = FilterDesign::bandpass(4, 20.0, 6.75e9, 300e6).synthesize()?;
+        let r = d.response_default()?;
+        assert_eq!(r.samples.len(), 201);
+        // First point should be at center - 1.5*bw = 6.75e9 - 450e6 = 6.3e9
+        let expected_start = 6.75e9 - 1.5 * 300e6;
+        assert!((r.samples[0].frequency_hz - expected_start).abs() < 1.0);
         Ok(())
     }
 

@@ -109,12 +109,6 @@ impl CouplingMatrix {
         transmission_zero: f64,
         zero_positions: (usize, usize),
     ) -> Result<Self> {
-        if self.topology() != MatrixTopology::Arrow {
-            return Err(MfsError::PreconditionViolation(format!(
-                "trisection extraction requires Arrow input, got {:?}",
-                self.topology()
-            )));
-        }
         validate_trisection_positions(self.order(), zero_positions)?;
         if !transmission_zero.is_finite() {
             return Err(MfsError::InvalidTransmissionZero(
@@ -154,9 +148,9 @@ impl CouplingMatrix {
 }
 
 fn validate_triplet_center(order: usize, center_resonator: usize) -> Result<()> {
-    if center_resonator < 2 || center_resonator >= order {
+    if center_resonator < 1 || center_resonator >= order {
         return Err(MfsError::InvalidTransmissionZero(format!(
-            "triplet center must be in [2, {}), got {center_resonator}",
+            "triplet center must be in [1, {}), got {center_resonator}",
             order
         )));
     }
@@ -165,7 +159,7 @@ fn validate_triplet_center(order: usize, center_resonator: usize) -> Result<()> 
 }
 
 fn validate_quadruplet_position(order: usize, position: usize) -> Result<()> {
-    if position < 2 || position + 1 >= order {
+    if position < 1 || position + 1 >= order {
         return Err(MfsError::InvalidTransmissionZero(format!(
             "quadruplet position must leave room for two adjacent triplets, got {position} for order {order}"
         )));
@@ -188,4 +182,244 @@ fn validate_trisection_positions(order: usize, zero_positions: (usize, usize)) -
     }
 
     Ok(())
+}
+
+impl CouplingMatrix {
+    /// Extract cascade trisections (CT topology) for multiple zeros.
+    ///
+    /// Applies trisection extraction sequentially for each zero.
+    /// Input should be in Arrow form.
+    pub(crate) fn extract_cascade_trisections(
+        &self,
+        zeros: &[f64],
+        positions: &[(usize, usize)],
+    ) -> Result<Self> {
+        if zeros.len() != positions.len() {
+            return Err(MfsError::DimensionMismatch {
+                expected: zeros.len(),
+                actual: positions.len(),
+            });
+        }
+        let mut matrix = self.clone();
+        for (tz, pos) in zeros.iter().zip(positions.iter()) {
+            matrix = matrix.extract_trisection(*tz, *pos)?;
+        }
+        matrix.ensure_positive_main_couplings();
+        Ok(matrix)
+    }
+
+    /// Extract cascade quadruplets (CQ topology) for paired zeros.
+    ///
+    /// Processes zeros in pairs as quadruplets. An odd remaining zero
+    /// is extracted as a standalone trisection.
+    /// Input should be in Arrow form.
+    pub(crate) fn extract_cascade_quadruplets(
+        &self,
+        zeros: &[f64],
+        z_locs: &[[usize; 2]],
+    ) -> Result<Self> {
+        if zeros.len() != z_locs.len() {
+            return Err(MfsError::DimensionMismatch {
+                expected: zeros.len(),
+                actual: z_locs.len(),
+            });
+        }
+
+        let mut matrix = self.clone();
+        let _num_zeros = zeros.len();
+
+        // Classify z_locs into CQ pairs and CT singles
+        // span=3 → quadruplet diagonal, span=2 → trisection
+        let mut quad_indices: Vec<(usize, usize, usize)> = Vec::new(); // (zero_idx, start, end)
+        let mut tri_indices: Vec<(usize, usize, usize)> = Vec::new();  // (zero_idx, start, end)
+
+        for (i, z) in z_locs.iter().enumerate() {
+            let span = if z[1] > z[0] { z[1] - z[0] } else { z[0] - z[1] };
+            let start = z[0].min(z[1]);
+            let end = z[0].max(z[1]);
+            match span {
+                3 => quad_indices.push((i, start, end)),
+                2 => tri_indices.push((i, start, end)),
+                _ => return Err(MfsError::InvalidTransmissionZero(
+                    format!("z_loc[{}]=[{},{}] has invalid span {}. Must be 2 (CT) or 3 (CQ).", i, z[0], z[1], span)
+                )),
+            }
+        }
+
+        // Match trisections to quadruplets
+        let mut used_tri = vec![false; tri_indices.len()];
+
+        // Process quadruplets (from high position to low = tail first)
+        let mut cq_ops: Vec<(f64, f64, usize, usize)> = Vec::new(); // (z1, z2, position, common_res)
+        for &(q_zero_idx, q_start, _q_end) in quad_indices.iter() {
+            // Find matching trisection within this quadruplet range
+            let mut partner = None;
+            for (ti, &(t_zero_idx, t_start, t_end)) in tri_indices.iter().enumerate() {
+                if used_tri[ti] { continue; }
+                if t_start >= q_start && t_end <= _q_end {
+                    partner = Some((ti, t_zero_idx, t_start));
+                    break;
+                }
+            }
+            if let Some((ti, t_zero_idx, t_start)) = partner {
+                used_tri[ti] = true;
+                let position = q_start + 1; // triplet center
+                let common_res = if t_start == q_start { 1 } else { 4 };
+                cq_ops.push((zeros[t_zero_idx], zeros[q_zero_idx], position, common_res));
+            } else {
+                return Err(MfsError::InvalidTransmissionZero(
+                    format!("Quadruplet ({},{}) has no matching trisection partner", q_start, _q_end)
+                ));
+            }
+        }
+
+        // Collect remaining CTs
+        let mut ct_ops: Vec<(f64, usize)> = Vec::new(); // (zero, center)
+        for (ti, &(t_zero_idx, t_start, t_end)) in tri_indices.iter().enumerate() {
+            if !used_tri[ti] {
+                let center = (t_start + t_end) / 2;
+                ct_ops.push((zeros[t_zero_idx], center));
+            }
+        }
+
+        // Sort all operations by position descending (extract from tail first)
+        let mut all_ops: Vec<(usize, bool)> = Vec::new(); // (position, is_cq)
+        for (_i, &(_, _, pos, _)) in cq_ops.iter().enumerate() {
+            all_ops.push((pos, true));
+        }
+        for (_i, &(_, center)) in ct_ops.iter().enumerate() {
+            all_ops.push((center, false));
+        }
+        // We need indices after sorting
+        let mut cq_order: Vec<usize> = (0..cq_ops.len()).collect();
+        cq_order.sort_by(|a, b| cq_ops[*b].2.cmp(&cq_ops[*a].2));
+        let mut ct_order: Vec<usize> = (0..ct_ops.len()).collect();
+        ct_order.sort_by(|a, b| ct_ops[*b].1.cmp(&ct_ops[*a].1));
+
+        // Interleave by position (highest first)
+        let mut cq_iter = cq_order.iter().peekable();
+        let mut ct_iter = ct_order.iter().peekable();
+
+        loop {
+            let cq_pos = cq_iter.peek().map(|&&i| cq_ops[i].2);
+            let ct_pos = ct_iter.peek().map(|&&i| ct_ops[i].1);
+            match (cq_pos, ct_pos) {
+                (Some(cp), Some(tp)) if cp >= tp => {
+                    let &i = cq_iter.next().unwrap();
+                    let (z1, z2, pos, cr) = cq_ops[i];
+                    matrix = matrix.extract_quadruplet(z1, z2, pos, cr, false)?;
+                }
+                (_, Some(_)) => {
+                    let &i = ct_iter.next().unwrap();
+                    let (z, center) = ct_ops[i];
+                    matrix = matrix.extract_triplet(z, center)?;
+                }
+                (Some(_), None) => {
+                    let &i = cq_iter.next().unwrap();
+                    let (z1, z2, pos, cr) = cq_ops[i];
+                    matrix = matrix.extract_quadruplet(z1, z2, pos, cr, false)?;
+                }
+                (None, None) => break,
+            }
+        }
+
+        matrix.ensure_positive_main_couplings();
+        Ok(matrix)
+    }
+
+    /// Ensure all main (nearest-neighbor) couplings are positive.
+    fn ensure_positive_main_couplings(&mut self) {
+        let side = self.side();
+        for i in 0..(side - 1) {
+            if self.get(i, i + 1) < 0.0 {
+                self.flip_sign_inplace(i + 1);
+            }
+        }
+    }
+
+    // TODO: This mirrors `CouplingMatrix::flip_sign` in `src/matrix/core.rs`
+    // (same row/column negation, same diagonal preservation), differing only
+    // in mutating in place instead of returning a new matrix. Keep the two in
+    // sync: a similarity sign flip must leave the diagonal unchanged
+    // (R*M*R^T with R[i][i] = -1). If one is edited, the other must be checked
+    // too. Consider deduplicating into a single shared helper.
+    fn flip_sign_inplace(&mut self, index: usize) {
+        let side = self.side();
+        for col in 0..side {
+            let val = self.data[index * side + col];
+            self.data[index * side + col] = -val;
+        }
+        for row in 0..side {
+            let val = self.data[row * side + index];
+            self.data[row * side + index] = -val;
+        }
+    }
+}
+
+impl CouplingMatrix {
+    /// Extract BOX topology from Arrow matrix.
+    ///
+    /// BOX is a 4-resonator structure with cross-couplings M(k,k+2) and M(k+1,k+3),
+    /// and eliminated inline M(k+1,k+2) = 0.
+    ///
+    /// Algorithm: extract_triplet → Jacobi rotation to eliminate M[center, center+1]
+    ///
+    /// `span` is (start, end) with end-start=3, representing the 4-resonator block.
+    /// Internally: center = start+1, used for triplet extraction.
+    pub(crate) fn extract_box_section(
+        &self,
+        transmission_zero: f64,
+        span_start: usize,
+    ) -> Result<Self> {
+        let center = span_start + 1;
+
+        // Step 1: extract trisection
+        let mut matrix = self.extract_triplet(transmission_zero, center)?;
+
+        // Step 2: Jacobi rotation in plane (center, center+1) to eliminate M[center, center+1]
+        let i = center;
+        let j = center + 1;
+        let mij = matrix.get(i, j);
+        let mii = matrix.get(i, i);
+        let mjj = matrix.get(j, j);
+
+        let denom = mii - mjj;
+        let theta = if denom.abs() > 1e-12 {
+            -0.5 * (2.0 * mij / denom).atan()
+        } else {
+            if mij > 0.0 { -std::f64::consts::FRAC_PI_4 } else { std::f64::consts::FRAC_PI_4 }
+        };
+
+        matrix.apply_givens_similarity_inplace(i, j, theta.cos(), theta.sin());
+        matrix.clean_small_values();
+        Ok(matrix)
+    }
+
+    /// Extract multiple BOX sections.
+    /// Each span is [start, end] with end-start=3.
+    pub(crate) fn extract_box_sections(
+        &self,
+        zeros: &[f64],
+        spans: &[[usize; 2]],
+    ) -> Result<Self> {
+        if zeros.len() != spans.len() {
+            return Err(MfsError::DimensionMismatch {
+                expected: zeros.len(),
+                actual: spans.len(),
+            });
+        }
+        let mut matrix = self.clone();
+        // Process from high position to low (tail first)
+        let mut ops: Vec<(f64, usize)> = zeros.iter()
+            .zip(spans.iter())
+            .map(|(&z, s)| (z, s[0].min(s[1])))
+            .collect();
+        ops.sort_by(|a, b| b.1.cmp(&a.1));
+
+        for (tz, start) in ops {
+            matrix = matrix.extract_box_section(tz, start)?;
+        }
+        matrix.ensure_positive_main_couplings();
+        Ok(matrix)
+    }
 }

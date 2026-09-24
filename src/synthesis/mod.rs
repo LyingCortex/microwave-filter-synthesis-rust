@@ -4,7 +4,7 @@ mod residues;
 mod sections;
 
 pub use residues::{AdmittancePolynomials, ResidueExpansion, ResiduePole};
-pub use residues::{ClassifiedResidues, ResidueClassification, classify_residues};
+pub use residues::{ClassifiedResidues, ResidueClassification, classify_residues, residue_real_component};
 pub use residues::synthesize_residue_expansions;
 pub use engine::{MatrixSynthesisEngine, MatrixSynthesisMethod, MatrixSynthesisOutcome};
 pub use orchestration::{

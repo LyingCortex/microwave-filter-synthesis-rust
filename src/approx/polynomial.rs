@@ -99,9 +99,14 @@ impl PolynomialSet {
                 actual: self.f.coefficients.len(),
             });
         }
-        if self.p.coefficients.len() > self.order {
+        // P(s) has degree = number of finite transmission zeros (nfz), so it
+        // has nfz + 1 coefficients. For a lossless filter nfz <= order, so the
+        // fully canonical case (nfz == order, e.g. P(s) of degree `order`)
+        // yields order + 1 coefficients and is valid. Only nfz > order (i.e.
+        // more than `order + 1` coefficients) is rejected.
+        if self.p.coefficients.len() > self.order + 1 {
             return Err(MfsError::DimensionMismatch {
-                expected: self.order,
+                expected: self.order + 1,
                 actual: self.p.coefficients.len(),
             });
         }

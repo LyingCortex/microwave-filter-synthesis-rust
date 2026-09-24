@@ -40,13 +40,19 @@ pub struct AberthRootSolver;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct CompanionMatrixRootSolver;
 
+/// Companion matrix root solver using the faer linear algebra library.
+/// Uses complex eigenvalue decomposition for maximum precision.
+/// Preserves polynomial symmetry better than iterative methods.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct FaerRootSolver;
+
 /// Adaptive root solver that tries fast methods first and falls back to more
 /// robust (but slower) methods when they fail.
 ///
 /// Strategy chain:
-/// 1. Durand-Kerner (fastest, works well for degree ≤ 25)
-/// 2. Aberth-Ehrlich (cubic convergence, better for degree 20-40)
-/// 3. Companion matrix eigenvalues (most robust, works for any degree)
+/// 1. Companion matrix via nalgebra (accurate, preserves symmetry)
+/// 2. Durand-Kerner (fallback for edge cases)
+/// 3. Aberth-Ehrlich (last resort)
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct AdaptiveRootSolver;
 
@@ -114,6 +120,19 @@ impl ComplexPolynomial {
         }
 
         Self::new(trim_trailing_complex_zeros(coefficients))
+    }
+
+    /// Multiplies two polynomials (convolution of coefficients).
+    pub fn multiply(&self, rhs: &Self) -> Result<Self> {
+        let n = self.coefficients.len();
+        let m = rhs.coefficients.len();
+        let mut result = vec![COMPLEX_ZERO; n + m - 1];
+        for (i, &a) in self.coefficients.iter().enumerate() {
+            for (j, &b) in rhs.coefficients.iter().enumerate() {
+                result[i + j] += a * b;
+            }
+        }
+        Self::new(result)
     }
 
     /// Subtracts another polynomial, padding the shorter one with implicit zeros.
@@ -591,6 +610,69 @@ impl ComplexRootSolver for CompanionMatrixRootSolver {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Faer companion matrix solver
+// ─────────────────────────────────────────────────────────────────────────────
+
+impl ComplexRootSolver for FaerRootSolver {
+    fn roots_of(&self, polynomial: &ComplexPolynomial) -> Result<Vec<ComplexCoefficient>> {
+        use faer::complex_native::c64;
+        use faer::Mat;
+
+        let degree = polynomial.degree();
+        if degree == 0 {
+            return Ok(Vec::new());
+        }
+
+        let leading = *polynomial.coefficients.last().ok_or_else(|| {
+            MfsError::PreconditionViolation("polynomial is missing a leading coefficient".to_string())
+        })?;
+        if leading.norm_sqr() <= 1e-24 {
+            return Err(MfsError::PreconditionViolation(
+                "polynomial leading coefficient must be non-zero".to_string(),
+            ));
+        }
+
+        // Normalize to monic
+        let normalized: Vec<_> = polynomial
+            .coefficients
+            .iter()
+            .copied()
+            .map(|c| c / leading)
+            .collect();
+
+        // Build complex companion matrix directly using faer
+        let mut companion = Mat::<c64>::zeros(degree, degree);
+
+        // Sub-diagonal ones
+        for i in 1..degree {
+            companion[(i, i - 1)] = c64::new(1.0, 0.0);
+        }
+
+        // Last column: -c_k
+        for i in 0..degree {
+            companion[(i, degree - 1)] = c64::new(-normalized[i].re, -normalized[i].im);
+        }
+
+        // Compute eigenvalues using faer's eigenvalue solver
+        let eigenvalues = companion.eigenvalues::<c64>();
+
+        let roots: Vec<ComplexCoefficient> = eigenvalues
+            .iter()
+            .map(|&ev| ComplexCoefficient::new(ev.re, ev.im))
+            .collect();
+
+        if roots.len() != degree {
+            return Err(MfsError::NumericalFailure(format!(
+                "faer solver returned {} roots for degree {degree}",
+                roots.len()
+            )));
+        }
+
+        Ok(roots)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Adaptive fallback solver
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -598,22 +680,22 @@ impl ComplexRootSolver for AdaptiveRootSolver {
     fn roots_of(&self, polynomial: &ComplexPolynomial) -> Result<Vec<ComplexCoefficient>> {
         let degree = polynomial.degree();
 
-        // Strategy 1: Durand-Kerner (fast, good for degree ≤ ~28)
-        match DurandKernerRootSolver.roots_of(polynomial) {
+        // Strategy 1: Companion matrix eigenvalues (most accurate, preserves symmetry)
+        match FaerRootSolver.roots_of(polynomial) {
             Ok(roots) => return Ok(roots),
-            Err(_) if degree > 0 => {} // Fall through to next strategy
-            Err(e) => return Err(e),    // Degree 0 or precondition errors propagate
-        }
-
-        // Strategy 2: Aberth-Ehrlich (cubic convergence, better for degree 25-40)
-        match AberthRootSolver.roots_of(polynomial) {
-            Ok(roots) => return Ok(roots),
-            Err(_) if degree > 0 => {} // Fall through to companion matrix
+            Err(_) if degree > 0 => {} // Fall through to iterative methods
             Err(e) => return Err(e),
         }
 
-        // Strategy 3: Companion matrix eigenvalues (most robust, any degree)
-        CompanionMatrixRootSolver.roots_of(polynomial)
+        // Strategy 2: Durand-Kerner (fallback for cases where companion fails)
+        match DurandKernerRootSolver.roots_of(polynomial) {
+            Ok(roots) => return Ok(roots),
+            Err(_) if degree > 0 => {}
+            Err(e) => return Err(e),
+        }
+
+        // Strategy 3: Aberth-Ehrlich (last resort)
+        AberthRootSolver.roots_of(polynomial)
     }
 }
 
@@ -646,6 +728,61 @@ fn evaluate_monic_polynomial(
         .rev()
         .copied()
         .fold(COMPLEX_ZERO, |acc, coefficient| acc * x + coefficient)
+}
+
+/// Multiplies a polynomial by `s`, shifting coefficients up by one power.
+///
+/// Shared by the duplexer and multiplexer synthesis helpers.
+pub fn multiply_by_s(poly: &ComplexPolynomial) -> Result<ComplexPolynomial> {
+    let mut new_coeffs = vec![COMPLEX_ZERO];
+    new_coeffs.extend_from_slice(&poly.coefficients);
+    ComplexPolynomial::new(new_coeffs)
+}
+
+/// Pads a polynomial to a given length with zero coefficients.
+///
+/// Shared by the duplexer and multiplexer `recover_filter_design` paths.
+pub fn pad_polynomial(
+    poly: &ComplexPolynomial,
+    target_len: usize,
+) -> Result<ComplexPolynomial> {
+    if poly.coefficients.len() >= target_len {
+        return Ok(poly.clone());
+    }
+    let mut padded = poly.coefficients.clone();
+    padded.resize(target_len, COMPLEX_ZERO);
+    ComplexPolynomial::new(padded)
+}
+
+/// Computes the maximum displacement between two sets of roots (sorted by
+/// imaginary part). Returns [`f64::INFINITY`] if the two sets differ in size.
+///
+/// Shared by the duplexer and multiplexer convergence metrics.
+pub fn compute_root_displacement(prev: &[ComplexCoefficient], current: &[ComplexCoefficient]) -> f64 {
+    if prev.len() != current.len() {
+        return f64::INFINITY;
+    }
+
+    let mut prev_sorted = prev.to_vec();
+    let mut curr_sorted = current.to_vec();
+
+    let cmp_complex = |a: &ComplexCoefficient, b: &ComplexCoefficient| {
+        a.im.partial_cmp(&b.im)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.re.partial_cmp(&b.re).unwrap_or(std::cmp::Ordering::Equal))
+    };
+
+    prev_sorted.sort_by(cmp_complex);
+    curr_sorted.sort_by(cmp_complex);
+
+    prev_sorted
+        .iter()
+        .zip(curr_sorted.iter())
+        .map(|(p, c)| {
+            let d = (p - c).norm();
+            if d.is_finite() { d } else { 1.0 }
+        })
+        .fold(0.0_f64, f64::max)
 }
 
 #[cfg(test)]

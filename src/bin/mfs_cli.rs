@@ -80,6 +80,14 @@ enum Command {
         #[arg(short, long)]
         bandwidth: Option<f64>,
 
+        /// Lower passband edge in Hz (alternative to center+bandwidth).
+        #[arg(long, alias = "f1")]
+        start: Option<f64>,
+
+        /// Upper passband edge in Hz (alternative to center+bandwidth).
+        #[arg(long, alias = "f2")]
+        stop: Option<f64>,
+
         /// Transmission zeros (comma-separated, in Hz if bandpass, normalized otherwise).
         #[arg(short, long, value_delimiter = ',', allow_hyphen_values = true)]
         zeros: Option<Vec<f64>>,
@@ -96,9 +104,47 @@ enum Command {
         #[arg(long, default_value = "201")]
         points: usize,
 
+        /// Response frequency range start (Hz). Defaults to center - 1.5*bw.
+        #[arg(long)]
+        resp_start: Option<f64>,
+
+        /// Response frequency range stop (Hz). Defaults to center + 1.5*bw.
+        #[arg(long)]
+        resp_stop: Option<f64>,
+
         /// Export Touchstone file to this path.
         #[arg(long, value_name = "FILE")]
         s2p: Option<PathBuf>,
+    },
+
+    /// Synthesize an N-channel multiplexer from repeated channel specs.
+    Multiplexer {
+        /// Channel spec as `order:return_loss_db:center_hz:bandwidth_hz`.
+        /// Repeat for each channel (at least two required).
+        #[arg(long, value_name = "CHANNEL", required = true)]
+        channel: Vec<String>,
+
+        /// Maximum number of iterative convergence steps.
+        #[arg(long, default_value = "40")]
+        max_iterations: usize,
+
+        /// Convergence tolerance on root displacement.
+        #[arg(long, default_value = "1e-8")]
+        tol: f64,
+
+        /// Response frequency range start (Hz). Defaults to the lowest channel
+        /// center minus 1.5× its bandwidth.
+        #[arg(long)]
+        resp_start: Option<f64>,
+
+        /// Response frequency range stop (Hz). Defaults to the highest channel
+        /// center plus 1.5× its bandwidth.
+        #[arg(long)]
+        resp_stop: Option<f64>,
+
+        /// Number of frequency points for the response.
+        #[arg(long, default_value = "401")]
+        points: usize,
     },
 }
 
@@ -166,8 +212,12 @@ fn main() {
 
 fn run(cli: &Cli) -> Result<(), CliRunError> {
     // Handle subcommands first
-    if let Some(Command::Design { order, return_loss, center, bandwidth, zeros, q, topology, points, s2p }) = &cli.command {
-        return run_design(*order, *return_loss, *center, *bandwidth, zeros.as_deref(), *q, topology, *points, s2p.as_deref(), &cli.format);
+    if let Some(Command::Design { order, return_loss, center, bandwidth, start, stop, zeros, q, topology, points, resp_start, resp_stop, s2p }) = &cli.command {
+        return run_design(*order, *return_loss, *center, *bandwidth, *start, *stop, zeros.as_deref(), *q, topology, *points, *resp_start, *resp_stop, s2p.as_deref(), &cli.format);
+    }
+
+    if let Some(Command::Multiplexer { channel, max_iterations, tol, resp_start, resp_stop, points }) = &cli.command {
+        return run_multiplexer(channel, *max_iterations, *tol, *resp_start, *resp_stop, *points, &cli.format);
     }
 
     // Determine execution mode based on flags
@@ -231,10 +281,14 @@ fn run_design(
     return_loss: f64,
     center: Option<f64>,
     bandwidth: Option<f64>,
+    start: Option<f64>,
+    stop: Option<f64>,
     zeros: Option<&[f64]>,
     q: Option<f64>,
     topology: &str,
     points: usize,
+    resp_start: Option<f64>,
+    resp_stop: Option<f64>,
     s2p: Option<&std::path::Path>,
     format: &OutputFormat,
 ) -> Result<(), CliRunError> {
@@ -242,8 +296,34 @@ fn run_design(
     use mfs::matrix::MatrixTopology;
     use mfs::touchstone::{self, FreqUnit, DataFormat, TouchstoneConfig, TouchstoneVersion};
 
+    // Resolve center/bandwidth from either (center, bw) or (start, stop) notation
+    let (resolved_center, resolved_bw) = match (center, bandwidth, start, stop) {
+        (Some(c), Some(bw), _, _) => (Some(c), Some(bw)),
+        (None, None, Some(f1), Some(f2)) => {
+            if f2 <= f1 {
+                return Err(CliRunError::InputParse(
+                    "--stop must be greater than --start".into(),
+                ));
+            }
+            let c = (f1 + f2) / 2.0;
+            let bw = f2 - f1;
+            (Some(c), Some(bw))
+        }
+        (Some(c), None, Some(f1), _) => {
+            // center + start → derive bandwidth = 2*(center - start)
+            let bw = 2.0 * (c - f1);
+            if bw <= 0.0 {
+                return Err(CliRunError::InputParse(
+                    "--start must be less than --center".into(),
+                ));
+            }
+            (Some(c), Some(bw))
+        }
+        _ => (center, bandwidth),
+    };
+
     // Build the design
-    let design = if let (Some(c), Some(bw)) = (center, bandwidth) {
+    let design = if let (Some(c), Some(bw)) = (resolved_center, resolved_bw) {
         let mut builder = FilterDesign::bandpass(order, return_loss, c, bw);
         if let Some(z) = zeros {
             builder = builder.zeros_hz(z.iter().copied());
@@ -272,19 +352,22 @@ fn run_design(
     let matrix = design.to_topology(topo).map_err(CliRunError::Pipeline)?;
 
     // Get response
-    let response = if let (Some(c), Some(bw)) = (center, bandwidth) {
-        let start = c - bw;
-        let stop = c + bw;
+    let response = if let (Some(c), Some(bw)) = (resolved_center, resolved_bw) {
+        // Default response range: center ± 1.5*bw (covers passband + nearby stopband)
+        let r_start = resp_start.unwrap_or(c - 1.5 * bw);
+        let r_stop = resp_stop.unwrap_or(c + 1.5 * bw);
         if let Some(q_val) = q {
-            design.response_lossy(start, stop, points, q_val).map_err(CliRunError::Pipeline)?
+            design.response_lossy(r_start, r_stop, points, q_val).map_err(CliRunError::Pipeline)?
         } else {
-            design.response(start, stop, points).map_err(CliRunError::Pipeline)?
+            design.response(r_start, r_stop, points).map_err(CliRunError::Pipeline)?
         }
     } else {
+        let r_start = resp_start.unwrap_or(-3.0);
+        let r_stop = resp_stop.unwrap_or(3.0);
         if let Some(q_val) = q {
-            design.response_lossy_normalized(-3.0, 3.0, points, q_val).map_err(CliRunError::Pipeline)?
+            design.response_lossy_normalized(r_start, r_stop, points, q_val).map_err(CliRunError::Pipeline)?
         } else {
-            design.response_normalized(-3.0, 3.0, points).map_err(CliRunError::Pipeline)?
+            design.response_normalized(r_start, r_stop, points).map_err(CliRunError::Pipeline)?
         }
     };
 
@@ -336,9 +419,10 @@ fn run_design(
             println!("── Filter Design ──");
             println!("  Order:       {order}");
             println!("  Return Loss: {return_loss:.1} dB");
-            if let (Some(c), Some(bw)) = (center, bandwidth) {
+            if let (Some(c), Some(bw)) = (resolved_center, resolved_bw) {
                 println!("  Center:      {:.6} GHz", c / 1e9);
                 println!("  Bandwidth:   {:.3} MHz", bw / 1e6);
+                println!("  Passband:    {:.6} – {:.6} GHz", (c - bw / 2.0) / 1e9, (c + bw / 2.0) / 1e9);
             }
             if let Some(z) = zeros {
                 let zs: Vec<String> = z.iter().map(|v| format!("{v:.4}")).collect();
@@ -370,7 +454,7 @@ fn run_design(
             let n = response.samples.len();
             let show = 5.min(n);
             for s in response.samples.iter().take(show) {
-                let freq_label = if center.is_some() {
+                let freq_label = if resolved_center.is_some() {
                     format!("{:.4} GHz", s.frequency_hz / 1e9)
                 } else {
                     format!("{:.4}", s.frequency_hz)
@@ -380,7 +464,7 @@ fn run_design(
             if n > show * 2 { println!("  {:>12}", "..."); }
             if n > show {
                 for s in response.samples.iter().skip(n - show) {
-                    let freq_label = if center.is_some() {
+                    let freq_label = if resolved_center.is_some() {
                         format!("{:.4} GHz", s.frequency_hz / 1e9)
                     } else {
                         format!("{:.4}", s.frequency_hz)
@@ -394,10 +478,181 @@ fn run_design(
     Ok(())
 }
 
+/// Runs the quick `multiplexer` subcommand: N-channel synthesis + analysis.
+fn run_multiplexer(
+    channel: &[String],
+    max_iterations: usize,
+    tol: f64,
+    resp_start: Option<f64>,
+    resp_stop: Option<f64>,
+    points: usize,
+    format: &OutputFormat,
+) -> Result<(), CliRunError> {
+    use mfs::multiplexer::{Multiplexer, MultiplexerSynthesis};
+
+    // Parse each `order:rl:center:bw` string into a ChannelSpec.
+    let mut specs: Vec<mfs::ChannelSpec> = Vec::with_capacity(channel.len());
+    for raw in channel {
+        let parts: Vec<&str> = raw.split(':').collect();
+        if parts.len() != 4 {
+            return Err(CliRunError::InputParse(format!(
+                "channel spec '{raw}' must be formatted as order:return_loss_db:center_hz:bandwidth_hz"
+            )));
+        }
+        let order = parts[0].trim().parse::<usize>().map_err(|_| {
+            CliRunError::InputParse(format!("invalid order '{}' in channel spec '{raw}'", parts[0]))
+        })?;
+        let return_loss_db = parts[1].trim().parse::<f64>().map_err(|_| {
+            CliRunError::InputParse(format!(
+                "invalid return loss '{}' in channel spec '{raw}'",
+                parts[1]
+            ))
+        })?;
+        let center_hz = parts[2].trim().parse::<f64>().map_err(|_| {
+            CliRunError::InputParse(format!(
+                "invalid center frequency '{}' in channel spec '{raw}'",
+                parts[2]
+            ))
+        })?;
+        let bandwidth_hz = parts[3].trim().parse::<f64>().map_err(|_| {
+            CliRunError::InputParse(format!(
+                "invalid bandwidth '{}' in channel spec '{raw}'",
+                parts[3]
+            ))
+        })?;
+        specs.push(mfs::ChannelSpec {
+            order,
+            return_loss_db,
+            zeros: Vec::new(),
+            center_hz,
+            bandwidth_hz,
+        });
+    }
+
+    // Run iterative N-channel synthesis.
+    let mut synthesis = MultiplexerSynthesis::new()
+        .channels(specs.clone())
+        .max_iterations(max_iterations)
+        .convergence_tol(tol);
+    if specs.len() == 2 {
+        // Mirror the diplexer's default ideal T-junction.
+        synthesis = synthesis.junction(mfs::JunctionType::TypeI { n: 1.0, b0: 0.0 });
+    }
+    let result = synthesis.synthesize().map_err(CliRunError::Pipeline)?;
+
+    // Build the multiplexer and compute a response.
+    let mux = Multiplexer::new(result.channels.clone()).map_err(CliRunError::Pipeline)?;
+
+    let (r_start, r_stop) = resolve_multiplexer_range(&result.channels, resp_start, resp_stop);
+    let response = mux
+        .response(r_start, r_stop, points)
+        .map_err(CliRunError::Pipeline)?;
+
+    // Output.
+    match format {
+        OutputFormat::Json => {
+            let channels: Vec<serde_json::Value> = result
+                .channels
+                .iter()
+                .map(|ch| {
+                    serde_json::json!({
+                        "order": ch.order(),
+                        "center_hz": ch.center_hz(),
+                        "bandwidth_hz": ch.bandwidth_hz(),
+                    })
+                })
+                .collect();
+            let output = serde_json::json!({
+                "channels": channels,
+                "iterations": result.iterations,
+                "convergence_error": result.convergence_error,
+                "junction": format!("{:?}", result.junction),
+                "response": {
+                    "frequencies": response.frequencies,
+                    "antenna_s11_db": response.antenna_s11_db,
+                    "channel_s21_db": response.channel_s21_db,
+                    "channel_s11_db": response.channel_s11_db,
+                    "isolation_db": response.isolation_db,
+                },
+            });
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&output)
+                    .map_err(|e| CliRunError::Serialization(e.to_string()))?
+            );
+        }
+        OutputFormat::Table => {
+            println!("── Multiplexer Synthesis ──");
+            println!("  Channels:      {}", result.channels.len());
+            println!("  Iterations:    {}", result.iterations);
+            println!("  Conv. Error:   {:.3e}", result.convergence_error);
+            println!("  Junction:      {:?}", result.junction);
+            println!();
+            for (i, ch) in result.channels.iter().enumerate() {
+                println!(
+                    "  Channel {}: order={}, center={:.6} GHz, bw={:.3} MHz",
+                    i,
+                    ch.order(),
+                    ch.center_hz().unwrap_or(0.0) / 1e9,
+                    ch.bandwidth_hz().unwrap_or(0.0) / 1e6,
+                );
+                match mux.channel_folded(i) {
+                    Ok(matrix) => {
+                        let side = matrix.side();
+                        if side <= 10 {
+                            println!("    Folded coupling matrix:");
+                            for r in 0..side {
+                                let row: Vec<String> = (0..side)
+                                    .map(|c| format!("{:>8.4}", matrix.at(r, c).unwrap_or(0.0)))
+                                    .collect();
+                                println!("    [{}]", row.join(" "));
+                            }
+                        }
+                    }
+                    Err(e) => println!("    (folded matrix unavailable: {e})"),
+                }
+                println!();
+            }
+            println!("── Response ({} points) ──", response.frequencies.len());
+            println!("  Freq: {:.4} GHz – {:.4} GHz", r_start / 1e9, r_stop / 1e9);
+            println!("  Antenna S11:   min {:.1} dB", min_db(&response.antenna_s11_db));
+            for (i, s21) in response.channel_s21_db.iter().enumerate() {
+                println!("  Channel {i} S21: peak {:.1} dB", max_db(s21));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Chooses a response frequency range, defaulting to the outer channel bands.
+fn resolve_multiplexer_range(
+    channels: &[mfs::design::FilterDesign],
+    resp_start: Option<f64>,
+    resp_stop: Option<f64>,
+) -> (f64, f64) {
+    let lo = channels
+        .iter()
+        .map(|ch| ch.center_hz().unwrap_or(0.0) - 1.5 * ch.bandwidth_hz().unwrap_or(0.0))
+        .fold(f64::INFINITY, f64::min);
+    let hi = channels
+        .iter()
+        .map(|ch| ch.center_hz().unwrap_or(0.0) + 1.5 * ch.bandwidth_hz().unwrap_or(0.0))
+        .fold(f64::NEG_INFINITY, f64::max);
+    (resp_start.unwrap_or(lo), resp_stop.unwrap_or(hi))
+}
+
+fn min_db(values: &[f64]) -> f64 {
+    values.iter().copied().fold(f64::INFINITY, f64::min)
+}
+
+fn max_db(values: &[f64]) -> f64 {
+    values.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+}
+
 /// Builds a `SynthesisContext` from a `SynthesisRequest` without running any stages.
 /// This prepares the context for incremental stage execution via `run_stage`.
 fn build_context_from_request(request: SynthesisRequest) -> mfs::Result<SynthesisContext> {
-    // Validate the request
     request.validate().map_err(|ve| {
         mfs::MfsError::PreconditionViolation(ve.to_string())
     })?;

@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f2a1dccec69eee32942aba7e7c52b45bfa17f4190ce3144b9a02a5fe30df7d59 # shrinks to spec = NormalizedFilterSpec { order: 5, return_loss_db: 15.0, transmission_zeros: [TransmissionZero { value: 1.1 }], unloaded_q: None, out_of_band_attenuation: None }

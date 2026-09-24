@@ -14,8 +14,8 @@ use proptest::prelude::*;
 use mfs::approx::generalized_chebyshev_polynomials;
 use mfs::spec::FilterSpec;
 use mfs::synthesis::{
-    classify_residues, synthesize_admittance_polynomials, synthesize_residue_expansions,
-    MatrixSynthesisEngine, ResidueClassification,
+    classify_residues, residue_real_component, synthesize_admittance_polynomials,
+    synthesize_residue_expansions, MatrixSynthesisEngine, ResidueClassification,
 };
 use mfs::transform::{transform_matrix, TopologyKind};
 
@@ -599,15 +599,19 @@ proptest! {
                 if let ResidueClassification::Real { index } = classification {
                     let source_coupling = matrix.at(0, *index + 1).unwrap_or(0.0);
                     let load_coupling = matrix.at(*index + 1, order + 1).unwrap_or(0.0);
-                    let residue_12 = y12.residues[*index].residue.re;
+                    let residue_12 = y12.residues[*index].residue;
+                    // For odd-order filters the transfer residue carries a
+                    // `j`-phase (see `residue_real_component`); use the same
+                    // physically-meaningful component the matrix builder uses.
+                    let residue_12_real = residue_real_component(residue_12);
 
                     let product = source_coupling * load_coupling;
-                    let coupling_diff = (product - residue_12).abs();
+                    let coupling_diff = (product - residue_12_real).abs();
                     prop_assert!(
                         coupling_diff <= 1e-10,
                         "Coupling product at resonator {} should equal residue_12={}, \
                          got source*load = {} * {} = {}, diff={}",
-                        index, residue_12, source_coupling, load_coupling, product, coupling_diff
+                        index, residue_12_real, source_coupling, load_coupling, product, coupling_diff
                     );
                 }
             }

@@ -18,6 +18,12 @@ pub use crate::error::{MfsError, Result};
 pub use crate::matrix::{CouplingMatrix, MatrixTopology};
 pub use crate::response::{ResponseSample, SParameterResponse};
 
+// Duplexer + multiplexer
+pub use crate::duplexer::{ChannelSpec, Duplexer, DuplexerSynthesis, JunctionType};
+pub use crate::multiplexer::{
+    Multiplexer, MultiplexerResponse, MultiplexerSynthesis, MultiplexerSynthesisResult,
+};
+
 // Supporting types (commonly needed)
 pub use crate::freq::{BandPassMapping, FrequencyGrid, FrequencyMapping, LowPassMapping};
 pub use crate::spec::{FilterSpec, FilterSpecBuilder, TransmissionZero};

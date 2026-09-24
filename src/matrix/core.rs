@@ -301,6 +301,13 @@ impl CouplingMatrix {
         }
     }
 
+    // TODO: This mirrors `CouplingMatrix::flip_sign_inplace` in
+    // `src/matrix/sections.rs` (same row/column negation, same diagonal
+    // preservation), differing only in returning a new matrix instead of
+    // mutating in place. Keep the two in sync: a similarity sign flip must
+    // leave the diagonal unchanged (R*M*R^T with R[i][i] = -1). If one is
+    // edited, the other must be checked too. Consider deduplicating into a
+    // single shared helper.
     fn flip_sign(&self, diagonal_index: usize) -> Self {
         let side = self.side();
         let mut result = self.clone();
@@ -312,9 +319,13 @@ impl CouplingMatrix {
         for row in 0..side {
             result.data[row * side + diagonal_index] = -result.data[row * side + diagonal_index];
         }
-        // The diagonal element was negated twice, restore it
-        result.data[diagonal_index * side + diagonal_index] =
-            -result.data[diagonal_index * side + diagonal_index];
+        // The diagonal element has now been negated twice (once by the row
+        // negation, once by the column negation), so it is back to its original
+        // value. A proper similarity flip R*M*R^T (R[i][i] = -1) leaves the
+        // diagonal unchanged, so we must NOT negate it a third time. Negating
+        // it again here was a bug that flipped the self-coupling sign of any
+        // flipped node, corrupting the response (lost transmission zeros) for
+        // even-order asymmetric filters.
         result
     }
 
@@ -331,7 +342,7 @@ impl CouplingMatrix {
         };
 
         for row_oper_num in 0..end_oper {
-            for col_in_row_oper in ((row_oper_num + 2)..=filter_order).rev() {
+            for col_in_row_oper in ((row_oper_num + 2)..=(filter_order - row_oper_num)).rev() {
                 if matrix
                     .get(row_oper_num, col_in_row_oper)
                     .abs()
