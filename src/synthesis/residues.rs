@@ -57,8 +57,22 @@ pub(crate) fn synthesize_admittance_polynomials(
     let p_transfer = generalized
         .p_s
         .scale(complex_from_real(-2.0 / polynomials.eps))?;
-    let conjugated_e = e_s.alternating_conjugate()?;
-    let conjugated_f = f_over_eps_r.alternating_conjugate()?;
+
+    // Cameron's admittance construction uses (-1)^N * P(-s)* for the E and F
+    // mirror terms. For odd N this global sign is mandatory: without it the
+    // denominator's leading coefficient cancels to zero and the poles drift
+    // off the imaginary axis, so the transversal synthesis rejects the result.
+    let parity_sign = if polynomials.order % 2 == 0 {
+        complex_from_real(1.0)
+    } else {
+        complex_from_real(-1.0)
+    };
+    let conjugated_e = e_s
+        .alternating_conjugate()?
+        .scale(parity_sign)?;
+    let conjugated_f = f_over_eps_r
+        .alternating_conjugate()?
+        .scale(parity_sign)?;
 
     let denominator = e_s
         .add(&f_over_eps_r)?

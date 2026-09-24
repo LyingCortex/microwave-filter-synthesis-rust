@@ -361,12 +361,21 @@ pub fn build_e_polynomial_stage(
     eps_r: f64,
 ) -> Result<EPolynomialStage> {
     let solver = DurandKernerRootSolver;
-    let f_w = ComplexPolynomial::new(s_to_w_coefficients(&f_s.coefficients))?;
-    let p_w = ComplexPolynomial::new(s_to_w_coefficients(&p_s.coefficients))?;
+    let f_w_raw = ComplexPolynomial::new(s_to_w_coefficients(&f_s.coefficients))?;
+    let p_w_raw = ComplexPolynomial::new(s_to_w_coefficients(&p_s.coefficients))?;
 
+    // Normalize F(w) and P(w) to monic: the s=jw transform rotates the leading
+    // coefficient by j^N, so without this the F/eps_r and P/eps terms carry the
+    // wrong relative weight (corrupting odd orders, where j^N is imaginary).
+    let f_w = normalize_to_monic(&f_w_raw)?;
+    let p_w = normalize_to_monic(&p_w_raw)?;
+
+    // Cameron's formula: E(w) = F(w)/eps_r + j*P(w)/eps. The j factor on the
+    // P term is required; omitting it shifts E(w)'s roots for every order.
+    let j_over_eps = ComplexCoefficient::new(0.0, 1.0 / eps);
     let e_w = f_w
         .scale(complex_from_real(1.0 / eps_r))?
-        .add(&p_w.scale(complex_from_real(1.0 / eps))?)?;
+        .add(&p_w.scale(j_over_eps)?)?;
 
     let raw_roots = e_w.roots_with(&solver)?;
     // Reflect roots into the stable half-plane before reconstructing the polynomial.
@@ -376,7 +385,10 @@ pub fn build_e_polynomial_stage(
         .map(reflect_to_upper_half_plane)
         .collect::<Vec<_>>();
     let e_w_from_roots = ComplexPolynomial::from_complex_roots(&reflected_roots)?;
-    let e_s = ComplexPolynomial::new(w_to_s_coefficients(&e_w_from_roots.coefficients))?;
+    // The w->s transform scales the leading coefficient by (-j)^N; normalize
+    // back to monic to match the literature gauge.
+    let e_s_raw = ComplexPolynomial::new(w_to_s_coefficients(&e_w_from_roots.coefficients))?;
+    let e_s = normalize_to_monic(&e_s_raw)?;
     let e_s_roots = reflected_roots
         .iter()
         .copied()
