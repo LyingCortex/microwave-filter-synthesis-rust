@@ -57,6 +57,26 @@ pub struct ClassifiedResidues {
     pub conjugate_pairs: Vec<(usize, usize)>,
 }
 
+/// Extracts the real coupling value from a complex residue, tolerating the
+/// `j`-phase introduced by the odd-order `s = j w` convention.
+///
+/// For a Chebyshev prototype, evaluating the transfer at a pole on the
+/// imaginary axis (`s = jω₀`) cancels the phase of the numerator residue:
+/// `r12 / (s - p)` becomes real. The residue itself is real for even-order
+/// filters but purely imaginary for odd-order filters (a `j^order` factor).
+/// Naively taking `.re` therefore yields zero transfer couplings (and hence a
+/// fully-reflective matrix) for odd-order all-pole designs. We prefer the real
+/// part and only fall back to the imaginary part when the real part is
+/// numerically negligible, so even-order behaviour (where the real part is
+/// significant) is preserved exactly.
+pub fn residue_real_component(residue: ComplexCoefficient) -> f64 {
+    if residue.re.abs() <= 1e-10 {
+        residue.im
+    } else {
+        residue.re
+    }
+}
+
 /// Classifies residues as real or complex-conjugate pairs.
 ///
 /// Iterates through residues, detects complex ones (imaginary magnitude > tolerance),
@@ -171,6 +191,7 @@ pub fn classify_residues(
 /// The conjugate's residues are implicitly `conj(r)`, so the sum `r + conj(r) = 2*Re(r)`.
 ///
 /// Returns `(diagonal, source_coupling, load_coupling, cross_coupling)`.
+#[allow(dead_code)]
 pub(crate) fn combine_conjugate_pair(
     pole_a: ComplexCoefficient,
     residue_11_a: ComplexCoefficient,
@@ -244,8 +265,24 @@ pub fn synthesize_admittance_polynomials(
         e_s.clone()
     };
 
-    let conjugated_e = e_normalized.alternating_conjugate()?;
-    let conjugated_f = f_over_eps_r.alternating_conjugate()?;
+    // Cameron's admittance formula uses E(-s)* and F(-s)*, which include a
+    // global (-1)^N factor relative to the simple alternating_conjugate
+    // (conj(c_k) * (-1)^k). Without this factor the leading coefficients of
+    // the denominator cancel for odd N, producing poles off the imaginary
+    // axis and a fully-reflective coupling matrix.
+    let order = polynomials.order;
+    let parity_sign = if order % 2 == 0 {
+        complex_from_real(1.0)
+    } else {
+        complex_from_real(-1.0)
+    };
+
+    let conjugated_e = e_normalized
+        .alternating_conjugate()?
+        .scale(parity_sign)?;
+    let conjugated_f = f_over_eps_r
+        .alternating_conjugate()?
+        .scale(parity_sign)?;
 
     let denominator = e_normalized
         .add(&f_over_eps_r)?
@@ -262,7 +299,6 @@ pub fn synthesize_admittance_polynomials(
 
     // Fallback: if the symmetric construction still causes degree loss
     // (e.g., due to numerical noise), use the simpler Cameron formulation.
-    let order = polynomials.order;
     if denominator.degree() < order {
         let alt_denominator = e_normalized.add(&f_over_eps_r)?;
         let alt_y11 = e_normalized.sub(&f_over_eps_r)?;
@@ -340,14 +376,15 @@ pub(crate) fn build_transversal_from_residues(
 
                 let pole_imag = pole.im;
 
-                // For poles classified as Real, extract the real part of each residue.
-                // The classification step already determined this pole should be treated
-                // as real (either because it's near the origin, has real residues, or
-                // is an unpaired complex pole from complex polynomial arithmetic).
-                // In all cases, we take Re(residue) as the physically meaningful value.
-                let residue_11 = y11.residues[idx].residue.re;
-                let residue_12 = y12.residues[idx].residue.re;
-                let residue_22 = y22.residues[idx].residue.re;
+                // For poles classified as Real, extract a real coupling value from
+                // each residue. The classification step already determined this pole
+                // should be treated as real (either because it's near the origin, has
+                // real residues, or is an unpaired complex pole from complex polynomial
+                // arithmetic). The dominant real/imaginary component is used to tolerate
+                // the odd-order `j`-phase of the transfer residue.
+                let residue_11 = residue_real_component(y11.residues[idx].residue);
+                let residue_12 = residue_real_component(y12.residues[idx].residue);
+                let residue_22 = residue_real_component(y22.residues[idx].residue);
                 let use_r11 = residue_11.abs() >= residue_22.abs();
 
                 let source = if use_r11 {
@@ -380,29 +417,49 @@ pub(crate) fn build_transversal_from_residues(
                     )));
                 }
 
-                // Combine the conjugate pair to get real-valued couplings for pole_a
-                let (diagonal_a, source_a, load_a, _cross_a) = combine_conjugate_pair(
-                    pole_a,
-                    y11.residues[idx_a].residue,
-                    y12.residues[idx_a].residue,
-                    y22.residues[idx_a].residue,
-                )?;
+                // Each pole of the conjugate pair maps to an independent row/column
+                // in the transversal matrix (Cameron 2003, Section III).
+                // Extract real-valued couplings from each pole's residue independently,
+                // tolerating the odd-order `j`-phase of the transfer residue.
+                let residue_11_a = residue_real_component(y11.residues[idx_a].residue);
+                let residue_12_a = residue_real_component(y12.residues[idx_a].residue);
+                let residue_22_a = residue_real_component(y22.residues[idx_a].residue);
+                let use_r11_a = residue_11_a.abs() >= residue_22_a.abs();
 
-                // Combine the conjugate pair to get real-valued couplings for pole_b
-                let (diagonal_b, source_b, load_b, _cross_b) = combine_conjugate_pair(
-                    pole_b,
-                    y11.residues[idx_b].residue,
-                    y12.residues[idx_b].residue,
-                    y22.residues[idx_b].residue,
-                )?;
+                let source_a = if use_r11_a {
+                    nonzero_sqrt_abs(residue_11_a, "y11 residue (pair a)")?
+                } else {
+                    residue_12_a / nonzero_sqrt_abs(residue_22_a, "y22 residue (pair a)")?
+                };
+                let load_a = if use_r11_a {
+                    residue_12_a / nonzero_sqrt_abs(residue_11_a, "y11 residue (pair a)")?
+                } else {
+                    nonzero_sqrt_abs(residue_22_a, "y22 residue (pair a)")?
+                };
+
+                let residue_11_b = residue_real_component(y11.residues[idx_b].residue);
+                let residue_12_b = residue_real_component(y12.residues[idx_b].residue);
+                let residue_22_b = residue_real_component(y22.residues[idx_b].residue);
+                let use_r11_b = residue_11_b.abs() >= residue_22_b.abs();
+
+                let source_b = if use_r11_b {
+                    nonzero_sqrt_abs(residue_11_b, "y11 residue (pair b)")?
+                } else {
+                    residue_12_b / nonzero_sqrt_abs(residue_22_b, "y22 residue (pair b)")?
+                };
+                let load_b = if use_r11_b {
+                    residue_12_b / nonzero_sqrt_abs(residue_11_b, "y11 residue (pair b)")?
+                } else {
+                    nonzero_sqrt_abs(residue_22_b, "y22 residue (pair b)")?
+                };
 
                 // Assign entries for pole_a's row
-                builder = builder.set(idx_a + 1, idx_a + 1, diagonal_a)?;
+                builder = builder.set(idx_a + 1, idx_a + 1, -pole_a.im)?;
                 builder = builder.set_symmetric(0, idx_a + 1, source_a)?;
                 builder = builder.set_symmetric(idx_a + 1, order + 1, load_a)?;
 
                 // Assign entries for pole_b's row
-                builder = builder.set(idx_b + 1, idx_b + 1, diagonal_b)?;
+                builder = builder.set(idx_b + 1, idx_b + 1, -pole_b.im)?;
                 builder = builder.set_symmetric(0, idx_b + 1, source_b)?;
                 builder = builder.set_symmetric(idx_b + 1, order + 1, load_b)?;
             }
@@ -801,31 +858,31 @@ mod tests {
             );
         }
 
-        // Verify reference matrix values from the current implementation (captured values)
-        // These values serve as the backward compatibility baseline.
-        assert_approx_eq(matrix.at(0, 1).unwrap(), 4.5872405777715969e-1, 1e-10,
+        // Reference values cross-validated against the fuqtgui Python engine
+        // (CouplingMatrix.find_Ps / find_Es / coupling_matrix pipeline).
+        assert_approx_eq(matrix.at(0, 1).unwrap(), 3.2436689194764357e-1, 1e-10,
             "reference value M[0,1]");
-        assert_approx_eq(matrix.at(0, 2).unwrap(), 9.0503295577547382e-1, 1e-10,
+        assert_approx_eq(matrix.at(0, 2).unwrap(), 6.3995494022614496e-1, 1e-10,
             "reference value M[0,2]");
-        assert_approx_eq(matrix.at(0, 3).unwrap(), 9.0503295577547360e-1, 1e-10,
+        assert_approx_eq(matrix.at(0, 3).unwrap(), 6.3995494022614707e-1, 1e-10,
             "reference value M[0,3]");
-        assert_approx_eq(matrix.at(0, 4).unwrap(), 4.5872405777716063e-1, 1e-10,
+        assert_approx_eq(matrix.at(0, 4).unwrap(), 3.2436689194763746e-1, 1e-10,
             "reference value M[0,4]");
-        assert_approx_eq(matrix.at(1, 1).unwrap(), 1.2452660363370740e0, 1e-10,
+        assert_approx_eq(matrix.at(1, 1).unwrap(), 1.2452660363370787e0, 1e-10,
             "reference value M[1,1]");
-        assert_approx_eq(matrix.at(1, 5).unwrap(), -4.5872405777716097e-1, 1e-10,
+        assert_approx_eq(matrix.at(1, 5).unwrap(), -3.2436689194763552e-1, 1e-10,
             "reference value M[1,5]");
-        assert_approx_eq(matrix.at(2, 2).unwrap(), 7.6299234763017876e-1, 1e-10,
+        assert_approx_eq(matrix.at(2, 2).unwrap(), 7.6299234763018264e-1, 1e-10,
             "reference value M[2,2]");
-        assert_approx_eq(matrix.at(2, 5).unwrap(), 9.0503295577547394e-1, 1e-10,
+        assert_approx_eq(matrix.at(2, 5).unwrap(), 6.3995494022614674e-1, 1e-10,
             "reference value M[2,5]");
-        assert_approx_eq(matrix.at(3, 3).unwrap(), -7.6299234763017876e-1, 1e-10,
+        assert_approx_eq(matrix.at(3, 3).unwrap(), -7.6299234763018497e-1, 1e-10,
             "reference value M[3,3]");
-        assert_approx_eq(matrix.at(3, 5).unwrap(), -9.0503295577547405e-1, 1e-10,
+        assert_approx_eq(matrix.at(3, 5).unwrap(), -6.3995494022614741e-1, 1e-10,
             "reference value M[3,5]");
-        assert_approx_eq(matrix.at(4, 4).unwrap(), -1.2452660363370742e0, 1e-10,
+        assert_approx_eq(matrix.at(4, 4).unwrap(), -1.2452660363370769e0, 1e-10,
             "reference value M[4,4]");
-        assert_approx_eq(matrix.at(4, 5).unwrap(), 4.5872405777715902e-1, 1e-10,
+        assert_approx_eq(matrix.at(4, 5).unwrap(), 3.2436689194764701e-1, 1e-10,
             "reference value M[4,5]");
 
         Ok(())
