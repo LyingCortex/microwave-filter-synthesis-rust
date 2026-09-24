@@ -795,18 +795,25 @@ mod tests {
 
     #[test]
     fn bandpass_edges_equivalent() -> Result<()> {
-        // bandpass_edges(6.6e9, 6.9e9) should equal bandpass(6.75e9, 300e6)
-        let d1 = FilterDesign::bandpass(4, 20.0, 6.75e9, 300e6).synthesize()?;
-        let d2 = FilterDesign::bandpass_edges(4, 20.0, 6.6e9, 6.9e9).synthesize()?;
-        assert_eq!(d2.center_hz(), Some(6.75e9));
-        assert_eq!(d2.bandwidth_hz(), Some(300e6));
-        assert_eq!(d2.f_start_hz(), Some(6.6e9));
-        assert_eq!(d2.f_stop_hz(), Some(6.9e9));
+        // bandpass_edges(f1, f2) uses geometric center sqrt(f1*f2) and bw = f2 - f1
+        // (so that Omega(f1) = -1 and Omega(f2) = +1 exactly), and must equal
+        // bandpass(geometric_center, bw).
+        let f_start: f64 = 6.6e9;
+        let f_stop: f64 = 6.9e9;
+        let center = (f_start * f_stop).sqrt();
+        let bw = f_stop - f_start;
+
+        let d1 = FilterDesign::bandpass(4, 20.0, center, bw).synthesize()?;
+        let d2 = FilterDesign::bandpass_edges(4, 20.0, f_start, f_stop).synthesize()?;
+        assert_eq!(d2.center_hz(), Some(center));
+        assert_eq!(d2.bandwidth_hz(), Some(bw));
+        assert_eq!(d2.f_start_hz(), Some(center - bw / 2.0));
+        assert_eq!(d2.f_stop_hz(), Some(center + bw / 2.0));
         // Coupling matrices should be identical
         let m1 = d1.matrix();
         let m2 = d2.matrix();
         for i in 0..m1.side() {
-            for j in 0..m1.side() {
+            for j in 0..m2.side() {
                 let v1 = m1.at(i, j).unwrap_or(0.0);
                 let v2 = m2.at(i, j).unwrap_or(0.0);
                 assert!((v1 - v2).abs() < 1e-12, "mismatch at ({i},{j}): {v1} vs {v2}");

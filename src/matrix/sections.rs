@@ -109,6 +109,11 @@ impl CouplingMatrix {
         transmission_zero: f64,
         zero_positions: (usize, usize),
     ) -> Result<Self> {
+        if self.topology() != MatrixTopology::Arrow {
+            return Err(MfsError::PreconditionViolation(
+                "extract_trisection requires an Arrow-topology matrix (trisection patterns only exist in the arrow reduction); convert with transform_topology(MatrixTopology::Arrow) first".to_string(),
+            ));
+        }
         validate_trisection_positions(self.order(), zero_positions)?;
         if !transmission_zero.is_finite() {
             return Err(MfsError::InvalidTransmissionZero(

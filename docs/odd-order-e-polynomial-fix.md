@@ -161,7 +161,25 @@ two-TZ coupling matrix (M[0,1], M[0,2], …) now agrees with Python to 8.77e-15.
 - `src/synthesis/residues.rs::order_4_with_2_tzs_backward_compatibility`
   reference values re-captured from the corrected output and cross-validated
   against the fuqtgui Python engine.
-- `cargo test --lib`: 184 pass. Two pre-existing failures are unrelated to this
-  change (`bandpass_edges_equivalent` — center-frequency arithmetic vs geometric
-  mean; `trisection_extraction_rejects_non_arrow_input` — matrix topology
-  validation) and were failing before this fix.
+- `src/fixtures/mod.rs::cameron_order3_generalized_pipeline_exact_case` — the
+  order-3 E(s) anchor was a stale capture of the old un-normalized gauge
+  (leading coefficient `j`); updated to the monic gauge, verified against the
+  independent fuqtgui Python reference to ~1e-15.
+- `tests/synthesis_properties.rs::property_10` — the old coefficient-parity
+  assertion (even powers real, odd powers imaginary) was gauge-fragile: the
+  admittance denominator is only defined up to a global ±1/±j rotation of
+  E(s), so a fixed coefficient parity cannot hold across gauges (it had been
+  failing pre-fix with a committed regression seed). Rewritten to the
+  gauge-independent physical invariant it was meant to check: all denominator
+  poles lie on the imaginary axis — the same invariant the transversal builder
+  enforces via `pole_axis_tolerance`.
+- `src/design.rs::bandpass_edges_equivalent` — the test compared
+  `bandpass_edges(f1, f2)` (geometric center `√(f1·f2)`, which the bandpass
+  transform requires for Ω(±1) at the edges) against `bandpass(6.75e9, …)`
+  (arithmetic mean). Fixed the test to compare against the geometric center.
+- `src/matrix/sections.rs::extract_trisection` — added the missing
+  Arrow-topology precondition (the test
+  `trisection_extraction_rejects_non_arrow_input` already expected it; all
+  legitimate call paths convert to Arrow first).
+- `cargo test`: **285 passed, 0 failed, 1 ignored** (full suite: lib unit,
+  integration, and property tests).

@@ -698,94 +698,51 @@ proptest! {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(100))]
 
-    /// Property 10: Admittance polynomial coefficient parity
+    /// Property 10: Admittance denominator poles lie on the imaginary axis
     ///
-    /// For any valid FilterSpec where E(s) has the expected parity structure
-    /// (purely real coefficients on even powers, purely imaginary on odd powers),
-    /// the admittance denominator polynomial SHALL preserve this parity:
-    /// - Even-power coefficients are purely real (|imaginary part| < 1e-10)
-    /// - Odd-power coefficients are purely imaginary (|real part| < 1e-10)
+    /// For any valid FilterSpec, the lossless admittance denominator polynomial
+    /// SHALL have all of its poles on the imaginary axis (|Re(pole)| < tol).
     ///
-    /// The admittance denominator is constructed as E + F/eps_r + conj(F/eps_r) + conj(E)
-    /// where conj is the alternating_conjugate operation. This construction inherently
-    /// produces a polynomial with the parity structure for generalized Chebyshev filters.
-    /// The precondition verifies E(s) has a compatible parity structure before asserting.
+    /// This is the gauge-independent form of the requirement-8.4 parity
+    /// invariant. The denominator D(s) = E + F/eps_r + (-1)^N E(-s)* +
+    /// (-1)^N F(-s)*/eps_r is only defined up to a global phase (a ±1/±j
+    /// rotation of E(s) does not change the filter), so asserting a fixed
+    /// coefficient parity (even=real / odd=imaginary) is fragile: it holds in
+    /// one gauge but not a rotated one. The phase-free, physical statement is
+    /// that D(s) is an even or odd real polynomial, i.e. D(jω) is real for real
+    /// ω, which is equivalent to all poles lying on the imaginary axis. This is
+    /// also precisely the invariant the transversal builder enforces via its
+    /// `pole_axis_tolerance`, so a violation here would corrupt the coupling
+    /// matrix (real parts become self-coupling offsets, breaking the response).
     #[test]
-    fn property_10_admittance_polynomial_coefficient_parity(spec in filter_spec_strategy()) {
-        // Generate polynomials
+    fn property_10_admittance_denominator_poles_on_imaginary_axis(spec in filter_spec_strategy()) {
         let polynomials = generalized_chebyshev_polynomials(&spec)
             .expect("polynomial generation should succeed for valid specs");
 
-        // Access E(s) from the generalized data
-        let generalized = match polynomials.generalized.as_ref() {
-            Some(g) => g,
-            None => return Ok(()), // Skip if no generalized data
-        };
-        let e_s = match generalized.e_s.as_ref() {
-            Some(e) => e,
-            None => return Ok(()), // Skip if E(s) is not available
-        };
-
-        // Verify precondition: E(s) has a compatible parity structure.
-        // For generalized Chebyshev filters, E(s) can be:
-        // - All real coefficients (even-order all-pole)
-        // - All imaginary coefficients (odd-order)
-        // - Strict alternating parity (even=real, odd=imaginary)
-        // In all these cases, the denominator construction preserves parity.
-        //
-        // We check that each coefficient is either purely real OR purely imaginary
-        // (i.e., it lies on one of the axes in the complex plane). This is the
-        // structural property that ensures the denominator has parity.
-        let parity_tolerance = 1e-10;
-        let e_has_axis_aligned_coefficients = e_s.coefficients.iter().all(|coeff| {
-            coeff.re.abs() <= parity_tolerance || coeff.im.abs() <= parity_tolerance
-        });
-
-        // If E(s) does not have axis-aligned coefficients, skip this test case.
-        // The property only applies when E(s) has the expected structure.
-        if !e_has_axis_aligned_coefficients {
-            return Ok(());
-        }
-
-        // Compute admittance polynomials
         let admittance = synthesize_admittance_polynomials(&polynomials)
             .expect("synthesize_admittance_polynomials should succeed for valid specs");
 
-        // Assert denominator polynomial preserves parity:
-        // Even-power coefficients are purely real (|im| < 1e-10)
-        // Odd-power coefficients are purely imaginary (|re| < 1e-10)
-        for (power, coeff) in admittance.denominator.coefficients.iter().enumerate() {
-            if power % 2 == 0 {
-                // Even power: should be purely real
-                prop_assert!(
-                    coeff.im.abs() < 1e-10,
-                    "Denominator coefficient at power {} should be purely real, \
-                     but has imaginary part {}. Coefficient = {} + {}i. \
-                     Spec: order={}, return_loss={}, tzs={:?}",
-                    power,
-                    coeff.im,
-                    coeff.re,
-                    coeff.im,
-                    spec.order,
-                    spec.return_loss_db,
-                    spec.transmission_zeros
-                );
-            } else {
-                // Odd power: should be purely imaginary
-                prop_assert!(
-                    coeff.re.abs() < 1e-10,
-                    "Denominator coefficient at power {} should be purely imaginary, \
-                     but has real part {}. Coefficient = {} + {}i. \
-                     Spec: order={}, return_loss={}, tzs={:?}",
-                    power,
-                    coeff.re,
-                    coeff.re,
-                    coeff.im,
-                    spec.order,
-                    spec.return_loss_db,
-                    spec.transmission_zeros
-                );
-            }
+        // Adaptive pole-axis tolerance matching the transversal builder
+        // (residues::build_transversal_from_residues): 1e-6, scaled by (N/5)^2.
+        let order = polynomials.order as f64;
+        let tolerance = 1e-6_f64.max(1e-6 * (order / 5.0).powi(2));
+
+        let poles = admittance
+            .denominator
+            .roots()
+            .expect("denominator root-finding should succeed for a valid spec");
+
+        for pole in &poles {
+            prop_assert!(
+                pole.re.abs() < tolerance,
+                "Admittance denominator pole has real part {} (tolerance {}), \
+                 spec: order={}, return_loss={}, tzs={:?}",
+                pole.re,
+                tolerance,
+                spec.order,
+                spec.return_loss_db,
+                spec.transmission_zeros
+            );
         }
     }
 }
