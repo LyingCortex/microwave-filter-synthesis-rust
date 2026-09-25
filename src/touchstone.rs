@@ -128,9 +128,9 @@ pub fn write_touchstone(
 
 /// Reads a Touchstone file using the `touchstone` crate and returns S-parameter data.
 pub fn read_touchstone(path: impl AsRef<Path>) -> Result<SParameterResponse> {
-    let path_str = path.as_ref().to_str()
-        .ok_or_else(|| MfsError::PreconditionViolation("invalid file path".into()))?;
-    let network = touchstone::Network::new(path_str.to_string());
+    let network = touchstone::Network::new(path.as_ref()).map_err(|e| {
+        MfsError::PreconditionViolation(format!("failed to parse Touchstone file: {e}"))
+    })?;
 
     if network.rank != 2 {
         return Err(MfsError::PreconditionViolation(
