@@ -101,7 +101,10 @@ pub fn format_response_samples_table_data(samples: &[ResponseSample]) -> Table {
                 format_signed_number(sample.normalized_omega),
                 format_complex_scalar_parts(sample.s11_re, sample.s11_im),
                 format_complex_scalar_parts(sample.s21_re, sample.s21_im),
-                format_signed_number(sample.group_delay),
+                match sample.group_delay {
+                    Some(gd) => format_signed_number(gd),
+                    None => "n/a".to_string(),
+                },
             ]
         })
         .collect::<Vec<_>>();

@@ -172,9 +172,14 @@ pub fn compare_responses(
         comparison.max_s21_magnitude_deviation = comparison
             .max_s21_magnitude_deviation
             .max((magnitude(left.s21_re, left.s21_im) - magnitude(right.s21_re, right.s21_im)).abs());
-        comparison.max_group_delay_deviation = comparison
-            .max_group_delay_deviation
-            .max((left.group_delay - right.group_delay).abs());
+        // Group delay is only compared where both samples have it (the
+        // pole-expansion fast path leaves it None); mixed/missing values are
+        // skipped rather than treated as a zero deviation.
+        if let (Some(l), Some(r)) = (left.group_delay, right.group_delay) {
+            comparison.max_group_delay_deviation = comparison
+                .max_group_delay_deviation
+                .max((l - r).abs());
+        }
     }
 
     Ok(comparison)
@@ -359,7 +364,7 @@ mod tests {
         ResponseSample {
             frequency_hz,
             normalized_omega,
-            group_delay: 0.25,
+            group_delay: Some(0.25),
             s11_re,
             s11_im: 0.0,
             s21_re,

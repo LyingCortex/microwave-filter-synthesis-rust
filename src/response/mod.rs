@@ -13,7 +13,9 @@ pub struct ResponseSample {
     /// Matching normalized frequency used internally by the solver.
     pub normalized_omega: f64,
     /// Approximate group delay derived from the solved response matrix.
-    pub group_delay: f64,
+    /// `None` when the solver cannot compute it (e.g. the pole-expansion
+    /// fast path) — never a silent 0.0.
+    pub group_delay: Option<f64>,
     /// Real part of the reflection coefficient.
     pub s11_re: f64,
     /// Imaginary part of the reflection coefficient.
@@ -166,18 +168,66 @@ mod tests {
         assert_eq!(response.samples.len(), 5);
         assert_ne!(response.samples[0].s21_re, response.samples[2].s21_re);
         assert_eq!(response.samples[2].normalized_omega, 0.0);
-        assert!(response.samples[2].group_delay.is_finite());
+        assert!(response.samples[2].group_delay.unwrap().is_finite());
         Ok(())
     }
 
     #[test]
     fn response_normalized_evaluate_uses_normalized_grid_values() -> Result<()> {
-        let matrix = CouplingMatrix::identity(2)?;
+        // A loaded 2-resonator chain (non-degenerate) so the LU backend's
+        // group-delay expression has a non-zero denominator.
+        let matrix = CouplingMatrixBuilder::new(2)?
+            .set_symmetric(0, 1, 0.5)?
+            .set_symmetric(1, 2, 0.7)?
+            .set_symmetric(2, 3, 0.5)?
+            .build()?;
         let grid = FrequencyGrid::linspace(1.0, 2.0, 3)?;
         let response = ResponseSolver::default().evaluate_normalized(&matrix, &grid)?;
 
         assert_eq!(response.samples[0].normalized_omega, 1.0);
-        assert!(response.samples[0].group_delay.is_finite());
+        assert!(response.samples[0].group_delay.unwrap().is_finite());
+        Ok(())
+    }
+
+    /// The LU backend must mark group delay `None` (not a fake 0.0) when its
+    /// expression is numerically degenerate — e.g. an identity matrix whose
+    /// transmission column is zero.
+    #[test]
+    fn group_delay_is_none_when_lu_expression_is_degenerate() -> Result<()> {
+        let matrix = CouplingMatrix::identity(2)?;
+        let grid = FrequencyGrid::linspace(1.0, 2.0, 3)?;
+        let response = ResponseSolver::default().evaluate_normalized(&matrix, &grid)?;
+        assert!(
+            response.samples[0].group_delay.is_none(),
+            "degenerate LU group delay must be None, not 0.0"
+        );
+        Ok(())
+    }
+
+    /// T4.3: group delay must be explicit per solver path, never a silent 0.0.
+    /// The LU backend computes it (`Some`); the pole-expansion fast path does
+    /// not and marks it `None`.
+    #[test]
+    fn group_delay_is_explicit_per_solver_path() -> Result<()> {
+        let matrix = CouplingMatrixBuilder::new(2)?
+            .set_symmetric(0, 1, 0.5)?
+            .set_symmetric(1, 2, 0.7)?
+            .set_symmetric(2, 3, 0.5)?
+            .build()?;
+        let grid = FrequencyGrid::linspace(-2.0, 2.0, 5)?;
+
+        let lu = ResponseSolver::default().evaluate_normalized(&matrix, &grid)?;
+        assert!(
+            lu.samples[0].group_delay.is_some(),
+            "LU backend must provide a group delay"
+        );
+
+        let pole = crate::response::pole_expansion::PoleExpansionData::from_matrix(&matrix)?;
+        let pe = pole.evaluate_normalized(&grid)?;
+        assert!(
+            pe.samples.iter().all(|s| s.group_delay.is_none()),
+            "pole-expansion fast path must mark group_delay None, not a silent 0.0"
+        );
         Ok(())
     }
 

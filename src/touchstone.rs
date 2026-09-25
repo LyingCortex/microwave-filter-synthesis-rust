@@ -145,7 +145,7 @@ pub fn read_touchstone(path: impl AsRef<Path>) -> Result<SParameterResponse> {
         .map(|(s11, s21)| ResponseSample {
             frequency_hz: s11.frequency,
             normalized_omega: 0.0,
-            group_delay: 0.0,
+            group_delay: None,
             s11_re: s11.s_ri.0,
             s11_im: s11.s_ri.1,
             s21_re: s21.s_ri.0,

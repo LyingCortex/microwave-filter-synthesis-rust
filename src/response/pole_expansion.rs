@@ -246,7 +246,9 @@ impl PoleExpansionData {
                 ResponseSample {
                     frequency_hz: omega,
                     normalized_omega: omega,
-                    group_delay: 0.0, // Not available from pole expansion
+                    // Pole expansion does not compute group delay: explicit
+                    // None rather than a silent 0.0 (T4.3).
+                    group_delay: None,
                     s11_re: s11.re,
                     s11_im: s11.im,
                     s21_re: s21.re,
@@ -274,7 +276,7 @@ impl PoleExpansionData {
                 Ok(ResponseSample {
                     frequency_hz: freq_hz,
                     normalized_omega: omega,
-                    group_delay: 0.0,
+                    group_delay: None,
                     s11_re: s11.re,
                     s11_im: s11.im,
                     s21_re: s21.re,

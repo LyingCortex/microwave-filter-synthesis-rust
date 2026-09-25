@@ -66,10 +66,12 @@ pub(super) fn evaluate_response(
                 acc + row_last[index] * col_first[index]
             });
             let denominator = col_first[side - 1];
+            // None when the group-delay expression is numerically degenerate:
+            // undefined is explicit, a fake 0.0 is not (T4.3).
             let group_delay = if denominator.norm_sqr() <= 1e-18 {
-                0.0
+                None
             } else {
-                (numerator / denominator).im
+                Some((numerator / denominator).im)
             };
 
             Ok(ResponseSample {

@@ -335,7 +335,7 @@ impl PyFilterDesign {
             samples: freqs.iter().enumerate().map(|(i, &f)| ResponseSample {
                 frequency_hz: f,
                 normalized_omega: f,
-                group_delay: 0.0,
+                group_delay: None,
                 s11_re: target_s11_re[i],
                 s11_im: target_s11_im[i],
                 s21_re: target_s21_re[i],
