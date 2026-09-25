@@ -48,6 +48,72 @@ fn representable_db(v: f64) -> bool {
     v.is_finite() || v == f64::NEG_INFINITY
 }
 
+/// Maximum absolute entry-wise difference between two same-order coupling
+/// matrices. The matrix is (N+2)×(N+2); `order()` is N.
+fn max_matrix_delta(a: &CouplingMatrix, b: &CouplingMatrix) -> f64 {
+    assert_eq!(a.order(), b.order(), "matrices must have the same order");
+    let n = a.order() + 2;
+    let mut max = 0.0_f64;
+    for i in 0..n {
+        for j in 0..n {
+            let av = a.at(i, j).unwrap_or(0.0);
+            let bv = b.at(i, j).unwrap_or(0.0);
+            max = max.max((av - bv).abs());
+        }
+    }
+    max
+}
+
+/// Synthesizes a single channel independently through the exact per-channel
+/// path the multiplexer uses (`FilterSpec::new` → `generalized_chebyshev_polynomials`
+/// → `MatrixSynthesisEngine::synthesize`, no zeros, no explicit unloaded Q —
+/// mirroring `MultiplexerSynthesis::build_spec`). In the mutual-loading no-op
+/// state this is bit-identical to the multiplexer's recovered channel matrix;
+/// it is the reference the propagation tests compare against.
+fn independent_matrix(order: usize, rl: f64) -> mfs::error::Result<CouplingMatrix> {
+    let spec = FilterSpec::new(order, rl)?;
+    let polys = generalized_chebyshev_polynomials(&spec)?;
+    mfs::synthesis::MatrixSynthesisEngine.synthesize(&polys)
+}
+
+/// Regression guard (P1): far-apart channels' mutual loading vanishes, so the
+/// recovered channel matrix must converge to independent per-channel synthesis.
+/// Passes trivially today (the perturbation is a no-op, so recovered ==
+/// independent); it guards that the propagation fix does not make far-apart
+/// channels diverge from the independent result.
+#[test]
+fn separation_limit_converges_to_independent() -> mfs::error::Result<()> {
+    let a = channel(5, 20.0, 10.0e9, 100.0e6);
+    let b = channel(5, 20.0, 12.0e9, 100.0e6); // 2 GHz apart, 100 MHz bandwidth
+    let mux = MultiplexerSynthesis::new().channels([a, b]).synthesize()?;
+    let ref0 = independent_matrix(5, 20.0)?;
+    let delta = max_matrix_delta(mux.channels[0].matrix(), &ref0);
+    assert!(
+        delta < 1.0e-6,
+        "far-apart channel must converge to independent synthesis (max|Δg| = {delta}, expected < 1e-6)"
+    );
+    Ok(())
+}
+
+/// RED (P1): adjacent/overlapping channels must exhibit mutual loading — the
+/// recovered channel matrix must DIFFER from independent per-channel synthesis.
+/// This fails today because the perturbation is a no-op (recovered ==
+/// independent, so max|Δg| = 0); it is the test that proves mutual loading
+/// actually propagates into the output matrices.
+#[test]
+fn adjacent_channels_show_loading() -> mfs::error::Result<()> {
+    let a = channel(5, 20.0, 10.0e9, 150.0e6);
+    let b = channel(5, 20.0, 10.1e9, 150.0e6); // 100 MHz apart, 150 MHz bandwidth -> overlap
+    let mux = MultiplexerSynthesis::new().channels([a, b]).synthesize()?;
+    let ref0 = independent_matrix(5, 20.0)?;
+    let delta = max_matrix_delta(mux.channels[0].matrix(), &ref0);
+    assert!(
+        delta > 1.0e-12,
+        "adjacent channels must show mutual loading: recovered matrix must differ from independent synthesis (max|Δg| = {delta}, expected > 1e-12; a no-op leaves it exactly 0)"
+    );
+    Ok(())
+}
+
 /// N=2 multiplexer synthesis must match the established diplexer band
 /// placement: two channels, iterations run, convergence error finite, centers
 /// preserved within a small tolerance, correctly ordered (tx < rx). The
