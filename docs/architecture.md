@@ -34,9 +34,15 @@ synthesis with finite transmission zeros.
 src/
 ├── lib.rs              Crate root: re-exports and legacy compatibility
 ├── design.rs           High-level FilterDesign API (primary entry point)
-├── prelude.rs          Minimal re-exports for common workflows
+├── prelude.rs          Re-exports for common workflows
 ├── error.rs            Structured error enum (MfsError) and Result alias
 ├── freq.rs             Frequency mappings (LowPass, BandPass) and grid generation
+├── duplexer.rs         2-channel (Tx/Rx) duplexer synthesis + N-port analysis
+├── multiplexer.rs      Generalized N-channel multiplexer synthesis + analysis
+├── optimize.rs         Coupling-matrix tuning/extraction (Levenberg-Marquardt)
+├── spectral.rs         Spectral factorization (cepstrum + companion eigenvalues)
+├── touchstone.rs       Touchstone (.s2p) export and import
+├── python.rs           Python bindings (optional, behind `python` feature)
 ├── approx/             Polynomial approximation
 │   ├── mod.rs              Module facade
 │   ├── polynomial.rs       PolynomialSet and GeneralizedChebyshevData types
@@ -300,6 +306,38 @@ Terminal and markdown report generation for synthesis results.
 
 Literature-backed reference filter configurations loaded from JSON database.
 
+### `duplexer` — 2-Channel Duplexer
+
+Synthesizes and analyzes a Tx/Rx duplexer sharing a common antenna port.
+Combines two band-pass `FilterDesign`s and computes the 3-port S-parameters
+(including an ideal-junction model). Provides `ChannelSpec`, `JunctionType`,
+`DuplexerSynthesis` (iterative Macchiarella-style perturbation), and
+`Duplexer::response`.
+
+### `multiplexer` — N-Channel Multiplexer
+
+Generalizes the duplexer to an arbitrary number of channels over a common
+junction. `MultiplexerSynthesis` runs the iterative mutual-loading loop;
+`Multiplexer` provides (N+1)-port analysis (`response`, `channel`,
+`channel_folded`, `channel_matrices`). Built on `FilterDesign`.
+
+### `optimize` — Coupling-Matrix Optimization
+
+Levenberg-Marquardt nonlinear least-squares for two workflows: **tuning**
+(match a target S-parameter response) and **extraction** (recover a matrix from
+measured data). `OptimizeConfig` / `OptimizeResult`.
+
+### `spectral` — Spectral Factorization
+
+Polynomial decomposition `R(s) = D(s)·D*(s)` with `D` all-LHP. Two methods:
+cepstrum (FFT-based, `rustfft`) and balanced companion-matrix eigenvalues.
+Used by the duplexer/multiplexer full-iteration path.
+
+### `touchstone` — Touchstone I/O
+
+`.s2p` export/import (v1.0/v2.0, RI/MA/DB, Hz/kHz/MHz/GHz, configurable
+reference impedance). `design.save_touchstone` / `design.to_touchstone`.
+
 ## CLI Interface
 
 ```
@@ -371,13 +409,18 @@ All errors are `Serialize + Deserialize` for structured JSON error reporting.
 
 ```toml
 [dependencies]
-nalgebra = "0.33"        # Matrix operations (multiply, transpose, eigenvalues)
+nalgebra = "0.33"        # Matrix operations (LU solve, Schur, eigenvalues)
 num-complex = "0.4"      # Complex arithmetic for polynomials and response
-serde = "1"              # Serialization for pipeline I/O and error types
+faer = "0.20"            # Complex companion-matrix eigenvalues (root finding)
+rustfft = "6.2"          # FFT for cepstrum spectral factorization
+serde = { version = "1", features = ["derive"] }  # Serialization
 serde_json = "1"         # JSON parsing for pipeline requests
-clap = "4"               # CLI argument parsing (optional, behind "cli" feature)
+touchstone = { version = "0.12.1", default-features = false }  # .s2p parsing
+clap = { version = "4", features = ["derive"], optional = true }   # CLI (feature "cli")
+pyo3 = { version = "0.23", features = ["extension-module"], optional = true }  # Python (feature "python")
 
 [dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }  # Benchmarking
 proptest = "1.6"         # Property-based testing
 ```
 
@@ -443,7 +486,10 @@ let context = run_full_pipeline(request)?;
    is not implemented.
 3. **Wheel topology** is deprecated and currently an alias for Arrow.
 4. **HighPass and BandStop** frequency mappings are not implemented.
-5. **Touchstone (.s2p) export** is not available — no EDA tool interop format.
+5. **N-channel mutual loading** — the duplexer/multiplexer iterative
+   perturbation currently does not propagate into the output coupling matrices
+   (the engine consumes `generalized.e_s/f_s/p_s`, not the rebuilt `.e`/`.f`).
+   Tracked in `docs/internal/architecture-review-2026-09-25.md` (P1).
 
 ## Future Roadmap
 
@@ -451,9 +497,10 @@ let context = run_full_pipeline(request)?;
 |-------|---------|----------|
 | Next | Passband transmission zeros | High |
 | Next | Repeated-pole residue expansion | High |
+| Next | Propagate N-channel mutual loading (P1) | High |
 | Later | HighPass/BandStop frequency mappings | Medium |
-| Later | Touchstone (.s2p) export | Medium |
-| Later | Python bindings (pyo3) | Low |
 | Later | Butterworth/Elliptic approximation families | Low |
 | Later | Multi-band frequency mapping | Low |
-| Later | Performance benchmarks (criterion) | Low |
+
+> Touchstone export, Python bindings, and criterion benchmarks are already
+> implemented (see `src/touchstone.rs`, `src/python.rs`, `benches/`).
