@@ -1,6 +1,79 @@
 # Changelog
 
-## [Unreleased]
+## [0.5.0] — 2026-09-25
+
+### Changed (architecture remediation)
+
+- **N-channel mutual loading now propagates into output coupling matrices (P1).**
+  The duplexer/multiplexer `recover_filter_design` rebuilt E/F from the
+  perturbed S-roots but wrote only `PolynomialSet.e/f`; the synthesis engine
+  reads `generalized.e_s/f_s`, so the loading correction was silently dropped
+  and output matrices were bit-identical to independent per-channel synthesis.
+  Both recovery paths now write the perturbed E/F back to `generalized.e_s/f_s`.
+  (`src/multiplexer.rs`, `src/duplexer.rs`)
+- **`ResponseSample.group_delay` is now `Option<f64>` (P9).** `None` when the
+  solver cannot compute it (pole-expansion fast path, degenerate LU case)
+  instead of a silent `0.0`. Terminal output renders "n/a"; response
+  verification compares group delay only where both samples have it.
+  **Breaking.**
+- **Pipeline `mapping` now drives physical-domain evaluation (P3).** A
+  `bandpass`/`lowpass` mapping maps a physical-Hz grid through the frequency
+  mapping before response evaluation; previously it was silently ignored (a
+  physical grid was misread as normalized ω, e.g. 6.75 GHz → |S21| ≈ −490 dB).
+  Unknown or incomplete mappings are rejected with `MfsError::InvalidFrequency`.
+  **Breaking** for requests that relied on the old (ignored) behavior.
+- **Legacy crate-root free functions are deprecated (P2).** `filter_spec`,
+  `lowpass`, `bandpass`, `normalize_transmission_zeros_hz`,
+  `generalized_chebyshev`, `generalized_chebyshev_polynomials`,
+  `generalized_chebyshev_with_response`, `synthesize_canonical_matrix`,
+  `synthesize_canonical_matrix_with_details`, and `synthesize_matrix_with_topology`
+  are `#[deprecated]` (pointing at the module APIs / `FilterDesign`). Still
+  functional; removal deferred to a future breaking release.
+- **Band-center convention unified to the geometric mean (P2/P9).** The CLI
+  `design` subcommand and duplexer `tx()`/`rx()` used the arithmetic mean while
+  `FilterDesign::bandpass_edges` used the geometric mean. All edge-based entry
+  points now share `freq::edges_to_center_bandwidth`, so `Ω(f1)=-1`/`Ω(f2)=+1`
+  holds consistently.
+
+### Added
+
+- **Single-sourced spec construction (P2).** `synthesis::build_filter_spec` is
+  the one FilterSpec-assembly helper used by `FilterDesign`, the JSON pipeline,
+  the CLI, and the duplexer/multiplexer — replacing the copy-pasted
+  order/RL/zeros/unloaded-Q blocks.
+- **Duplexer full-Macchiarella iteration is opt-in.** `DuplexerSynthesis::
+  full_iteration(bool)` (default `false`) replaces a hardcoded flag, making the
+  full spectral path reachable and testable without changing default behavior.
+- **Root-solver accuracy tests + criterion bench (P4).** `benches/root_solvers.rs`
+  times the four solvers at degrees {10, 20, 30}; new lib tests pin accuracy and
+  document a genuine defect: the nalgebra `CompanionMatrixRootSolver`
+  complex-coefficient branch (2n×2n real embedding) can return conjugate-flipped
+  non-roots, so it stays out of the production `AdaptiveRootSolver` chain
+  (faer companion → Durand-Kerner → Aberth) and is used only as a real-
+  coefficient test oracle.
+- **Engine seam test (P1).** `matrix_synthesizer_is_sensitive_to_generalized_e_s`
+  proves the engine responds to `generalized.e_s` — the field it actually
+  consumes — guarding the P1 no-op class at the seam.
+- **Propagation regression tests (P1).** `adjacent_channels_show_loading`
+  (loading must alter the recovered matrix) and `recovered_channels_remain_
+  passband` (propagation must not degenerate the channel) in
+  `tests/multiplexer.rs`.
+
+### Removed
+
+- **Dead code (P7).** `response::pole_expansion::evaluate_with_pole_expansion_
+  verified` (an unused dB-tolerance dispatcher), `spectral`'s
+  `balanced_real_companion_roots`/`balanced_complex_companion_roots` + no-op
+  `balance_matrix`, and `duplexer`'s `wilson_spectral_factor` + its exclusive
+  `fit_polynomial_ls`/`polynomial_max_diff` helpers. ~340 lines.
+
+### Documentation
+
+- `docs/architecture.md` module list and dependency table now match the code;
+  the root-finder fallback order is stated once, canonically (it was previously
+  documented four contradictory ways). See
+  `docs/internal/architecture-review-2026-09-25.md` for the full assessment.
+- Version aligned across `Cargo.toml`, `pyproject.toml`, and `README.md`.
 
 ### Fixed
 

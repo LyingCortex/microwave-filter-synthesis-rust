@@ -266,10 +266,14 @@ Evaluates electrical response from coupling matrix over frequency grid.
 **Key types:**
 - `ResponseSolver` — configurable solver (lossless/lossy)
 - `SParameterResponse` — collection of frequency-indexed S-parameter samples
-- `ResponseSample` — S11, S21 (real + imaginary) at one frequency point
+- `ResponseSample` — S11, S21 (real + imaginary) at one frequency point, plus
+  `group_delay: Option<f64>` (explicitly `None` when the solver path cannot
+  compute it, e.g. the pole-expansion fast path — never a silent `0.0`)
 
 **Algorithm:**
-Complex matrix inversion method: `[S] = [I] - 2j[R]^(1/2) ([jΩ] - [M])^(-1) [R]^(1/2)`
+Complex matrix inversion method: `[S] = [I] - 2j[R]^(1/2) ([jΩ] - [M])^(-1) [R]^(1/2)`.
+A fast O(N) pole-expansion path is used when the matrix is transversal,
+cross-checked against the LU solver with automatic fallback.
 
 ### `verify` — Verification Utilities
 
@@ -299,7 +303,14 @@ Composable stage-based pipeline with JSON I/O and incremental execution.
 1. `ApproximationStage` — FilterSpec → PolynomialSet
 2. `MatrixSynthesisStage` — PolynomialSet → CouplingMatrix
 3. `TopologyTransformStage` — CouplingMatrix → TransformOutcome
-4. `ResponseEvaluationStage` — CouplingMatrix + Grid → SParameterResponse
+4. `ResponseEvaluationStage` — CouplingMatrix + Grid (+ optional Mapping)
+   → SParameterResponse
+
+**Frequency mapping:** when a request carries `mapping` (`bandpass`/`lowpass`),
+the response stage evaluates a *physical-Hz* grid through the mapping
+(`MappingConfig::build_mapping`); otherwise the grid is treated as already
+normalized. Unknown or incomplete mappings are rejected with
+`MfsError::InvalidFrequency` (previously the field was accepted but ignored).
 
 **Features:**
 - `run_full_pipeline(request)` — complete execution from JSON
@@ -495,10 +506,15 @@ let context = run_full_pipeline(request)?;
    is not implemented.
 3. **Wheel topology** is deprecated and currently an alias for Arrow.
 4. **HighPass and BandStop** frequency mappings are not implemented.
-5. **N-channel mutual loading** — the duplexer/multiplexer iterative
-   perturbation currently does not propagate into the output coupling matrices
-   (the engine consumes `generalized.e_s/f_s/p_s`, not the rebuilt `.e`/`.f`).
-   Tracked in `docs/internal/architecture-review-2026-09-25.md` (P1).
+5. **N-channel mutual loading fidelity** — the perturbation now propagates
+   into the output coupling matrices (P1 fixed, 0.5.0), but the simplified
+   frequency-offset perturbation has limited passband fidelity for adjacent
+   channels (it does not converge to machine tolerance for well-separated
+   bands, and the loaded channel loses some passband peak). The high-fidelity
+   model is the full Macchiarella spectral path, enabled per-channel via
+   `DuplexerSynthesis::full_iteration(true)` and deferred as the proper fix.
+   See `docs/internal/multiplexer-code-review.md` and
+   `docs/internal/architecture-review-2026-09-25.md`.
 
 ## Future Roadmap
 

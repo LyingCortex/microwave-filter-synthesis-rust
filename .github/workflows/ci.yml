@@ -40,3 +40,14 @@ jobs:
       - run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: "-D warnings"
+
+  version-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cargo.toml and pyproject.toml versions must match
+        run: |
+          cargo_v=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')
+          py_v=$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "([^"]+)"/\1/')
+          echo "Cargo.toml=$cargo_v pyproject.toml=$py_v"
+          [ "$cargo_v" = "$py_v" ] || { echo "version drift between Cargo.toml and pyproject.toml"; exit 1; }
