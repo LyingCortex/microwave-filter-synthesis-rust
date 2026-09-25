@@ -196,7 +196,7 @@ mod tests {
     fn group_delay_is_none_when_lu_expression_is_degenerate() -> Result<()> {
         let matrix = CouplingMatrix::identity(2)?;
         let grid = FrequencyGrid::linspace(1.0, 2.0, 3)?;
-        let response = ResponseSolver::default().evaluate_normalized(&matrix, &grid)?;
+        let response = ResponseSolver.evaluate_normalized(&matrix, &grid)?;
         assert!(
             response.samples[0].group_delay.is_none(),
             "degenerate LU group delay must be None, not 0.0"

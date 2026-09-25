@@ -517,10 +517,13 @@ let context = run_full_pipeline(request)?;
    into the output coupling matrices (P1 fixed, 0.5.0), but the simplified
    frequency-offset perturbation has limited passband fidelity for adjacent
    channels (it does not converge to machine tolerance for well-separated
-   bands, and the loaded channel loses some passband peak). The high-fidelity
-   model is the full Macchiarella spectral path, enabled per-channel via
-   `DuplexerSynthesis::full_iteration(true)` and deferred as the proper fix.
-   See `docs/internal/multiplexer-code-review.md` and
+   bands, and the loaded channel loses some passband peak). The full
+   Macchiarella spectral path exists behind
+   `DuplexerSynthesis::full_iteration(true)`, but it is **not numerically
+   converged for order ≥ 4 yet** (returns a typed error; order 2 runs but
+   exhausts its iterations) — it is a reachable foundation, not a drop-in
+   high-fidelity fix. The proper fix (converging the full spectral path) is
+   deferred. See `docs/multiplexer-code-review.md` and
    `docs/internal/architecture-review-2026-09-25.md`.
 
 ## Future Roadmap
@@ -529,7 +532,7 @@ let context = run_full_pipeline(request)?;
 |-------|---------|----------|
 | Next | Passband transmission zeros | High |
 | Next | Repeated-pole residue expansion | High |
-| Next | Propagate N-channel mutual loading (P1) | High |
+| Next | Converge the full Macchiarella spectral path (order ≥ 4) for high-fidelity N-channel loading | High |
 | Later | HighPass/BandStop frequency mappings | Medium |
 | Later | Butterworth/Elliptic approximation families | Low |
 | Later | Multi-band frequency mapping | Low |

@@ -352,6 +352,11 @@ impl DuplexerSynthesis {
     /// using the simplified frequency-offset perturbation). The full path
     /// calls `spectral::spectral_factor` and is heavier; it is opt-in until
     /// its performance and convergence are tuned.
+    ///
+    /// Note: it is not numerically converged for order ≥ 4 yet (the recovered
+    /// transversal matrix can fail pole-placement validation with a typed
+    /// error), so treat it as an experimental foundation, not a drop-in
+    /// high-fidelity replacement.
     pub fn full_iteration(mut self, enabled: bool) -> Self {
         self.full_iteration = enabled;
         self
