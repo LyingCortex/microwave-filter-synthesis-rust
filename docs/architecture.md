@@ -64,7 +64,11 @@ src/
 ├── synthesis/          Coupling matrix synthesis engine
 │   ├── mod.rs              Module facade and public exports
 │   ├── engine.rs           MatrixSynthesisEngine orchestration
-│   ├── residues.rs         Residue expansion, classification, transversal builder
+│   ├── residues/           Residue synthesis (split by engine seam)
+│   │   ├── mod.rs              Facade re-exporting the three seams
+│   │   ├── admittance.rs       Y-parameter polynomials from approximation output
+│   │   ├── expansion.rs        Residue expansion, classification
+│   │   └── transversal.rs      Transversal coupling-matrix assembly
 │   ├── orchestration.rs    High-level synthesis + evaluation helpers
 │   └── sections.rs         SectionSynthesis (triplet/quadruplet/trisection)
 ├── transform/          Topology transformations
@@ -357,6 +361,9 @@ Used by the duplexer/multiplexer full-iteration path.
 
 `.s2p` export/import (v1.0/v2.0, RI/MA/DB, Hz/kHz/MHz/GHz, configurable
 reference impedance). `design.save_touchstone` / `design.to_touchstone`.
+Backed by the `touchstone` crate 0.14.5 (import via `Network::new`);
+`touchstone::NetworkBuilder` is available for generating S-parameter
+networks programmatically.
 
 ## CLI Interface
 
@@ -435,7 +442,7 @@ faer = "0.20"            # Complex companion-matrix eigenvalues (root finding)
 rustfft = "6.2"          # FFT for cepstrum spectral factorization
 serde = { version = "1", features = ["derive"] }  # Serialization
 serde_json = "1"         # JSON parsing for pipeline requests
-touchstone = { version = "0.12.1", default-features = false }  # .s2p parsing
+touchstone = { version = "0.14.5", default-features = false }  # .s2p parsing + NetworkBuilder
 clap = { version = "4", features = ["derive"], optional = true }   # CLI (feature "cli")
 pyo3 = { version = "0.23", features = ["extension-module"], optional = true }  # Python (feature "python")
 

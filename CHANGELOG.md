@@ -67,6 +67,15 @@
   `balance_matrix`, and `duplexer`'s `wilson_spectral_factor` + its exclusive
   `fit_polynomial_ls`/`polynomial_max_diff` helpers. ~340 lines.
 
+### Dependencies
+
+- **touchstone 0.12.1 → 0.14.5.** Only breaking change touched:
+  `Network::new` now returns `Result` (parse errors are mapped to
+  `MfsError::PreconditionViolation` instead of the old panic). The upgrade
+  exposes `touchstone::NetworkBuilder` (crate root, not feature-gated) for
+  programmatically generating S-parameter networks, plus in-memory
+  `Network::from_str`/`from_bytes`.
+
 ### Documentation
 
 - `docs/architecture.md` module list and dependency table now match the code;
