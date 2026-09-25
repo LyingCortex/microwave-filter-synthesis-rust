@@ -94,7 +94,7 @@ impl ResponseSolver {
         &self,
         matrix: &CouplingMatrix,
         grid: &FrequencyGrid,
-        mapping: &impl FrequencyMapping,
+        mapping: &dyn FrequencyMapping,
     ) -> Result<SParameterResponse> {
         self.evaluate_with_settings(matrix, grid, mapping, ResponseSettings::default())
     }
@@ -104,7 +104,7 @@ impl ResponseSolver {
         &self,
         matrix: &CouplingMatrix,
         grid: &FrequencyGrid,
-        mapping: &impl FrequencyMapping,
+        mapping: &dyn FrequencyMapping,
         settings: ResponseSettings,
     ) -> Result<SParameterResponse> {
         let normalized_omegas = mapping

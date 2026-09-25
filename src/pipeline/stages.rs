@@ -4,6 +4,7 @@
 //! Stages delegate to existing library implementations rather than reimplementing
 //! core algorithms.
 
+use super::context::MappingConfig;
 use crate::approx::{generalized_chebyshev_polynomials, PolynomialSet};
 use crate::error::Result;
 use crate::freq::FrequencyGrid;
@@ -120,19 +121,24 @@ impl Stage for TopologyTransformStage {
 // ---------------------------------------------------------------------------
 
 /// Input for the response evaluation stage: a coupling matrix paired with a
-/// frequency grid for normalized evaluation.
+/// frequency grid for evaluation. When `mapping` is present the grid is
+/// treated as physical frequencies and evaluated in the physical domain;
+/// otherwise it is treated as a normalized-prototype grid.
 #[derive(Debug, Clone)]
 pub struct ResponseEvaluationInput {
     /// The coupling matrix to evaluate.
     pub matrix: CouplingMatrix,
-    /// The frequency grid (normalized) on which to evaluate the response.
+    /// The frequency grid on which to evaluate the response.
     pub grid: FrequencyGrid,
+    /// Optional physical-frequency mapping; when set, `grid` is physical Hz.
+    pub mapping: Option<MappingConfig>,
 }
 
 /// Evaluates the S-parameter response of a coupling matrix on a frequency grid.
 ///
-/// Delegates to [`ResponseSolver::evaluate_normalized`] which computes S11 and
-/// S21 at each grid point using the normalized prototype frequency axis.
+/// Delegates to [`ResponseSolver::evaluate`] (physical grid, mapped through
+/// the given [`MappingConfig`]) or [`ResponseSolver::evaluate_normalized`]
+/// (already-normalized grid) which compute S11 and S21 at each grid point.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ResponseEvaluationStage;
 
@@ -141,7 +147,15 @@ impl Stage for ResponseEvaluationStage {
     type Output = SParameterResponse;
 
     fn execute(&self, input: &Self::Input) -> Result<Self::Output> {
-        ResponseSolver::default().evaluate_normalized(&input.matrix, &input.grid)
+        match &input.mapping {
+            Some(mapping) => {
+                let mapping = mapping.build_mapping()?;
+                ResponseSolver::default().evaluate(&input.matrix, &input.grid, mapping.as_ref())
+            }
+            None => {
+                ResponseSolver::default().evaluate_normalized(&input.matrix, &input.grid)
+            }
+        }
     }
 
     fn name(&self) -> &'static str {
@@ -258,7 +272,11 @@ mod tests {
         let stage = ResponseEvaluationStage;
         assert_eq!(stage.name(), "response_evaluation");
 
-        let input = ResponseEvaluationInput { matrix, grid };
+        let input = ResponseEvaluationInput {
+            matrix,
+            grid,
+            mapping: None,
+        };
         let response = stage.execute(&input)?;
         assert_eq!(response.samples.len(), 21);
         // Response should vary across frequency
@@ -275,7 +293,11 @@ mod tests {
         let grid = FrequencyGrid::linspace(-1.5, 1.5, 11)?;
 
         let stage = ResponseEvaluationStage;
-        let input = ResponseEvaluationInput { matrix, grid };
+        let input = ResponseEvaluationInput {
+            matrix,
+            grid,
+            mapping: None,
+        };
         let response = stage.execute(&input)?;
 
         for sample in &response.samples {

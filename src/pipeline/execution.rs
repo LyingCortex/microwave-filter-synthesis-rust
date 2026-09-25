@@ -129,6 +129,7 @@ fn run_response_evaluation_stage(context: &mut SynthesisContext) -> Result<()> {
     let input = ResponseEvaluationInput {
         matrix: matrix.as_ref().clone(),
         grid,
+        mapping: context.options.mapping.clone(),
     };
     let response = stage.execute(&input)?;
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;

@@ -231,9 +231,12 @@ pub fn run_full_pipeline(request: SynthesisRequest) -> Result<SynthesisContext> 
                 .clone()
         };
         let grid = FrequencyGrid::linspace(grid_config.start, grid_config.stop, grid_config.points)?;
+        // When a mapping is present the grid is physical Hz and is evaluated in
+        // the physical domain; otherwise it is a normalized-prototype grid.
         let input = ResponseEvaluationInput {
             matrix: eval_matrix,
             grid,
+            mapping: ctx.options.mapping.clone(),
         };
         let response = stage.execute(&input)?;
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -302,9 +305,12 @@ mod tests {
                 bandwidth_hz: Some(300.0e6),
                 cutoff_hz: None,
             }),
+            // A bandpass mapping means the grid is physical Hz (mapped to the
+            // prototype before evaluation), so a normalized grid would be a
+            // contradictory input. Use a physical grid spanning the band.
             grid: Some(GridConfig {
-                start: -3.0,
-                stop: 3.0,
+                start: 6.0e9,
+                stop: 7.5e9,
                 points: 201,
             }),
         };
@@ -325,6 +331,77 @@ mod tests {
             assert!(*timing >= 0.0);
         }
         Ok(())
+    }
+
+    #[test]
+    fn physical_grid_with_bandpass_mapping_evaluates_in_physical_domain() -> Result<()> {
+        // A physical-Hz grid plus a bandpass mapping must be evaluated in the
+        // physical domain: at the band center the response is passband
+        // (|S21| near 0 dB). If `mapping` is ignored and the Hz grid is
+        // misread as normalized ω, 6.75 GHz lands deep in the stopband and
+        // |S21| collapses.
+        let request = SynthesisRequest {
+            order: 4,
+            return_loss_db: 20.0,
+            transmission_zeros: vec![],
+            unloaded_q: None,
+            topology: None,
+            mapping: Some(MappingConfig {
+                kind: "bandpass".to_string(),
+                center_hz: Some(6.75e9),
+                bandwidth_hz: Some(300.0e6),
+                cutoff_hz: None,
+            }),
+            grid: Some(GridConfig {
+                start: 6.0e9,
+                stop: 7.5e9,
+                points: 201,
+            }),
+        };
+
+        let ctx = run_full_pipeline(request)?;
+        let response = ctx.response().expect("response must be produced");
+        let freqs: Vec<f64> = response.samples.iter().map(|s| s.frequency_hz).collect();
+        let center_idx = freqs
+            .iter()
+            .enumerate()
+            .min_by(|a, b| (a.1 - &6.75e9).abs().partial_cmp(&(b.1 - &6.75e9).abs()).unwrap())
+            .unwrap()
+            .0;
+        let s21_db = response.samples[center_idx].s21_db();
+        assert!(
+            s21_db > -3.0,
+            "at the band center a mapped physical grid must be in the passband (|S21| = {s21_db} dB); an unmapped grid would read 6.75e9 as normalized ω and land in the stopband"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn bandpass_mapping_without_parameters_is_rejected() {
+        let request = SynthesisRequest {
+            order: 4,
+            return_loss_db: 20.0,
+            transmission_zeros: vec![],
+            unloaded_q: None,
+            topology: None,
+            mapping: Some(MappingConfig {
+                kind: "bandpass".to_string(),
+                center_hz: None,
+                bandwidth_hz: None,
+                cutoff_hz: None,
+            }),
+            grid: Some(GridConfig {
+                start: -3.0,
+                stop: 3.0,
+                points: 21,
+            }),
+        };
+
+        let err = run_full_pipeline(request).unwrap_err();
+        assert!(
+            matches!(err, MfsError::InvalidFrequency(_)),
+            "incomplete mapping must be rejected, not silently ignored; got {err:?}"
+        );
     }
 
     #[test]

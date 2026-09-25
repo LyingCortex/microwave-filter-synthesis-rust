@@ -5,6 +5,8 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::approx::PolynomialSet;
+use crate::error::{MfsError, Result};
+use crate::freq::{BandPassMapping, FrequencyMapping, LowPassMapping};
 use crate::matrix::CouplingMatrix;
 use crate::response::SParameterResponse;
 use crate::spec::FilterSpec;
@@ -45,6 +47,42 @@ pub struct MappingConfig {
     pub bandwidth_hz: Option<f64>,
     /// Cutoff frequency in Hz (for lowpass mappings).
     pub cutoff_hz: Option<f64>,
+}
+
+impl MappingConfig {
+    /// Builds the concrete mapping this configuration describes.
+    ///
+    /// An unknown kind or a missing parameter is rejected with a typed error
+    /// instead of being silently ignored: a caller who requested physical-
+    /// frequency evaluation must get it or get told why it is impossible.
+    pub fn build_mapping(&self) -> Result<Box<dyn FrequencyMapping>> {
+        match self.kind.as_str() {
+            "bandpass" => {
+                let center_hz = self.center_hz.ok_or_else(|| {
+                    MfsError::InvalidFrequency(
+                        "bandpass mapping requires center_hz".to_string(),
+                    )
+                })?;
+                let bandwidth_hz = self.bandwidth_hz.ok_or_else(|| {
+                    MfsError::InvalidFrequency(
+                        "bandpass mapping requires bandwidth_hz".to_string(),
+                    )
+                })?;
+                Ok(Box::new(BandPassMapping::new(center_hz, bandwidth_hz)?))
+            }
+            "lowpass" => {
+                let cutoff_hz = self.cutoff_hz.ok_or_else(|| {
+                    MfsError::InvalidFrequency(
+                        "lowpass mapping requires cutoff_hz".to_string(),
+                    )
+                })?;
+                Ok(Box::new(LowPassMapping::new(cutoff_hz)?))
+            }
+            kind => Err(MfsError::InvalidFrequency(format!(
+                "unknown mapping kind: {kind:?} (supported: \"bandpass\", \"lowpass\")"
+            ))),
+        }
+    }
 }
 
 /// Frequency grid configuration for response evaluation.
