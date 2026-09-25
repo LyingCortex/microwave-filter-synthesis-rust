@@ -230,6 +230,7 @@ pub struct DuplexerSynthesis {
     junction: JunctionType,
     max_iterations: usize,
     convergence_tol: f64,
+    full_iteration: bool,
 }
 
 impl DuplexerSynthesis {
@@ -249,6 +250,9 @@ impl DuplexerSynthesis {
             junction: JunctionType::default(),
             max_iterations: 15,
             convergence_tol: 1e-8,
+            // The simplified perturbation path is the default; the full
+            // Macchiarella spectral iteration is opt-in (see `full_iteration`).
+            full_iteration: false,
         }
     }
 
@@ -344,6 +348,15 @@ impl DuplexerSynthesis {
         self
     }
 
+    /// Enables the full Macchiarella spectral-iteration path (default: off,
+    /// using the simplified frequency-offset perturbation). The full path
+    /// calls `spectral::spectral_factor` and is heavier; it is opt-in until
+    /// its performance and convergence are tuned.
+    pub fn full_iteration(mut self, enabled: bool) -> Self {
+        self.full_iteration = enabled;
+        self
+    }
+
     /// Runs the iterative synthesis algorithm.
     ///
     /// Returns the synthesized Tx and Rx filter designs that account for
@@ -389,10 +402,9 @@ impl DuplexerSynthesis {
         let mut iterations = 0;
         let mut convergence_error = f64::INFINITY;
 
-        // Try the full Macchiarella iteration with spectral factorization
-        let use_full_iteration = false; // TODO: enable when spectral_factor performance is tuned
-
-        if use_full_iteration {
+        // Full Macchiarella spectral iteration is opt-in via `.full_iteration(true)`
+        // (default: the simplified frequency-offset perturbation).
+        if self.full_iteration {
             for iter in 0..self.max_iterations {
                 iterations = iter + 1;
 
