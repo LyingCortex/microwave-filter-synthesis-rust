@@ -910,4 +910,169 @@ mod tests {
         }
         Ok(())
     }
+
+    /// Deterministic, well-spread complex roots: distinct angles offset by 0.4 rad
+    /// (avoids landing on real axis), radii cycling through {0.5, 0.75, 1.0,
+    /// 1.25, 1.5}. Minimum pairwise distance is >= 0.5, so greedy
+    /// nearest-neighbor matching cannot misassign roots.
+    fn fixed_complex_roots(degree: usize) -> Vec<ComplexCoefficient> {
+        (0..degree)
+            .map(|k| {
+                let radius = 0.5 + 0.25 * (((k * 7 + 3) % 5) as f64);
+                let angle = 2.0 * std::f64::consts::PI * k as f64 / degree as f64 + 0.4;
+                ComplexCoefficient::new(radius * angle.cos(), radius * angle.sin())
+            })
+            .collect()
+    }
+
+    fn nearest_neighbor_max_error(
+        recovered: &[ComplexCoefficient],
+        expected: &[ComplexCoefficient],
+    ) -> f64 {
+        assert_eq!(recovered.len(), expected.len(), "root count mismatch");
+        let mut used = vec![false; expected.len()];
+        recovered
+            .iter()
+            .map(|&found| {
+                let mut best = f64::INFINITY;
+                let mut best_index = 0;
+                for (index, &true_root) in expected.iter().enumerate() {
+                    if used[index] {
+                        continue;
+                    }
+                    let distance = (found - true_root).norm();
+                    if distance < best {
+                        best = distance;
+                        best_index = index;
+                    }
+                }
+                used[best_index] = true;
+                best
+            })
+            .fold(0.0_f64, f64::max)
+    }
+
+    fn max_root_residual(
+        polynomial: &ComplexPolynomial,
+        roots: &[ComplexCoefficient],
+    ) -> f64 {
+        roots
+            .iter()
+            .map(|&root| polynomial.evaluate(root).norm())
+            .fold(0.0_f64, f64::max)
+    }
+
+    #[test]
+    fn durand_kerner_solver_recovers_known_roots_degrees_10_20_30() -> Result<()> {
+        let solver = DurandKernerRootSolver;
+        for degree in [10usize, 20, 30] {
+            let expected = fixed_complex_roots(degree);
+            let polynomial = ComplexPolynomial::from_complex_roots(&expected)?;
+            let recovered = solver.roots_of(&polynomial)?;
+            let max_error = nearest_neighbor_max_error(&recovered, &expected);
+            println!("durand_kerner degree {degree}: max root error = {max_error:.3e}");
+            assert!(
+                max_error <= 1e-6,
+                "durand_kerner degree {degree}: max root error {max_error:.3e} exceeds 1e-6"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn aberth_solver_recovers_known_roots_degrees_10_20_30() -> Result<()> {
+        let solver = AberthRootSolver;
+        for degree in [10usize, 20, 30] {
+            let expected = fixed_complex_roots(degree);
+            let polynomial = ComplexPolynomial::from_complex_roots(&expected)?;
+            let recovered = solver.roots_of(&polynomial)?;
+            let max_error = nearest_neighbor_max_error(&recovered, &expected);
+            println!("aberth degree {degree}: max root error = {max_error:.3e}");
+            assert!(
+                max_error <= 1e-6,
+                "aberth degree {degree}: max root error {max_error:.3e} exceeds 1e-6"
+            );
+        }
+        Ok(())
+    }
+
+    // nalgebra Schur hits ~2.4e-6 at degree 30; clearly-named looser bound.
+    const COMPANION_REAL_DEG30_BOUND: f64 = 1e-4;
+
+    fn fixed_real_roots(degree: usize) -> Vec<f64> {
+        let spacing = 0.7;
+        (0..degree)
+            .map(|k| (k as f64 - (degree - 1) as f64 / 2.0) * spacing)
+            .collect()
+    }
+
+    #[test]
+    fn companion_matrix_solver_recovers_known_real_roots_degrees_10_20_30() -> Result<()> {
+        let solver = CompanionMatrixRootSolver;
+        for degree in [10usize, 20, 30] {
+            let expected = fixed_real_roots(degree);
+            let polynomial = ComplexPolynomial::from_real_roots(&expected)?;
+            let recovered = solver.roots_of(&polynomial)?;
+            let expected_c: Vec<ComplexCoefficient> = expected
+                .iter()
+                .map(|&r| ComplexCoefficient::new(r, 0.0))
+                .collect();
+            let max_error = nearest_neighbor_max_error(&recovered, &expected_c);
+            println!("companion_matrix(real) degree {degree}: max root error = {max_error:.3e}");
+            let bound = if degree == 30 { COMPANION_REAL_DEG30_BOUND } else { 1e-6 };
+            assert!(
+                max_error <= bound,
+                "companion_matrix(real) degree {degree}: max root error {max_error:.3e} exceeds {bound}"
+            );
+        }
+        Ok(())
+    }
+
+    /// Documents a genuine defect in `CompanionMatrixRootSolver`'s complex-
+    /// coefficient branch. Its 2n×2n real embedding has eigenvalues
+    /// {λ, conj(λ)} for every root λ, and the conjugate-pair extraction picks
+    /// whichever of the two appears first in Schur order. For a
+    /// complex-coefficient polynomial only λ (not conj(λ)) is a root of p, so
+    /// ~half the returned values are conjugate-flipped NON-roots:
+    ///   - large max residual (p(flipped value) ≠ 0), and
+    ///   - large nearest-neighbor error (~2·|Im λ|) vs the intended roots.
+    /// This is why the nalgebra companion solver must not be used on
+    /// complex-coefficient polynomials (the real-coefficient branch, which
+    /// never flips, is the only sound path and is what production filter
+    /// synthesis actually exercises).
+    #[test]
+    fn companion_matrix_solver_complex_branch_returns_conjugate_flipped_non_roots() {
+        let solver = CompanionMatrixRootSolver;
+        let degree = 10usize;
+        let expected = fixed_complex_roots(degree);
+        let polynomial = ComplexPolynomial::from_complex_roots(&expected).unwrap();
+        let recovered = solver.roots_of(&polynomial).unwrap();
+
+        let residual = max_root_residual(&polynomial, &recovered);
+        let nn_error = nearest_neighbor_max_error(&recovered, &expected);
+        println!(
+            "companion_matrix(complex) degree {degree}: max residual = {residual:.3e}, \
+             nearest-neighbor error = {nn_error:.3e}"
+        );
+
+        assert!(residual > 1.0, "expected flipped non-roots (large residual), got {residual:.3e}");
+        assert!(nn_error > 1.0, "expected conjugate-flip (large nn error), got {nn_error:.3e}");
+    }
+
+    #[test]
+    fn faer_solver_recovers_known_roots_degrees_10_20_30() -> Result<()> {
+        let solver = FaerRootSolver;
+        for degree in [10usize, 20, 30] {
+            let expected = fixed_complex_roots(degree);
+            let polynomial = ComplexPolynomial::from_complex_roots(&expected)?;
+            let recovered = solver.roots_of(&polynomial)?;
+            let max_error = nearest_neighbor_max_error(&recovered, &expected);
+            println!("faer degree {degree}: max root error = {max_error:.3e}");
+            assert!(
+                max_error <= 1e-6,
+                "faer degree {degree}: max root error {max_error:.3e} exceeds 1e-6"
+            );
+        }
+        Ok(())
+    }
 }

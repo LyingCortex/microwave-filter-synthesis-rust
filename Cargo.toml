@@ -46,6 +46,10 @@ proptest = { version = "1.6", default-features = false, features = ["std"] }
 name = "synthesis"
 harness = false
 
+[[bench]]
+name = "root_solvers"
+harness = false
+
 [features]
 cli = ["clap"]
 python = ["pyo3"]
