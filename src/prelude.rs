@@ -31,7 +31,10 @@ pub use crate::response::ResponseSolver;
 pub use crate::verify::ResponseTolerance;
 pub use crate::matrix::MatrixTopology as TopologyKind;
 
-// Legacy functions (for existing code)
+// Legacy functions (for existing code). These re-export the deprecated crate-root
+// free functions so existing callers keep compiling; new code should use the
+// module APIs (mfs::approx, mfs::synthesis, mfs::freq) or FilterDesign.
+#[allow(deprecated)]
 pub use crate::{
     bandpass, filter_spec, generalized_chebyshev, generalized_chebyshev_polynomials,
     generalized_chebyshev_with_response, lowpass, normalize_transmission_zeros_hz,

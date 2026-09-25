@@ -4,6 +4,10 @@
 //! verifies that the results are physically meaningful (symmetric, bounded
 //! couplings, correct eigenvalue structure).
 
+//! Demonstrates the legacy prelude/free-function workflow, which is
+//! deprecated but must keep working for backward compatibility.
+#![allow(deprecated)]
+
 use mfs::prelude::*;
 use mfs::CouplingMatrix;
 use mfs::matrix::MatrixTopology;

@@ -1,3 +1,7 @@
+//! Demonstrates the legacy prelude/free-function workflow, which is
+//! deprecated but must keep working for backward compatibility.
+#![allow(deprecated)]
+
 use mfs::{
     bandpass, filter_spec, generalized_chebyshev_with_response, normalize_transmission_zeros_hz,
     FrequencyGrid,

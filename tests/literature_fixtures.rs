@@ -14,7 +14,7 @@ use mfs::fixtures::{
     literature_reference_grid, literature_reference_grid_info,
 };
 use mfs::synthesis::{MatrixSynthesisMethod, SectionSynthesis};
-use mfs::generalized_chebyshev;
+use mfs::synthesis::synthesize_generalized_chebyshev as generalized_chebyshev;
 use mfs::verify::ResponseTolerance;
 
 fn approx_eq(lhs: f64, rhs: f64, tol: f64) {

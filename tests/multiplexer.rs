@@ -72,7 +72,7 @@ fn max_matrix_delta(a: &CouplingMatrix, b: &CouplingMatrix) -> f64 {
 /// it is the reference the propagation tests compare against.
 fn independent_matrix(order: usize, rl: f64) -> mfs::error::Result<CouplingMatrix> {
     let spec = FilterSpec::new(order, rl)?;
-    let polys = generalized_chebyshev_polynomials(&spec)?;
+    let polys = mfs::approx::generalized_chebyshev_polynomials(&spec)?;
     mfs::synthesis::MatrixSynthesisEngine.synthesize(&polys)
 }
 

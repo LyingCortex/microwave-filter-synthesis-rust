@@ -1,3 +1,7 @@
+//! Demonstrates the legacy prelude/free-function workflow, which is
+//! deprecated but must keep working for backward compatibility.
+#![allow(deprecated)]
+
 use mfs::prelude::*;
 
 fn main() -> Result<()> {

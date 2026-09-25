@@ -1,3 +1,7 @@
+//! Exercises the legacy top-level helper functions; they are deprecated but
+//! must keep working for backward compatibility.
+#![allow(deprecated)]
+
 use mfs::approx::generalized_chebyshev_polynomials;
 use mfs::error::Result;
 use mfs::prelude::{FilterSpec, TopologyKind};

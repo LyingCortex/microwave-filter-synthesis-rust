@@ -1,3 +1,7 @@
+//! Demonstrates the legacy prelude/free-function workflow, which is
+//! deprecated but must keep working for backward compatibility.
+#![allow(deprecated)]
+
 use mfs::fixtures::{
     cameron_generalized_order4_info, cameron_generalized_order4_spec,
     cameron_style_section_info, cameron_style_section_polynomials,

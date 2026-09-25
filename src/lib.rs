@@ -94,7 +94,7 @@ pub use approx::PolynomialSet;
 /// Default unloaded Q used by `filter_spec` when none is specified.
 pub const DEFAULT_UNLOADED_Q: f64 = 2000.0;
 
-/// Legacy: builds a filter spec. Prefer `FilterDesign::bandpass()` or `FilterDesign::prototype()`.
+#[deprecated(note = "use FilterDesign::bandpass()/prototype() or FilterSpec::builder()")]
 pub fn filter_spec<T>(
     order: usize,
     return_loss_db: f64,
@@ -111,12 +111,12 @@ where
     Ok(spec)
 }
 
-/// Legacy: builds a low-pass mapping.
+#[deprecated(note = "use mfs::freq::LowPassMapping::new")]
 pub fn lowpass(cutoff: f64) -> Result<LowPassMapping> {
     LowPassMapping::new(cutoff)
 }
 
-/// Legacy: normalizes Hz zeros to prototype coordinates.
+#[deprecated(note = "use the FrequencyMapping trait's map_hz_to_normalized, or FilterDesign::zeros_hz")]
 pub fn normalize_transmission_zeros_hz(
     zeros_hz: impl IntoIterator<Item = f64>,
     mapping: &impl FrequencyMapping,
@@ -127,22 +127,22 @@ pub fn normalize_transmission_zeros_hz(
         .collect()
 }
 
-/// Legacy: builds a band-pass mapping.
+#[deprecated(note = "use mfs::freq::BandPassMapping::new")]
 pub fn bandpass(center_hz: f64, bandwidth_hz: f64) -> Result<BandPassMapping> {
     BandPassMapping::new(center_hz, bandwidth_hz)
 }
 
-/// Legacy: synthesizes prototype and matrix. Prefer `FilterDesign`.
+#[deprecated(note = "use mfs::synthesis::synthesize_generalized_chebyshev")]
 pub fn generalized_chebyshev(spec: &FilterSpec) -> Result<SynthesisOutcome> {
     synthesis::synthesize_generalized_chebyshev(spec)
 }
 
-/// Legacy: exposes intermediate polynomials.
+#[deprecated(note = "use mfs::approx::generalized_chebyshev_polynomials")]
 pub fn generalized_chebyshev_polynomials(spec: &FilterSpec) -> Result<PolynomialSet> {
     approx::generalized_chebyshev_polynomials(spec)
 }
 
-/// Legacy: synthesizes and evaluates on a physical grid.
+#[deprecated(note = "use mfs::synthesis::synthesize_and_evaluate_with_mapping")]
 pub fn generalized_chebyshev_with_response(
     spec: &FilterSpec,
     mapping: &impl FrequencyMapping,
@@ -151,19 +151,19 @@ pub fn generalized_chebyshev_with_response(
     synthesize_and_evaluate_with_mapping(spec, mapping, grid)
 }
 
-/// Legacy: synthesizes canonical matrix from polynomials.
+#[deprecated(note = "use mfs::synthesis::MatrixSynthesisEngine::synthesize")]
 pub fn synthesize_canonical_matrix(polynomials: &PolynomialSet) -> Result<CouplingMatrix> {
     MatrixSynthesisEngine.synthesize(polynomials)
 }
 
-/// Legacy: synthesizes with details.
+#[deprecated(note = "use mfs::synthesis::MatrixSynthesisEngine::synthesize_with_details")]
 pub fn synthesize_canonical_matrix_with_details(
     polynomials: &PolynomialSet,
 ) -> Result<MatrixSynthesisOutcome> {
     MatrixSynthesisEngine.synthesize_with_details(polynomials)
 }
 
-/// Legacy: synthesizes with topology.
+#[deprecated(note = "use mfs::synthesis::MatrixSynthesisEngine::synthesize_with_topology")]
 pub fn synthesize_matrix_with_topology(
     polynomials: &PolynomialSet,
     topology: TopologyKind,
@@ -174,6 +174,7 @@ pub fn synthesize_matrix_with_topology(
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use crate::fixtures::load_filter_database_end_to_end_fixture;
