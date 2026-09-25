@@ -214,10 +214,40 @@ impl FrequencyGrid {
     }
 }
 
+/// Converts passband edge frequencies into (center, bandwidth).
+///
+/// The center is the **geometric mean** `√(f1·f2)`, the convention under which
+/// `Ω(f1) = -1` and `Ω(f2) = +1` hold exactly in the band-pass mapping. This is
+/// the single definition of the edge→center/bandwidth convention; all
+/// edge-based entry points (`FilterDesign::bandpass_edges` and the CLI `design`
+/// subcommand) go through it so the convention cannot drift. Input validity
+/// (positive, ordered edges) is the caller's responsibility.
+pub fn edges_to_center_bandwidth(f1_hz: f64, f2_hz: f64) -> (f64, f64) {
+    let center_hz = (f1_hz * f2_hz).sqrt();
+    let bandwidth_hz = f2_hz - f1_hz;
+    (center_hz, bandwidth_hz)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::design::FilterDesign;
     use crate::spec::TransmissionZero;
+
+    #[test]
+    fn edges_to_center_bandwidth_uses_geometric_mean_convention() -> Result<()> {
+        let (f1, f2) = (6.6e9, 6.9e9);
+        let (center, bw) = edges_to_center_bandwidth(f1, f2);
+        approx_eq(center, (f1 * f2).sqrt(), 1e-6);
+        approx_eq(bw, f2 - f1, 1e-6);
+        // The high-level entry point must use the identical convention (S4):
+        // this cross-check is what prevents the CLI / bandpass_edges from
+        // drifting apart on the band-center definition.
+        let d = FilterDesign::bandpass_edges(4, 20.0, f1, f2).synthesize()?;
+        assert_eq!(d.center_hz(), Some(center));
+        assert_eq!(d.bandwidth_hz(), Some(bw));
+        Ok(())
+    }
 
     fn approx_eq(lhs: f64, rhs: f64, tol: f64) {
         let diff = (lhs - rhs).abs();

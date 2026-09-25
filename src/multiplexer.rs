@@ -15,7 +15,7 @@ use crate::freq::{BandPassMapping, FrequencyGrid};
 use crate::matrix::CouplingMatrix;
 use crate::response::ResponseSolver;
 use crate::spec::FilterSpec;
-use crate::synthesis::MatrixSynthesisEngine;
+use crate::synthesis::{build_filter_spec, MatrixSynthesisEngine};
 use num_complex::Complex64;
 
 /// N-channel multiplexer synthesis result.
@@ -273,11 +273,7 @@ impl MultiplexerSynthesis {
     }
 
     fn build_spec(ch: &ChannelSpec) -> Result<FilterSpec> {
-        let mut spec = FilterSpec::new(ch.order, ch.return_loss_db)?;
-        if !ch.zeros.is_empty() {
-            spec = spec.with_normalized_transmission_zeros(ch.zeros.iter().copied());
-        }
-        Ok(spec)
+        build_filter_spec(ch.order, ch.return_loss_db, &ch.zeros, None)
     }
 
     /// Recovers a filter design from converged S-polynomial roots, mirroring

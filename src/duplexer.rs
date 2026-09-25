@@ -144,6 +144,7 @@ impl Duplexer {
 
 use crate::approx::{ComplexPolynomial, generalized_chebyshev_polynomials, compute_root_displacement, multiply_by_s, pad_polynomial};
 use crate::spec::FilterSpec;
+use crate::synthesis::build_filter_spec;
 use num_complex::Complex64;
 
 /// Junction type for the diplexer T-junction.
@@ -252,11 +253,13 @@ impl DuplexerSynthesis {
     }
 
     /// Sets the Tx channel specification by passband edges.
+    ///
+    /// Uses the shared geometric-mean center convention (`edges_to_center_bandwidth`)
+    /// so every edge-based entry point agrees on the band center.
     pub fn tx(mut self, order: usize, return_loss_db: f64, f_start: f64, f_stop: f64) -> Self {
         self.tx_order = order;
         self.tx_rl = return_loss_db;
-        self.tx_center = (f_start + f_stop) / 2.0;
-        self.tx_bw = f_stop - f_start;
+        (self.tx_center, self.tx_bw) = crate::freq::edges_to_center_bandwidth(f_start, f_stop);
         self
     }
 
@@ -264,8 +267,7 @@ impl DuplexerSynthesis {
     pub fn rx(mut self, order: usize, return_loss_db: f64, f_start: f64, f_stop: f64) -> Self {
         self.rx_order = order;
         self.rx_rl = return_loss_db;
-        self.rx_center = (f_start + f_stop) / 2.0;
-        self.rx_bw = f_stop - f_start;
+        (self.rx_center, self.rx_bw) = crate::freq::edges_to_center_bandwidth(f_start, f_stop);
         self
     }
 
@@ -546,11 +548,7 @@ impl DuplexerSynthesis {
 
     #[allow(dead_code)]
     fn build_spec(&self, order: usize, rl: f64, zeros: &[f64]) -> Result<FilterSpec> {
-        let mut spec = FilterSpec::new(order, rl)?;
-        if !zeros.is_empty() {
-            spec = spec.with_normalized_transmission_zeros(zeros.iter().copied());
-        }
-        Ok(spec)
+        build_filter_spec(order, rl, zeros, None)
     }
 
     /// Computes N(s) - the numerator polynomial for antenna reflection.

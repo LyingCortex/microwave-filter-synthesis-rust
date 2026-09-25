@@ -8,8 +8,8 @@ pub use residues::{ClassifiedResidues, ResidueClassification, classify_residues,
 pub use residues::synthesize_residue_expansions;
 pub use engine::{MatrixSynthesisEngine, MatrixSynthesisMethod, MatrixSynthesisOutcome};
 pub use orchestration::{
-    synthesize_and_evaluate_with_mapping, synthesize_generalized_chebyshev, ApproximationKind,
-    EvaluationOutcome, SynthesisOutcome,
+    build_filter_spec, synthesize_and_evaluate_with_mapping, synthesize_generalized_chebyshev,
+    ApproximationKind, EvaluationOutcome, SynthesisOutcome,
 };
 pub use sections::SectionSynthesis;
 

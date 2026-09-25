@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{MfsError, Result};
 use crate::freq::FrequencyGrid;
-use crate::spec::FilterSpec;
 use crate::transform::TopologyKind;
 
 use super::context::{GridConfig, MappingConfig, PipelineOptions, SynthesisContext};
@@ -150,13 +149,12 @@ pub fn run_full_pipeline(request: SynthesisRequest) -> Result<SynthesisContext> 
     })?;
 
     // Build FilterSpec from request
-    let mut spec = FilterSpec::new(request.order, request.return_loss_db)?;
-    if !request.transmission_zeros.is_empty() {
-        spec = spec.with_normalized_transmission_zeros(request.transmission_zeros.iter().copied());
-    }
-    if let Some(q) = request.unloaded_q {
-        spec = spec.with_unloaded_q(q);
-    }
+    let spec = crate::synthesis::build_filter_spec(
+        request.order,
+        request.return_loss_db,
+        &request.transmission_zeros,
+        request.unloaded_q,
+    )?;
 
     // Build PipelineOptions from request
     let options = PipelineOptions {

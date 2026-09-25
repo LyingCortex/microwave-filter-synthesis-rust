@@ -20,11 +20,11 @@ use serde::{Deserialize, Serialize};
 use crate::error::{MfsError, Result};
 use crate::freq::FrequencyGrid;
 use crate::pipeline::context::{PipelineMetadata, PipelineOptions, SynthesisContext};
+use crate::synthesis::build_filter_spec;
 use crate::pipeline::stages::{
     ApproximationStage, MatrixSynthesisStage, ResponseEvaluationInput, ResponseEvaluationStage,
     Stage, TopologyTransformInput, TopologyTransformStage,
 };
-use crate::spec::FilterSpec;
 
 /// Executes a single named pipeline stage, storing the result in the context.
 ///
@@ -249,11 +249,12 @@ impl ContextSnapshot {
     }
 
     fn into_context(self) -> Result<SynthesisContext> {
-        let mut spec = FilterSpec::new(self.spec.order, self.spec.return_loss_db)?;
-        spec = spec.with_normalized_transmission_zeros(self.spec.transmission_zeros);
-        if let Some(q) = self.spec.unloaded_q {
-            spec = spec.with_unloaded_q(q);
-        }
+        let spec = build_filter_spec(
+            self.spec.order,
+            self.spec.return_loss_db,
+            &self.spec.transmission_zeros,
+            self.spec.unloaded_q,
+        )?;
 
         let mut context = SynthesisContext::with_options(spec, self.options);
         context.metadata = self.metadata;

@@ -305,8 +305,9 @@ fn run_design(
                     "--stop must be greater than --start".into(),
                 ));
             }
-            let c = (f1 + f2) / 2.0;
-            let bw = f2 - f1;
+            // Geometric-mean center, matching FilterDesign::bandpass_edges so the
+            // Ω(f1)=-1/Ω(f2)=+1 convention holds (single source in freq.rs).
+            let (c, bw) = mfs::freq::edges_to_center_bandwidth(f1, f2);
             (Some(c), Some(bw))
         }
         (Some(c), None, Some(f1), _) => {
@@ -658,13 +659,12 @@ fn build_context_from_request(request: SynthesisRequest) -> mfs::Result<Synthesi
     })?;
 
     // Build FilterSpec from request
-    let mut spec = mfs::FilterSpec::new(request.order, request.return_loss_db)?;
-    if !request.transmission_zeros.is_empty() {
-        spec = spec.with_normalized_transmission_zeros(request.transmission_zeros.iter().copied());
-    }
-    if let Some(q) = request.unloaded_q {
-        spec = spec.with_unloaded_q(q);
-    }
+    let spec = mfs::synthesis::build_filter_spec(
+        request.order,
+        request.return_loss_db,
+        &request.transmission_zeros,
+        request.unloaded_q,
+    )?;
 
     // Build PipelineOptions from request
     let options = PipelineOptions {

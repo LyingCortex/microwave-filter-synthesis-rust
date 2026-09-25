@@ -43,6 +43,26 @@ pub struct EvaluationOutcome {
     pub response: SParameterResponse,
 }
 
+/// Canonical `FilterSpec` construction shared by every synthesis entry point
+/// (high-level `FilterDesign`, the JSON pipeline, and the CLI). Centralizes the
+/// order/return-loss/normalized-zeros/unloaded-Q assembly so the convention
+/// lives in one place instead of being copy-pasted at each call site.
+pub fn build_filter_spec(
+    order: usize,
+    return_loss_db: f64,
+    normalized_transmission_zeros: &[f64],
+    unloaded_q: Option<f64>,
+) -> Result<FilterSpec> {
+    let mut spec = FilterSpec::new(order, return_loss_db)?;
+    if !normalized_transmission_zeros.is_empty() {
+        spec = spec.with_normalized_transmission_zeros(normalized_transmission_zeros.iter().copied());
+    }
+    if let Some(q) = unloaded_q {
+        spec = spec.with_unloaded_q(q);
+    }
+    Ok(spec)
+}
+
 /// Synthesizes using the default Chebyshev approximation flow.
 pub fn synthesize_generalized_chebyshev(spec: &FilterSpec) -> Result<SynthesisOutcome> {
     let polynomials = generalized_chebyshev_polynomials(spec)?;

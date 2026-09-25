@@ -25,7 +25,7 @@ use crate::freq::{BandPassMapping, FrequencyGrid, FrequencyMapping};
 use crate::matrix::{CouplingMatrix, MatrixTopology};
 use crate::response::{ResponseSolver, SParameterResponse};
 use crate::spec::FilterSpec;
-use crate::synthesis::MatrixSynthesisEngine;
+use crate::synthesis::{build_filter_spec, MatrixSynthesisEngine};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Builder
@@ -98,13 +98,7 @@ impl FilterDesignBuilder {
             }
         }
 
-        let mut spec = FilterSpec::new(self.order, self.return_loss_db)?;
-        if !all_zeros.is_empty() {
-            spec = spec.with_normalized_transmission_zeros(all_zeros);
-        }
-        if let Some(q) = self.unloaded_q {
-            spec = spec.with_unloaded_q(q);
-        }
+        let spec = build_filter_spec(self.order, self.return_loss_db, &all_zeros, self.unloaded_q)?;
 
         let polynomials = generalized_chebyshev_polynomials(&spec)?;
         let matrix = MatrixSynthesisEngine.synthesize(&polynomials)?;
@@ -198,8 +192,7 @@ impl FilterDesign {
         f_stop_hz: f64,
     ) -> FilterDesignBuilder {
         // Geometric mean ensures Ω(f_start)=-1 and Ω(f_stop)=+1 exactly.
-        let center_hz = (f_start_hz * f_stop_hz).sqrt();
-        let bandwidth_hz = f_stop_hz - f_start_hz;
+        let (center_hz, bandwidth_hz) = crate::freq::edges_to_center_bandwidth(f_start_hz, f_stop_hz);
         FilterDesignBuilder {
             order,
             return_loss_db,
