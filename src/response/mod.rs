@@ -216,7 +216,7 @@ mod tests {
             .build()?;
         let grid = FrequencyGrid::linspace(-2.0, 2.0, 5)?;
 
-        let lu = ResponseSolver::default().evaluate_normalized(&matrix, &grid)?;
+        let lu = ResponseSolver.evaluate_normalized(&matrix, &grid)?;
         assert!(
             lu.samples[0].group_delay.is_some(),
             "LU backend must provide a group delay"

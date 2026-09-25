@@ -150,11 +150,9 @@ impl Stage for ResponseEvaluationStage {
         match &input.mapping {
             Some(mapping) => {
                 let mapping = mapping.build_mapping()?;
-                ResponseSolver::default().evaluate(&input.matrix, &input.grid, mapping.as_ref())
+                ResponseSolver.evaluate(&input.matrix, &input.grid, mapping.as_ref())
             }
-            None => {
-                ResponseSolver::default().evaluate_normalized(&input.matrix, &input.grid)
-            }
+            None => ResponseSolver.evaluate_normalized(&input.matrix, &input.grid),
         }
     }
 

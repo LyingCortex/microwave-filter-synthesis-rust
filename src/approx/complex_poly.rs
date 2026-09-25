@@ -1037,17 +1037,16 @@ mod tests {
     }
 
     /// Documents a genuine defect in `CompanionMatrixRootSolver`'s complex-
-    /// coefficient branch. Its 2n×2n real embedding has eigenvalues
-    /// {λ, conj(λ)} for every root λ, and the conjugate-pair extraction picks
+    /// coefficient branch. Its 2n×2n real embedding has eigenvalues {λ,
+    /// conj(λ)} for every root λ, and the conjugate-pair extraction picks
     /// whichever of the two appears first in Schur order. For a
     /// complex-coefficient polynomial only λ (not conj(λ)) is a root of p, so
-    /// ~half the returned values are conjugate-flipped NON-roots:
-    ///   - large max residual (p(flipped value) ≠ 0), and
-    ///   - large nearest-neighbor error (~2·|Im λ|) vs the intended roots.
-    /// This is why the nalgebra companion solver must not be used on
-    /// complex-coefficient polynomials (the real-coefficient branch, which
-    /// never flips, is the only sound path and is what production filter
-    /// synthesis actually exercises).
+    /// about half the returned values are conjugate-flipped NON-roots, giving
+    /// a large max residual (p(flipped value) ≠ 0) and a large nearest-
+    /// neighbor error (~2·|Im λ|) versus the intended roots. This is why the
+    /// nalgebra companion solver must not be used on complex-coefficient
+    /// polynomials; the real-coefficient branch, which never flips, is the
+    /// only sound path and is what production filter synthesis exercises.
     #[test]
     fn companion_matrix_solver_complex_branch_returns_conjugate_flipped_non_roots() {
         let solver = CompanionMatrixRootSolver;

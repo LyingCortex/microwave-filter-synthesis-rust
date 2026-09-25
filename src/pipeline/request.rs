@@ -361,11 +361,12 @@ mod tests {
 
         let ctx = run_full_pipeline(request)?;
         let response = ctx.response().expect("response must be produced");
+        let center = 6.75e9;
         let freqs: Vec<f64> = response.samples.iter().map(|s| s.frequency_hz).collect();
         let center_idx = freqs
             .iter()
             .enumerate()
-            .min_by(|a, b| (a.1 - &6.75e9).abs().partial_cmp(&(b.1 - &6.75e9).abs()).unwrap())
+            .min_by(|a, b| (a.1 - center).abs().partial_cmp(&(b.1 - center).abs()).unwrap())
             .unwrap()
             .0;
         let s21_db = response.samples[center_idx].s21_db();
