@@ -166,6 +166,48 @@ mod tests {
         Ok(())
     }
 
+    /// S2 boundary guard: the engine must respond to `generalized.e_s`, the
+    /// field it actually consumes. Perturbing `e_s` must change the output
+    /// matrix. This is the seam-level test for the P1 no-op class — callers
+    /// that rebuild a polynomial set must update `generalized.e_s/f_s` (not
+    /// just `.e`/`.f`), and this test fails if the engine ever stops reading
+    /// the generalized data.
+    #[test]
+    fn matrix_synthesizer_is_sensitive_to_generalized_e_s() -> Result<()> {
+        let spec = FilterSpec::new(3, 20.0)?;
+        let base = generalized_chebyshev_polynomials(&spec)?;
+        let base_matrix = MatrixSynthesisEngine.synthesize(&base)?;
+
+        let mut perturbed = base.clone();
+        if let Some(g) = perturbed.generalized.as_mut() {
+            if let Some(e_s) = g.e_s.as_mut() {
+                let c = e_s.coefficients.len();
+                // Perturb the second-lowest coefficient (avoid the leading
+                // term, which the synthesis renormalizes).
+                let idx = c.min(2).saturating_sub(1);
+                let k = e_s.coefficients[idx];
+                e_s.coefficients[idx] = k * 1.001;
+            }
+        }
+        let perturbed_matrix = MatrixSynthesisEngine.synthesize(&perturbed)?;
+
+        let mut max_delta = 0.0_f64;
+        let n = base_matrix.side();
+        for i in 0..n {
+            for j in 0..n {
+                let d = (base_matrix.at(i, j).unwrap_or(0.0)
+                    - perturbed_matrix.at(i, j).unwrap_or(0.0))
+                    .abs();
+                max_delta = max_delta.max(d);
+            }
+        }
+        assert!(
+            max_delta > 1.0e-9,
+            "engine must respond to a perturbed generalized.e_s (max|Δ| = {max_delta})"
+        );
+        Ok(())
+    }
+
     #[test]
     fn matrix_synthesizer_returns_precondition_violation_without_generalized_data() -> Result<()> {
         let polynomials = PolynomialSet::new(
