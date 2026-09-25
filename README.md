@@ -46,7 +46,8 @@ fn main() -> Result<()> {
 - **Fast S-parameter evaluation** — Pole-expansion method (O(N) per frequency
   point) with automatic LU fallback
 - **High-order support** — Numerically stable up to order 30+ with adaptive
-  root-finding (Durand-Kerner → Aberth → Companion Matrix fallback)
+  root-finding (faer companion-matrix eigenvalues → Durand-Kerner →
+  Aberth-Ehrlich fallback)
 - **Band-pass scaling** — Convert normalized matrices to physical units
 - **Python bindings** (optional) — `pip install .` via maturin
 

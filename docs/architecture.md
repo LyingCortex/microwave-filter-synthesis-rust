@@ -188,12 +188,21 @@ Implements the generalized Chebyshev approximation algorithm.
 **Key types:**
 - `PolynomialSet` — E(s), F(s), P(s) polynomials with metadata (eps, eps_r, order)
 - `ComplexPolynomial` — complex-coefficient polynomial with arithmetic, evaluation, root finding
-- `DurandKernerRootSolver` — iterative complex root finder (128 iterations, 1e-12 tolerance)
+- `AdaptiveRootSolver` — canonical production chain: **faer companion-matrix
+  eigenvalues → Durand-Kerner → Aberth-Ehrlich** (fall-through on error)
+- `FaerRootSolver` / `DurandKernerRootSolver` / `AberthRootSolver` — the three
+  solvers in the chain
+- `CompanionMatrixRootSolver` — nalgebra Schur companion solver; kept as a
+  real-coefficient test oracle only (its complex-coefficient branch can return
+  conjugate-flipped non-roots — see the dedicated test in
+  `approx::complex_poly`)
 - `GeneralizedChebyshevData` — helper polynomials (E_s, F_s, P_s) for synthesis
 
 **Algorithm:**
 Recursive Chebyshev function generation with transmission zero injection,
 producing the characteristic polynomials needed for coupling matrix synthesis.
+Denominator roots are found via `AdaptiveRootSolver` (faer → Durand-Kerner →
+Aberth), not Durand-Kerner alone.
 
 ### `matrix` — Coupling Matrix
 

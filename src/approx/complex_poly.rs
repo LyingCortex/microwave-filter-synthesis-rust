@@ -46,13 +46,21 @@ pub struct CompanionMatrixRootSolver;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct FaerRootSolver;
 
-/// Adaptive root solver that tries fast methods first and falls back to more
-/// robust (but slower) methods when they fail.
+/// Adaptive root solver that tries the most accurate method first and falls
+/// back to iterative methods when it fails.
 ///
-/// Strategy chain:
-/// 1. Companion matrix via nalgebra (accurate, preserves symmetry)
-/// 2. Durand-Kerner (fallback for edge cases)
-/// 3. Aberth-Ehrlich (last resort)
+/// Strategy chain (canonical — see also `roots` and README "High-order
+/// support"):
+/// 1. Companion matrix via **faer** complex eigenvalues (accurate, preserves
+///    polynomial symmetry; sound for complex-coefficient polynomials).
+/// 2. Durand-Kerner (iterative fallback).
+/// 3. Aberth-Ehrlich (last-resort fallback).
+///
+/// Note: the nalgebra `CompanionMatrixRootSolver` is deliberately NOT in this
+/// chain — its complex-coefficient branch (2n×2n real embedding) can return
+/// conjugate-flipped non-roots. It is retained as a real-coefficient test
+/// oracle (see `companion_matrix_solver_complex_branch_returns_conjugate_
+/// flipped_non_roots`).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct AdaptiveRootSolver;
 
@@ -207,8 +215,8 @@ impl ComplexPolynomial {
 
     /// Estimates all roots with the default root solver.
     ///
-    /// Uses the adaptive solver which tries Durand-Kerner first, then Aberth,
-    /// then companion matrix eigenvalues as fallback.
+    /// Uses the adaptive solver: faer companion-matrix eigenvalues first,
+    /// then Durand-Kerner, then Aberth-Ehrlich (see `AdaptiveRootSolver`).
     pub fn roots(&self) -> Result<Vec<ComplexCoefficient>> {
         AdaptiveRootSolver.roots_of(self)
     }
