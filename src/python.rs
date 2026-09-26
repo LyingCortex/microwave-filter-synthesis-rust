@@ -175,7 +175,8 @@ impl PyFilterDesign {
     /// Computes full S-parameter response with all fields.
     ///
     /// Returns a list of dicts with keys: freq, s21_db, s11_db, s21_mag, s11_mag,
-    /// s21_phase, s11_phase, group_delay.
+    /// s21_phase, s11_phase, group_delay (float, or None where the solver path
+    /// does not compute group delay).
     #[pyo3(signature = (start=None, stop=None, points=201))]
     fn response_full(&self, py: Python<'_>, start: Option<f64>, stop: Option<f64>, points: usize) -> PyResult<PyObject> {
         use pyo3::types::PyDict;

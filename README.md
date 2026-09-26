@@ -84,7 +84,7 @@ for s in &response.samples {
     s.s21_db()          // |S21| in dB
     s.s11_db()          // |S11| in dB
     s.s21_phase_deg()   // ∠S21 in degrees
-    s.group_delay       // group delay
+    s.group_delay       // Option<f64> group delay (None on the fast path)
 }
 ```
 

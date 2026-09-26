@@ -357,13 +357,22 @@ Polynomial decomposition `R(s) = D(s)·D*(s)` with `D` all-LHP. Two methods:
 cepstrum (FFT-based, `rustfft`) and balanced companion-matrix eigenvalues.
 Used by the duplexer/multiplexer full-iteration path.
 
-### `touchstone` — Touchstone I/O
+### `touchstone` — Touchstone I/O & Network Operations
 
-`.s2p` export/import (v1.0/v2.0, RI/MA/DB, Hz/kHz/MHz/GHz, configurable
-reference impedance). `design.save_touchstone` / `design.to_touchstone`.
-Backed by the `touchstone` crate 0.14.5 (import via `Network::new`);
-`touchstone::NetworkBuilder` is available for generating S-parameter
-networks programmatically.
+`.s2p` text export/import (v1.0/v2.0, RI/MA/DB, Hz/kHz/MHz/GHz,
+configurable reference impedance) via `design.save_touchstone` /
+`design.to_touchstone` / `read_touchstone`. Backed by the `touchstone`
+crate 0.14.5 (import via `Network::new`).
+
+Network-level operations (0.5.0), wrapping the crate's `NetworkBuilder` /
+`Network::cascade` behind mfs's typed-error policy:
+- `build_network(response, z0)` / `FilterDesign::build_network()` — build a
+  live symmetric-reciprocal 2-port `touchstone::Network` (resample /
+  Y-Z-ABCD / save).
+- `touchstone::cascade(a, b)` / `FilterDesign::cascade(other)` — cascade two
+  2-ports (ABCD). Pre-validates rank / z0 / frequency unit / identical
+  frequency grid and returns `MfsError` instead of inheriting upstream
+  panics or silent index-wise grid pairing.
 
 ## CLI Interface
 
@@ -453,24 +462,29 @@ proptest = "1.6"         # Property-based testing
 
 ## Public API Levels
 
-### High-Level (common workflows)
+### High-Level (common workflows — `FilterDesign`)
 
 ```rust
 use mfs::prelude::*;
 
-// Synthesize a 4th-order filter with 2 transmission zeros
-let spec = filter_spec(4, 20.0, [-1.5, 2.0], None)?;
-let outcome = generalized_chebyshev(&spec)?;
-let matrix = outcome.matrix;
+// Synthesize a 4th-order band-pass filter with 2 transmission zeros
+let design = FilterDesign::bandpass(4, 20.0, 6.75e9, 300e6)
+    .zeros_hz([6.5e9, 7.0e9])
+    .synthesize()?;
 
-// Transform to folded topology
-let folded = transform_matrix(&matrix, TopologyKind::Folded)?;
+let folded = design.to_folded()?;
+let response = design.response(6.5e9, 7.0e9, 201)?;
 
-// Evaluate response on physical frequency grid
-let mapping = bandpass(6.75e9, 300.0e6)?;
-let grid = FrequencyGrid::linspace(6.5e9, 7.0e9, 201)?;
-let response = ResponseSolver::default().evaluate(&folded.matrix, &mapping, &grid)?;
+// Network operations (touchstone 0.14+)
+let network = design.build_network()?;          // live touchstone::Network
+let cascaded = design.cascade(&other_design)?;  // 2-port cascade
 ```
+
+> The crate-root legacy free functions (`filter_spec`, `generalized_chebyshev`,
+> `bandpass`, `lowpass`, `normalize_transmission_zeros_hz`,
+> `synthesize_canonical_matrix*`, `synthesize_matrix_with_topology`) are
+> `#[deprecated]` in 0.5.0 — use `FilterDesign` or the module APIs
+> (`mfs::approx`, `mfs::synthesis`, `mfs::freq`, `mfs::transform`) instead.
 
 ### Low-Level (advanced control)
 

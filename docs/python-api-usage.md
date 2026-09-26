@@ -188,7 +188,8 @@ data = d.response_full(start=1.8e9, stop=2.2e9, points=201)
 # [{'freq': Hz, 's21_db': dB, 's11_db': dB,
 #   's21_mag': linear, 's11_mag': linear,
 #   's21_phase': rad, 's11_phase': rad,
-#   'group_delay': sec}, ...]
+#   'group_delay': float or None}, ...]
+# group_delay 为 None 时该求解路径不计算群延迟（极点展开快路径）
 ```
 
 ---

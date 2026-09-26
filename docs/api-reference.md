@@ -159,7 +159,9 @@ for sample in &response.samples {
     sample.s11_im             // 虚部
 
     // 群延迟
-    sample.group_delay        // 群延迟（归一化单位）
+    sample.group_delay        // Option<f64>：Some(群延迟，归一化单位)；
+                              // None = 该求解路径不计算群延迟（极点展开快路径），
+                              // 显式标记而非静默的 0.0
 }
 ```
 
@@ -272,3 +274,85 @@ match FilterDesign::bandpass(0, 20.0, 6.75e9, 300e6).synthesize() {
 - `InvalidReturnLoss` — 回损 ≤ 0 或非有限值
 - `InvalidFrequency` — 频率参数无效
 - `NumericalFailure` — 数值计算未收敛（极高阶时可能出现）
+
+---
+
+## 9. Touchstone 导出与网络操作
+
+### 9.1 导出 .s2p（文本）
+
+```rust
+// 一行保存（默认 GHz, RI, 50Ω, 自动设计注释）
+design.save_touchstone("filter.s2p")?;
+
+// 可配置导出
+use mfs::touchstone::{FreqUnit, DataFormat};
+let text = design.to_touchstone()
+    .freq_unit(FreqUnit::MHz)
+    .format(DataFormat::DB)      // RI | MA | DB
+    .comment("My filter")
+    .build()?;                   // -> String
+// ...或 .save("filter.s2p")?
+```
+
+### 9.2 导入 .s2p
+
+```rust
+let response = mfs::touchstone::read_touchstone("measured.s2p")?;
+// -> SParameterResponse（2-port，S11/S21）
+```
+
+### 9.3 构建活的 `touchstone::Network`（0.14+）
+
+与上面的文本导出不同，`build_network` 返回功能完整的
+`touchstone::Network`，可 resample / cascade / Y-Z-ABCD 转换 / save：
+
+```rust
+use mfs::touchstone;
+
+// 从任意 SParameterResponse（对称互易 2-port：S12=S21, S22=S11）
+let net = touchstone::build_network(&response, 50.0)?;
+
+// 或直接从设计（默认响应网格，50Ω）
+let net = design.build_network()?;
+
+// 生成的网络可直接操作
+net.resample(&[6.5e9, 6.75e9, 7.0e9],
+    touchstone::Interpolation::Linear,
+    touchstone::Extrapolation::Error)?;
+let s21 = net.try_s_ri_at(1, 2, 1)?;      // S21 @ point 1
+let y   = net.y_matrix_at(0)?;            // 导纳矩阵 @ point 0
+```
+
+### 9.4 级联两个二端口网络
+
+```rust
+// 核心：touchstone::cascade(a, b)（port2 → port1，ABCD 相乘）
+let combined = touchstone::cascade(&net_a, &net_b)?;
+
+// 便捷：两个 FilterDesign 直接级联（50Ω，默认响应网格）
+let combined = design_a.cascade(&design_b)?;
+```
+
+`touchstone::cascade` 在上游 `Network::cascade`（会 panic）之前做预校验，
+返回类型化错误而非静默失败：两网络必须同为 2-port、参考阻抗相同、
+频率单位相同、且采样在**相同频率网格**上；网格不一致时请先 `resample`
+一个到另一个的网格再级联。
+
+---
+
+## 10. 已弃用的 crate 根函数（0.5.0）
+
+以下 crate 根自由函数已 `#[deprecated]`，仍可用但应迁移到模块 API 或
+`FilterDesign`（移除推迟到下一个破坏性版本）：
+
+| 弃用函数 | 替代 |
+|---|---|
+| `filter_spec` | `FilterSpec::builder()` / `FilterDesign::bandpass` |
+| `bandpass` / `lowpass` | `mfs::freq::BandPassMapping::new` / `LowPassMapping::new` |
+| `generalized_chebyshev` | `mfs::synthesis::synthesize_generalized_chebyshev` |
+| `generalized_chebyshev_polynomials` | `mfs::approx::generalized_chebyshev_polynomials` |
+| `generalized_chebyshev_with_response` | `mfs::synthesis::synthesize_and_evaluate_with_mapping` |
+| `synthesize_canonical_matrix(_with_details)` | `mfs::synthesis::MatrixSynthesisEngine::synthesize(_with_details)` |
+| `synthesize_matrix_with_topology` | `mfs::synthesis::MatrixSynthesisEngine::synthesize_with_topology` |
+| `normalize_transmission_zeros_hz` | `FrequencyMapping::map_hz_to_normalized` / `FilterDesign::zeros_hz` |
