@@ -10,7 +10,7 @@
 //! does not assert tight equiripple RL / isolation values. The recovered channel
 //! filters are, however, valid passband filters (the historical fully-reflective
 //! recovery was a core odd-order residue-extraction bug, now fixed — see
-//! `residue_real_component` in `src/synthesis/residues.rs`). These tests assert
+//! `residue_real_component` in `src/synthesis/residues/expansion.rs`). These tests assert
 //! the structural N-port contract rigorously (shapes, dimensions, determinism,
 //! no NaN) and treat the passband/isolation values as loose sanity checks.
 

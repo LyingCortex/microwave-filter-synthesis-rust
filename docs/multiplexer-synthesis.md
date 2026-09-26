@@ -220,36 +220,33 @@ the doc reflects reality, not aspiration.
    magnitude/sign for both parities. The diagnostic test
    `multiplexer_recovered_channel_is_passband` is now un-`#[ignore]`d and passes.
 
-5. **`recover_filter_design`'s mutual-loading perturbation does not reach the
-   output — CONFIRMED LIMITATION (not a bug introduced by the fix).** A probe
-   that compares the multiplexer's recovered channel coupling matrix against an
-   independently-synthesized filter of the same spec (`FilterDesign::bandpass`)
-   shows the two are **bit-identical** (`max |Δ| = 0`). The reason:
-   `MatrixSynthesisEngine.synthesize` reads `generalized.e_s/f_s/p_s` and ignores
-   the `PolynomialSet.e/f` that `recover_filter_design` rebuilds from the
-   perturbed S-roots (`src/multiplexer.rs` `recover_filter_design`). Consequently:
-   - the N-channel mutual-loading loop, `junction_coupling`, `alpha`,
-     `max_iterations`, and `convergence_tol` currently have **no effect on the
-     returned `channels`**; `s_roots` is the only thing the iteration changes and
-     it never reaches the matrix;
-   - the multiplexer is, functionally, independent per-channel synthesis
-     (the channels are valid passbands — but they are valid *because* they are
-     independent filters, not because of coupled-design loading).
-   This is a pre-existing architectural gap, not a regression from the residue
-   fix. To make the multiplexer honor mutual loading, `recover_filter_design`
-   must supply its reconstructed E/F to the matrix engine in a way the engine
-   consumes, or the engine must be taught to use a caller-provided
-   `PolynomialSet.e/f`. Tracked separately from this review.
+5. **Mutual loading now reaches the output (P1, 0.5.0) — the earlier
+   no-op limitation is resolved.** Originally, the probe below showed the
+   recovered channel matrix **bit-identical** (`max |Δ| = 0`) to independent
+   per-channel synthesis, because `MatrixSynthesisEngine.synthesize` reads
+   `generalized.e_s/f_s/p_s` and ignored the `PolynomialSet.e/f` that
+   `recover_filter_design` rebuilt from the perturbed S-roots. Since 0.5.0 the
+   duplexer/multiplexer recovery paths write the perturbed E/F back to
+   `generalized.e_s/f_s`, so the loading correction reaches the output matrices
+   (`adjacent_channels_show_loading` in `tests/multiplexer.rs` asserts the
+   non-degenerate effect, and
+   `matrix_synthesizer_is_sensitive_to_generalized_e_s` guards the engine seam).
+   **Remaining model caveat (simplified perturbation, not the full Macchiarella
+   N×N p₀ spectral solve):** the correction does *not* converge to independent
+   synthesis even for well-separated channels — the cross-channel term
+   `D_j/S_j` approaches a non-zero constant — so far-apart channels pay a small
+   passband-peak cost. This is a documented approximation, not a propagation
+   gap. (The pre-0.5.0 bit-identical state is preserved in this document's
+   git history.)
 
 ## Post-review status
 
 The review findings and their resolutions are recorded in
-`docs/multiplexer-code-review.md`. The mutual-loading perturbation path remains
-a simplified model (not the full N×N p₀ spectral solve) and does not reach
-machine tolerance for well-separated channels, and — per deviation item 5 — the
-perturbation currently does **not** propagate to the returned channel matrices
-at all (the multiplexer produces independent per-channel filters). The produced
-channel filters are nevertheless valid passband filters, which is the correct,
+`docs/multiplexer-code-review.md`. As of 0.5.0 (P1) the mutual-loading
+perturbation **does** propagate into the returned channel matrices (deviation
+item 5's no-op is resolved); the path remains a simplified model (not the full
+N×N p₀ spectral solve) and does not reach machine tolerance for well-separated
+channels. The produced channel filters are valid passband filters, which is the
 verifiable contract the tests assert.
 
 ## Verification / Acceptance Criteria
@@ -265,12 +262,12 @@ not asserted (approximate model / tolerance).
    approximate perturbation loop.)
 2. ⚠️ **Triplexer** (3 channels): synthesizes, converges to a finite bounded
    error, and the recovered channels are valid passband filters (no longer
-   fully-reflective). **Caveat (deviation item 5):** because the mutual-loading
-   perturbation does not propagate to the output, the recovered channels are
-   equivalent to independent per-channel synthesis; the coupled-design loading
-   is not yet reflected in the returned matrices. The dimensional N-port
-   contract is asserted strictly. The quasi-equiripple RL / strong-isolation
-   *values* are not tightly asserted (approximate model).
+   fully-reflective). **Caveat (deviation item 5, as of 0.5.0):** the
+   mutual-loading correction now reaches the output matrices (P1), but the
+   simplified perturbation model does not converge to independent synthesis even
+   for well-separated channels, so adjacent channels pay a passband-peak cost.
+   The dimensional N-port contract is asserted strictly. The quasi-equiripple
+   RL / strong-isolation *values* are not tightly asserted (approximate model).
 3. ⚠️ **Quadruplexer** (4 channels): same status as the triplexer.
 4. ✅ **Response**: `Multiplexer::response` matches `Duplexer::response` for
    N=2 (shape + agreement). The antenna model is the geometric mean
@@ -278,8 +275,9 @@ not asserted (approximate model / tolerance).
    is not asserted.
 5. ⚠️ **Convergence**: iteration count finite/bounded; under-relaxation prevents
    divergence for well-separated channels (triplexer/quadruplexer converge).
-   The `s_roots` iteration converges, but per deviation item 5 the result is
-   not yet consumed by the output matrices.
+   The `s_roots` iteration converges, and (as of 0.5.0, P1) the reconstructed
+   E/F from it is consumed by the output matrices; the simplified model's
+   residual is not asserted below machine tolerance (see deviation item 5).
 6. ✅ **No regression**: `cargo test --no-fail-fast` passes across all
    integration suites and doctests (only the 3 pre-existing, unrelated lib
    failures remain — they fail at baseline). The recovered-channel passband

@@ -531,27 +531,32 @@ $\sqrt{|r_{11,k}|}$ 对于物理滤波器总是 $O(1)$ 量级。
 - Aberth 方法收敛更快但实现更复杂，对极端情况仍可能失败
 - Companion Matrix 方法数值最稳健但速度最慢（O(n³) 一次性）
 
-因此采用**策略链**模式：快速方法优先尝试，失败时自动降级到更稳健的方法。
+因此采用**策略链**模式：最稳健的 faer 伴随矩阵特征值法优先尝试，
+失败时依次降级到快速迭代法（Durand-Kerner → Aberth）。
 
 ### 5.2 三级 Fallback 策略
 
 ```
 AdaptiveRootSolver.roots_of(polynomial)
 │
-├─ 尝试 1: DurandKernerRootSolver
-│  ├─ 成功 → 返回结果（最快路径）
-│  └─ 失败 → 继续
-│
-├─ 尝试 2: AberthRootSolver
+├─ 尝试 1: FaerRootSolver（faer 伴随矩阵特征值，最稳健路径）
 │  ├─ 成功 → 返回结果
 │  └─ 失败 → 继续
 │
-└─ 尝试 3: CompanionMatrixRootSolver
-   ├─ 成功 → 返回结果（最稳健路径）
+├─ 尝试 2: DurandKernerRootSolver
+│  ├─ 成功 → 返回结果（低阶快速路径）
+│  └─ 失败 → 继续
+│
+└─ 尝试 3: AberthRootSolver
+   ├─ 成功 → 返回结果
    └─ 失败 → 返回错误（极端情况）
 ```
 
-### 5.3 Aberth-Ehrlich 方法（第二级）
+> **注：** nalgebra 的 `CompanionMatrixRootSolver`（复系数走 2n×2n 实嵌入）在复系数分支存在已知缺陷——
+> 可能返回共轭翻转的非根（由回归测试 `companion_matrix_solver_complex_branch_returns_conjugate_flipped_non_roots` 锁定），
+> 因此**不**在生产 fallback 链中，仅保留为实系数测试 oracle。
+
+### 5.3 Aberth-Ehrlich 方法（第三级）
 
 **迭代公式：**
 
@@ -594,7 +599,7 @@ $$
 $p'/p$ 中除第 $k$ 项外的所有贡献，留下 $\approx 1/(z_k - \alpha_k)$，
 因此 $z_k^{\text{new}} \approx \alpha_k$，实现了三次收敛。
 
-### 5.4 Companion Matrix 特征值方法（第三级）
+### 5.4 Companion Matrix 特征值方法（测试 oracle，非生产链）
 
 **原理：** 多项式 $p(z) = z^n + c_{n-1}z^{n-1} + \cdots + c_0$ 的根
 等价于其伴随矩阵的特征值：
@@ -682,7 +687,7 @@ let roots = polynomial.roots_with(&CompanionMatrixRootSolver)?;
 | `src/response/backend.rs` | 选择性列/行求解替代完整求逆；利用矩阵对称性单次 LU 分解 |
 | `src/matrix/core.rs` | 原地 Givens 旋转；`to_folded()`/`to_arrow()` 零 clone；`flip_sign()` O(n) |
 | `src/matrix/sections.rs` | `extract_triplet()`/`extract_quadruplet()`/`extract_trisection()` 原地旋转 |
-| `src/approx/complex_poly.rs` | 三级 fallback 求根器（Durand-Kerner → Aberth → Companion Matrix） |
+| `src/approx/complex_poly.rs` | 三级 fallback 求根器（faer 伴随矩阵特征值 → Durand-Kerner → Aberth；nalgebra Companion Matrix 因复系数分支缺陷仅作实系数测试 oracle，不在生产链） |
 | `src/synthesis/residues.rs` | 求根器切换为 `AdaptiveRootSolver`；极点容差自适应 |
 | `src/python.rs` | **新增** PyO3 Python 绑定（`bandpass()`/`prototype()`/`response()`） |
 

@@ -81,8 +81,10 @@
 - `docs/architecture.md` module list and dependency table now match the code;
   the root-finder fallback order is stated once, canonically (it was previously
   documented four contradictory ways). See
-  `docs/internal/architecture-review-2026-09-25.md` for the full assessment.
+   `docs/internal/architecture-review-2026-09-25.md` for the full assessment.
 - Version aligned across `Cargo.toml`, `pyproject.toml`, and `README.md`.
+
+## [0.4.1] — 2026-09-25
 
 ### Fixed
 
@@ -157,12 +159,15 @@
 - `tests/multiplexer.rs` — 6 integration tests (N=2 diplexer parity, triplexer /
   quadruplexer synthesis & convergence, N-port response shape, common-port and
   isolation structure).
-- **Known limitation** (shared with `DuplexerSynthesis`): the perturbation
-  path's `recover_filter_design` reuses the original `D` polynomial with the
-  converged `S` roots, yielding fully-reflective channels (peak S21 = `-inf`).
-  The design doc and an `#[ignore]`d diagnostic test document this; a real fix
-  requires re-deriving `D` by interpolation at the converged roots via the full
-  Macchiarella spectral path (deferred as polish).
+- **Known limitation** (shared with `DuplexerSynthesis`): mutual loading uses
+  the simplified perturbation path, not the full Macchiarella N×N p₀ spectral
+  solve. As of 0.5.0 (P1) the perturbed E/F propagates into the output coupling
+  matrices, but the model is approximate: it does not converge to machine
+  tolerance for well-separated channels and adjacent channels pay a passband-peak
+  cost. (The earlier "fully-reflective recovered channel" symptom was the
+  pre-0.4.1 odd-order residue-extraction bug, since fixed — see `### Fixed`
+  above — and the diagnostic test `multiplexer_recovered_channel_is_passband`
+  is un-`#[ignore]`d and passing.)
 
 ## [0.2.0] — 2025-05-25
 

@@ -29,7 +29,8 @@ all-pole filter in the crate. That root cause is now fixed.
 **Symptom:** even a pristine `FilterDesign::prototype(5, 20.0)` evaluated to
 peak S21 = `-inf` dB; recovered multiplexer channels were equally degenerate.
 
-**Root cause:** in `src/synthesis/residues.rs`,
+**Root cause:** in the residue-synthesis module (`src/synthesis/residues.rs`
+at the time; now split into `src/synthesis/residues/{expansion,transversal}.rs`),
 `build_transversal_from_residues` extracted coupling values from residues with
 `.re`. For odd-order filters (an `s = j w` phase factor) the **transfer**
 residue `r12` is purely imaginary while the reflection residues `r11`/`r22` are
@@ -83,22 +84,22 @@ Added `multiplexer_type_ii_junction_converges` and
 
 ## Remaining Notes
 
-- **The mutual-loading perturbation does not reach the output (confirmed
-  2026-09-14).** A probe comparing the multiplexer's recovered channel coupling
-  matrix to an independently-synthesized filter of the same spec showed the two
-  are **bit-identical** (`max |Δ| = 0`). `MatrixSynthesisEngine.synthesize`
-  reads `generalized.e_s/f_s/p_s` and ignores the `PolynomialSet.e/f` that
-  `recover_filter_design` rebuilds from the perturbed S-roots
-  (`src/multiplexer.rs`). Consequently the N-channel loading loop,
-  `junction_coupling`, `alpha`, `max_iterations`, and `convergence_tol` have
-  **no effect on the returned `channels`**; the multiplexer is functionally
-  independent per-channel synthesis. This is a pre-existing architectural gap
-  (not a regression from the residue fix). Resolution requires either
-  `recover_filter_design` to hand its reconstructed E/F to the engine in a form
-  the engine consumes, or the engine to accept a caller-supplied
-  `PolynomialSet.e/f`. This qualifies item 2 above: the junction parameters
-  affect the internal `s_roots` iteration, but that iteration does not yet
-  propagate to the output matrices.
+- **The mutual-loading perturbation did not reach the output (confirmed
+  2026-09-14; RESOLVED in 0.5.0, P1).** A probe comparing the multiplexer's
+  recovered channel coupling matrix to an independently-synthesized filter of
+  the same spec showed the two were **bit-identical** (`max |Δ| = 0`).
+  `MatrixSynthesisEngine.synthesize` reads `generalized.e_s/f_s/p_s` and ignored
+  the `PolynomialSet.e/f` that `recover_filter_design` rebuilt from the
+  perturbed S-roots (`src/multiplexer.rs`). Since 0.5.0 both the duplexer and
+  multiplexer recovery paths write the perturbed E/F back to
+  `generalized.e_s/f_s`, so the loading correction reaches the returned
+  `channels` (guarded by `adjacent_channels_show_loading` in
+  `tests/multiplexer.rs` and the engine-seam test
+  `matrix_synthesizer_is_sensitive_to_generalized_e_s`). The remaining
+  caveat is the model, not the propagation: the simplified perturbation does
+  not converge to independent synthesis even for well-separated channels, so
+  adjacent channels pay a passband-peak cost (see
+  `docs/multiplexer-synthesis.md`, deviation item 5).
 - The synthesis still uses the **simplified perturbation path** (not the full
   Macchiarella N×N p₀ spectral solve). This is a documented design choice for
   "get the N-channel flow running"; it does not converge to machine tolerance
