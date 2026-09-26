@@ -100,6 +100,10 @@ design.to_touchstone()
     .freq_unit(FreqUnit::MHz)
     .format(DataFormat::DB)
     .save("filter.s2p")?;
+
+// Live touchstone::Network (NetworkBuilder, touchstone 0.14+):
+// resample / cascade / Y-Z-ABCD conversion, then save or inspect
+let network = design.build_network()?;
 ```
 
 ## Python Bindings
