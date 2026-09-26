@@ -650,6 +650,23 @@ impl FilterDesign {
         }
     }
 
+    /// Builds a live `touchstone::Network` (via `NetworkBuilder`) from the
+    /// default response of this design. Unlike the text export, the returned
+    /// network supports resampling, cascading, and Y/Z/ABCD conversion.
+    /// Uses a 50 Ω reference impedance.
+    ///
+    /// ```no_run
+    /// # use mfs::prelude::*;
+    /// let d = FilterDesign::bandpass(4, 20.0, 6.75e9, 300e6).synthesize()?;
+    /// let net = d.build_network()?;
+    /// assert_eq!(net.rank, 2);
+    /// # Ok::<(), MfsError>(())
+    /// ```
+    pub fn build_network(&self) -> Result<touchstone::Network> {
+        let response = self.default_response()?;
+        crate::touchstone::build_network(&response, 50.0)
+    }
+
     pub(crate) fn default_response(&self) -> Result<SParameterResponse> {
         if let (Some(center), Some(bw)) = (self.center_hz, self.bandwidth_hz) {
             // Default range: center ± 1.5*bw covers passband + nearby stopband

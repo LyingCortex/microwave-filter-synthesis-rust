@@ -156,6 +156,38 @@ pub fn read_touchstone(path: impl AsRef<Path>) -> Result<SParameterResponse> {
     Ok(SParameterResponse { samples })
 }
 
+/// Builds a live `touchstone::Network` from an `SParameterResponse` via
+/// `touchstone::NetworkBuilder` (touchstone 0.14+).
+///
+/// Models a symmetric reciprocal 2-port (S12 = S21, S22 = S11), the same
+/// assumption as the hand-written export in `to_touchstone_string`. Unlike
+/// that export (text only), the returned `Network` is fully functional: it can
+/// be resampled, cascaded, converted to Y/Z/ABCD, or saved with
+/// `Network::save` / `Network::to_touchstone_string`. Frequencies are in Hz.
+pub fn build_network(response: &SParameterResponse, z0: f64) -> Result<touchstone::Network> {
+    if response.samples.is_empty() {
+        return Err(MfsError::PreconditionViolation(
+            "cannot build a network from an empty response".into(),
+        ));
+    }
+    // The ".s2p" extension encodes the 2-port rank (the builder validates it).
+    let mut builder = touchstone::NetworkBuilder::new("generated.s2p", 2).z0(z0);
+    for s in &response.samples {
+        let s11 = touchstone::Complex { re: s.s11_re, im: s.s11_im };
+        let s21 = touchstone::Complex { re: s.s21_re, im: s.s21_im };
+        // Rows are destination ports, columns source ports:
+        // [S11 S12; S21 S22] = [s11 s21; s21 s11] for a symmetric 2-port.
+        let matrix = touchstone::SMatrix {
+            rank: 2,
+            data: vec![vec![s11, s21], vec![s21, s11]],
+        };
+        builder = builder.point(s.frequency_hz, matrix);
+    }
+    builder
+        .build()
+        .map_err(|e| MfsError::PreconditionViolation(format!("failed to build network: {e}")))
+}
+
 fn format_data_line(freq: f64, s: &ResponseSample, fmt: DataFormat) -> String {
     match fmt {
         DataFormat::RI => {
