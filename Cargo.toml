@@ -10,7 +10,7 @@ homepage = "https://github.com/LyingCortex/microwave-filter-synthesis-rust"
 documentation = "https://docs.rs/mfs"
 keywords = ["microwave", "filter", "rf", "synthesis", "coupling-matrix"]
 categories = ["science", "mathematics"]
-rust-version = "1.75"
+rust-version = "1.86"
 include = [
     "Cargo.toml",
     "README.md",
