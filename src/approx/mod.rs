@@ -21,7 +21,7 @@ pub use complex_poly::{
     compute_root_displacement, multiply_by_s, pad_polynomial,
 };
 pub use generalized_chebyshev::generalized_chebyshev_polynomials;
-pub use polynomial::{PolynomialSet, chebyshev_ripple_factor, monic_polynomial_from_real_roots};
+pub use polynomial::{PolynomialSet, PolynomialSetParams, chebyshev_ripple_factor, monic_polynomial_from_real_roots};
 
 /// Advanced Cameron/generalized helper primitives.
 ///

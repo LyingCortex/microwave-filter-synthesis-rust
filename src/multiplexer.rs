@@ -626,14 +626,17 @@ impl Multiplexer {
         // reflection than the maximum. This keeps the N-channel and diplexer
         // analyses consistent.
         let mut antenna_s11_db = Vec::with_capacity(points);
-        for k in 0..points {
+        let mut channel_s11_iters: Vec<_> =
+            channel_s11_mag.iter().map(|ch| ch.iter().copied()).collect();
+        for _ in 0..points {
             let mut log_sum = 0.0_f64;
             let mut nonzero = 0usize;
-            for i in 0..n {
-                let mag = channel_s11_mag[i][k];
-                if mag > 1e-300 {
-                    log_sum += mag.ln();
-                    nonzero += 1;
+            for iter in &mut channel_s11_iters {
+                if let Some(mag) = iter.next() {
+                    if mag > 1e-300 {
+                        log_sum += mag.ln();
+                        nonzero += 1;
+                    }
                 }
             }
             let geomean = if nonzero > 0 {
@@ -660,8 +663,10 @@ impl Multiplexer {
                     continue;
                 }
                 let mut row_db = Vec::with_capacity(points);
-                for k in 0..points {
-                    let prod = channel_s21_mag[i][k] * channel_s21_mag[j][k];
+                for (mag_i, mag_j) in
+                    channel_s21_mag[i].iter().zip(channel_s21_mag[j].iter())
+                {
+                    let prod = mag_i * mag_j;
                     let db = if prod > 1e-15 {
                         20.0 * prod.log10()
                     } else {
@@ -696,7 +701,7 @@ pub struct MultiplexerResponse {
     /// Per-channel reflection at its own port, dB.
     pub channel_s11_db: Vec<Vec<f64>>,
     /// Isolation between every ordered pair of distinct channels (i != j), dB.
-    /// isolation[i][j] = antenna-driven S21 between channel i and channel j.
+    /// `isolation[i][j]` = antenna-driven S21 between channel i and channel j.
     /// For i == j the entry is a zero-length vector (self-isolation is undefined).
     pub isolation_db: Vec<Vec<Vec<f64>>>,
 }

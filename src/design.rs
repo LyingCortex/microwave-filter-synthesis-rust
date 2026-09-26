@@ -143,7 +143,7 @@ impl FilterDesign {
     /// the geometric mean of the band edges: `center_hz = √(f_low × f_high)`.
     /// The bandwidth is then `bandwidth_hz = f_high - f_low`.
     ///
-    /// If you have band edge frequencies, prefer [`bandpass_edges()`] which
+    /// If you have band edge frequencies, prefer [`Self::bandpass_edges()`] which
     /// computes the correct geometric center automatically.
     ///
     /// Transmission zeros can be specified in Hz via `.zeros_hz(...)`.
@@ -623,8 +623,10 @@ impl FilterDesign {
         use crate::touchstone::{write_touchstone, TouchstoneConfig};
 
         let response = self.default_response()?;
-        let mut config = TouchstoneConfig::default();
-        config.comments = self.auto_comments();
+        let config = TouchstoneConfig {
+            comments: self.auto_comments(),
+            ..TouchstoneConfig::default()
+        };
         write_touchstone(&response, &config, path)
     }
 

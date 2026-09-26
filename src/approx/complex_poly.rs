@@ -543,10 +543,10 @@ impl ComplexRootSolver for CompanionMatrixRootSolver {
         }
 
         // Last column blocks: -c_k where c_k = a_k + j*b_k
-        for i in 0..degree {
+        let col = 2 * (degree - 1);
+        for (i, &c) in normalized.iter().enumerate().take(degree) {
             let row = 2 * i;
-            let col = 2 * (degree - 1);
-            let neg_c = -normalized[i];
+            let neg_c = -c;
             companion[(row, col)] = neg_c.re;
             companion[(row, col + 1)] = -neg_c.im;
             companion[(row + 1, col)] = neg_c.im;

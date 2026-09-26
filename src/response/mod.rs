@@ -164,7 +164,7 @@ mod tests {
         let grid = FrequencyGrid::linspace(6.6e9, 6.9e9, 5)?;
         let mapping = BandPassMapping::new(6.75e9, 300.0e6)?;
 
-        let response = ResponseSolver::default().evaluate(&matrix, &grid, &mapping)?;
+        let response = ResponseSolver {}.evaluate(&matrix, &grid, &mapping)?;
         assert_eq!(response.samples.len(), 5);
         assert_ne!(response.samples[0].s21_re, response.samples[2].s21_re);
         assert_eq!(response.samples[2].normalized_omega, 0.0);
@@ -182,7 +182,7 @@ mod tests {
             .set_symmetric(2, 3, 0.5)?
             .build()?;
         let grid = FrequencyGrid::linspace(1.0, 2.0, 3)?;
-        let response = ResponseSolver::default().evaluate_normalized(&matrix, &grid)?;
+        let response = ResponseSolver {}.evaluate_normalized(&matrix, &grid)?;
 
         assert_eq!(response.samples[0].normalized_omega, 1.0);
         assert!(response.samples[0].group_delay.unwrap().is_finite());
@@ -237,7 +237,7 @@ mod tests {
         let grid = FrequencyGrid::linspace(1.0e9, 2.0e9, 2)?;
         let mapping = LowPassMapping::new(1.0e9)?;
 
-        let response = ResponseSolver::default().evaluate(&matrix, &grid, &mapping)?;
+        let response = ResponseSolver {}.evaluate(&matrix, &grid, &mapping)?;
         assert_eq!(response.samples[0].normalized_omega, 1.0);
         assert_eq!(response.samples[1].normalized_omega, 2.0);
         Ok(())
@@ -251,7 +251,7 @@ mod tests {
             .set_symmetric(1, 2, 1.0)?
             .build()?;
         let grid = FrequencyGrid::linspace(-1.0, 1.0, 5)?;
-        let response = ResponseSolver::default().evaluate_normalized(&matrix, &grid)?;
+        let response = ResponseSolver {}.evaluate_normalized(&matrix, &grid)?;
 
         for sample in response.samples {
             let s11_mag_sq = sample.s11_re.powi(2) + sample.s11_im.powi(2);

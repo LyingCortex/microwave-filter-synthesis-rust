@@ -7,7 +7,8 @@ use crate::transform::{
     extract_quadruplet_section_with_response_check, extract_triplet_section,
     extract_triplet_section_matrix, extract_triplet_section_with_response_check,
     extract_trisection_section, extract_trisection_section_matrix,
-    extract_trisection_section_with_response_check, SectionTransformOutcome,
+    extract_trisection_section_with_response_check, QuadrupletExtraction,
+    SectionTransformOutcome,
 };
 use crate::verify::ResponseTolerance;
 
@@ -114,22 +115,14 @@ impl SectionSynthesis {
     pub fn synthesize_quadruplet_with_response_check(
         &self,
         polynomials: &PolynomialSet,
-        first_zero: f64,
-        second_zero: f64,
-        position: usize,
-        common_resonator: usize,
-        swap_zero_order: bool,
+        extraction: QuadrupletExtraction,
         grid: &FrequencyGrid,
         tolerance: ResponseTolerance,
     ) -> Result<SectionTransformOutcome> {
         let canonical = self.synthesize_canonical_matrix(polynomials)?;
         extract_quadruplet_section_with_response_check(
             &canonical,
-            first_zero,
-            second_zero,
-            position,
-            common_resonator,
-            swap_zero_order,
+            extraction,
             grid,
             tolerance,
         )

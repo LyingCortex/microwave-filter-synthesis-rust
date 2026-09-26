@@ -108,7 +108,7 @@ impl MatrixSynthesisEngine {
         transmission_zero: f64,
         center_resonator: usize,
     ) -> Result<CouplingMatrix> {
-        SectionSynthesis::default()
+        SectionSynthesis {}
             .synthesize_triplet_matrix(polynomials, transmission_zero, center_resonator)
     }
 
@@ -122,7 +122,7 @@ impl MatrixSynthesisEngine {
         common_resonator: usize,
         swap_zero_order: bool,
     ) -> Result<CouplingMatrix> {
-        SectionSynthesis::default().synthesize_quadruplet_matrix(
+        SectionSynthesis {}.synthesize_quadruplet_matrix(
             polynomials,
             first_zero,
             second_zero,
@@ -139,7 +139,7 @@ impl MatrixSynthesisEngine {
         transmission_zero: f64,
         zero_positions: (usize, usize),
     ) -> Result<CouplingMatrix> {
-        SectionSynthesis::default()
+        SectionSynthesis {}
             .synthesize_trisection_matrix(polynomials, transmission_zero, zero_positions)
     }
 }
@@ -147,7 +147,7 @@ impl MatrixSynthesisEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::approx::{PolynomialSet, generalized_chebyshev_polynomials};
+    use crate::approx::{PolynomialSet, PolynomialSetParams, generalized_chebyshev_polynomials};
     use crate::fixtures::load_filter_database_end_to_end_fixture;
     use crate::freq::BandPassMapping;
     use crate::spec::FilterSpec;
@@ -210,16 +210,16 @@ mod tests {
 
     #[test]
     fn matrix_synthesizer_returns_precondition_violation_without_generalized_data() -> Result<()> {
-        let polynomials = PolynomialSet::new(
-            3,
-            0.1,
-            0.1,
-            1.0,
-            vec![-1.5, 1.5],
-            vec![1.0, 0.2, 0.3, 0.4],
-            vec![0.8, 0.6, 0.4, 0.2],
-            vec![1.0, 0.5, -2.25],
-        )?;
+        let polynomials = PolynomialSet::new(&PolynomialSetParams {
+            order: 3,
+            ripple_factor: 0.1,
+            eps: 0.1,
+            eps_r: 1.0,
+            transmission_zeros_normalized: vec![-1.5, 1.5],
+            e: vec![1.0, 0.2, 0.3, 0.4],
+            f: vec![0.8, 0.6, 0.4, 0.2],
+            p: vec![1.0, 0.5, -2.25],
+        })?;
 
         let error = MatrixSynthesisEngine.synthesize(&polynomials).unwrap_err();
         assert!(matches!(error, MfsError::PreconditionViolation(_)));

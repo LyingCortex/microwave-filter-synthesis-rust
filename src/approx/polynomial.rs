@@ -2,6 +2,31 @@ use super::helpers::GeneralizedChebyshevData;
 use super::{ComplexCoefficient, ComplexPolynomial};
 use crate::error::{MfsError, Result};
 
+/// Parameters for constructing a [`PolynomialSet`].
+///
+/// Bundles the scalar ripple/order metadata together with the real
+/// coefficient vectors for the E, F, and P polynomials so [`PolynomialSet::new`]
+/// does not need a long positional argument list.
+#[derive(Debug, Clone, Default)]
+pub struct PolynomialSetParams {
+    /// Prototype order carried through the rest of the pipeline.
+    pub order: usize,
+    /// Chebyshev ripple factor derived from return loss.
+    pub ripple_factor: f64,
+    /// Generalized ripple parameter used by coupling-matrix synthesis formulas.
+    pub eps: f64,
+    /// Adjusted ripple parameter for all-finite-zero cases.
+    pub eps_r: f64,
+    /// Transmission zeros expressed in normalized coordinates.
+    pub transmission_zeros_normalized: Vec<f64>,
+    /// Denominator-like polynomial coefficients in ascending-power order.
+    pub e: Vec<f64>,
+    /// Numerator-like polynomial coefficients in ascending-power order.
+    pub f: Vec<f64>,
+    /// Finite-zero polynomial coefficients in ascending-power order.
+    pub p: Vec<f64>,
+}
+
 /// Polynomial data produced by the approximation stage.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PolynomialSet {
@@ -28,26 +53,17 @@ pub struct PolynomialSet {
 }
 
 impl PolynomialSet {
-    /// Creates a validated polynomial bundle.
-    pub fn new(
-        order: usize,
-        ripple_factor: f64,
-        eps: f64,
-        eps_r: f64,
-        transmission_zeros_normalized: Vec<f64>,
-        e: Vec<f64>,
-        f: Vec<f64>,
-        p: Vec<f64>,
-    ) -> Result<Self> {
+    /// Creates a validated polynomial bundle from the given parameters.
+    pub fn new(params: &PolynomialSetParams) -> Result<Self> {
         let set = Self {
-            order,
-            ripple_factor,
-            eps,
-            eps_r,
-            transmission_zeros_normalized,
-            e: complex_polynomial_from_real_coefficients(e)?,
-            f: complex_polynomial_from_real_coefficients(f)?,
-            p: complex_polynomial_from_real_coefficients(p)?,
+            order: params.order,
+            ripple_factor: params.ripple_factor,
+            eps: params.eps,
+            eps_r: params.eps_r,
+            transmission_zeros_normalized: params.transmission_zeros_normalized.clone(),
+            e: complex_polynomial_from_real_coefficients(params.e.clone())?,
+            f: complex_polynomial_from_real_coefficients(params.f.clone())?,
+            p: complex_polynomial_from_real_coefficients(params.p.clone())?,
             generalized: None,
         };
         set.validate()?;
@@ -276,16 +292,16 @@ mod tests {
 
     #[test]
     fn polynomial_set_reports_degrees() {
-        let polynomials = PolynomialSet::new(
-            3,
-            0.1,
-            0.1,
-            1.0,
-            vec![-1.0, 1.0],
-            vec![1.0, 0.2, 0.3, 0.4],
-            vec![0.8, 0.6, 0.4, 0.2],
-            vec![1.0, -2.0],
-        )
+        let polynomials = PolynomialSet::new(&PolynomialSetParams {
+            order: 3,
+            ripple_factor: 0.1,
+            eps: 0.1,
+            eps_r: 1.0,
+            transmission_zeros_normalized: vec![-1.0, 1.0],
+            e: vec![1.0, 0.2, 0.3, 0.4],
+            f: vec![0.8, 0.6, 0.4, 0.2],
+            p: vec![1.0, -2.0],
+        })
         .expect("valid polynomial set");
 
         assert_eq!(polynomials.e_degree(), 3);
@@ -298,9 +314,17 @@ mod tests {
 
     #[test]
     fn polynomial_set_rejects_mismatched_coefficient_lengths() {
-        let error =
-            PolynomialSet::new(3, 0.1, 0.1, 1.0, vec![], vec![1.0], vec![0.8, 0.6], vec![1.0])
-                .expect_err("mismatched coefficient lengths must fail");
+        let error = PolynomialSet::new(&PolynomialSetParams {
+            order: 3,
+            ripple_factor: 0.1,
+            eps: 0.1,
+            eps_r: 1.0,
+            transmission_zeros_normalized: vec![],
+            e: vec![1.0],
+            f: vec![0.8, 0.6],
+            p: vec![1.0],
+        })
+        .expect_err("mismatched coefficient lengths must fail");
 
         assert!(matches!(error, MfsError::DimensionMismatch { .. }));
     }
@@ -335,16 +359,16 @@ mod tests {
             eps: 0.23,
             eps_r: 1.7,
         };
-        let polynomials = PolynomialSet::new(
-            3,
-            0.1,
-            0.1,
-            1.0,
-            vec![2.0],
-            vec![1.0, 0.2, 0.3, 0.4],
-            vec![0.8, 0.6, 0.4, 0.2],
-            vec![1.0, -2.0],
-        )
+        let polynomials = PolynomialSet::new(&PolynomialSetParams {
+            order: 3,
+            ripple_factor: 0.1,
+            eps: 0.1,
+            eps_r: 1.0,
+            transmission_zeros_normalized: vec![2.0],
+            e: vec![1.0, 0.2, 0.3, 0.4],
+            f: vec![0.8, 0.6, 0.4, 0.2],
+            p: vec![1.0, -2.0],
+        })
         .expect("valid polynomial set")
         .with_generalized(generalized);
 
@@ -377,16 +401,16 @@ mod tests {
             eps: 0.23,
             eps_r: 1.7,
         };
-        let polynomials = PolynomialSet::new(
-            3,
-            0.1,
-            0.1,
-            1.0,
-            vec![2.0],
-            vec![1.0, 0.2, 0.3, 0.4],
-            vec![0.8, 0.6, 0.4, 0.2],
-            vec![1.0, -2.0],
-        )
+        let polynomials = PolynomialSet::new(&PolynomialSetParams {
+            order: 3,
+            ripple_factor: 0.1,
+            eps: 0.1,
+            eps_r: 1.0,
+            transmission_zeros_normalized: vec![2.0],
+            e: vec![1.0, 0.2, 0.3, 0.4],
+            f: vec![0.8, 0.6, 0.4, 0.2],
+            p: vec![1.0, -2.0],
+        })
         .expect("valid polynomial set")
         .with_generalized(generalized);
 
@@ -419,16 +443,16 @@ mod tests {
 
     #[test]
     fn polynomial_set_allows_infinite_transmission_zeros() {
-        let polynomials = PolynomialSet::new(
-            3,
-            0.1,
-            0.1,
-            1.0,
-            vec![f64::INFINITY, f64::INFINITY],
-            vec![1.0, 0.2, 0.3, 0.4],
-            vec![0.8, 0.6, 0.4, 0.2],
-            vec![1.0],
-        )
+        let polynomials = PolynomialSet::new(&PolynomialSetParams {
+            order: 3,
+            ripple_factor: 0.1,
+            eps: 0.1,
+            eps_r: 1.0,
+            transmission_zeros_normalized: vec![f64::INFINITY, f64::INFINITY],
+            e: vec![1.0, 0.2, 0.3, 0.4],
+            f: vec![0.8, 0.6, 0.4, 0.2],
+            p: vec![1.0],
+        })
         .expect("infinite transmission zeros should be accepted");
 
         assert!(polynomials.transmission_zeros_normalized.iter().all(|value| value.is_infinite()));

@@ -178,7 +178,6 @@ pub fn synthesize_matrix_with_topology(
 mod tests {
     use super::*;
     use crate::fixtures::load_filter_database_end_to_end_fixture;
-    use crate::transform::{transform_matrix_with_response_check, extract_triplet_section_with_response_check};
 
     #[test]
     fn new_api_basic_flow() -> Result<()> {
@@ -212,7 +211,7 @@ mod tests {
     fn legacy_response_solver() -> Result<()> {
         let matrix = CouplingMatrix::identity(3)?;
         let grid = FrequencyGrid::linspace(6.0e9, 7.0e9, 11)?;
-        let response = ResponseSolver::default().evaluate_normalized(&matrix, &grid)?;
+        let response = ResponseSolver {}.evaluate_normalized(&matrix, &grid)?;
         assert_eq!(response.samples.len(), 11);
         Ok(())
     }

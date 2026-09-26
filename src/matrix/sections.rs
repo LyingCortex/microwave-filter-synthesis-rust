@@ -194,6 +194,8 @@ impl CouplingMatrix {
     ///
     /// Applies trisection extraction sequentially for each zero.
     /// Input should be in Arrow form.
+    // kept: real algorithm, not yet wired to a topology path (see P7 dead-code policy)
+    #[allow(dead_code)]
     pub(crate) fn extract_cascade_trisections(
         &self,
         zeros: &[f64],
@@ -218,6 +220,8 @@ impl CouplingMatrix {
     /// Processes zeros in pairs as quadruplets. An odd remaining zero
     /// is extracted as a standalone trisection.
     /// Input should be in Arrow form.
+    // kept: real algorithm, not yet wired to a topology path (see P7 dead-code policy)
+    #[allow(dead_code)]
     pub(crate) fn extract_cascade_quadruplets(
         &self,
         zeros: &[f64],
@@ -239,7 +243,7 @@ impl CouplingMatrix {
         let mut tri_indices: Vec<(usize, usize, usize)> = Vec::new();  // (zero_idx, start, end)
 
         for (i, z) in z_locs.iter().enumerate() {
-            let span = if z[1] > z[0] { z[1] - z[0] } else { z[0] - z[1] };
+            let span = z[1].abs_diff(z[0]);
             let start = z[0].min(z[1]);
             let end = z[0].max(z[1]);
             match span {
@@ -289,10 +293,10 @@ impl CouplingMatrix {
 
         // Sort all operations by position descending (extract from tail first)
         let mut all_ops: Vec<(usize, bool)> = Vec::new(); // (position, is_cq)
-        for (_i, &(_, _, pos, _)) in cq_ops.iter().enumerate() {
+        for &(_, _, pos, _) in cq_ops.iter() {
             all_ops.push((pos, true));
         }
-        for (_i, &(_, center)) in ct_ops.iter().enumerate() {
+        for &(_, center) in ct_ops.iter() {
             all_ops.push((center, false));
         }
         // We need indices after sorting
@@ -333,6 +337,8 @@ impl CouplingMatrix {
     }
 
     /// Ensure all main (nearest-neighbor) couplings are positive.
+    // kept: real algorithm, not yet wired to a topology path (see P7 dead-code policy)
+    #[allow(dead_code)]
     fn ensure_positive_main_couplings(&mut self) {
         let side = self.side();
         for i in 0..(side - 1) {
@@ -348,6 +354,8 @@ impl CouplingMatrix {
     // sync: a similarity sign flip must leave the diagonal unchanged
     // (R*M*R^T with R[i][i] = -1). If one is edited, the other must be checked
     // too. Consider deduplicating into a single shared helper.
+    // kept: real algorithm, not yet wired to a topology path (see P7 dead-code policy)
+    #[allow(dead_code)]
     fn flip_sign_inplace(&mut self, index: usize) {
         let side = self.side();
         for col in 0..side {
@@ -371,6 +379,8 @@ impl CouplingMatrix {
     ///
     /// `span` is (start, end) with end-start=3, representing the 4-resonator block.
     /// Internally: center = start+1, used for triplet extraction.
+    // kept: real algorithm, not yet wired to a topology path (see P7 dead-code policy)
+    #[allow(dead_code)]
     pub(crate) fn extract_box_section(
         &self,
         transmission_zero: f64,
@@ -402,6 +412,8 @@ impl CouplingMatrix {
 
     /// Extract multiple BOX sections.
     /// Each span is [start, end] with end-start=3.
+    // kept: real algorithm, not yet wired to a topology path (see P7 dead-code policy)
+    #[allow(dead_code)]
     pub(crate) fn extract_box_sections(
         &self,
         zeros: &[f64],
@@ -419,7 +431,7 @@ impl CouplingMatrix {
             .zip(spans.iter())
             .map(|(&z, s)| (z, s[0].min(s[1])))
             .collect();
-        ops.sort_by(|a, b| b.1.cmp(&a.1));
+        ops.sort_by_key(|op| std::cmp::Reverse(op.1));
 
         for (tz, start) in ops {
             matrix = matrix.extract_box_section(tz, start)?;

@@ -10,7 +10,7 @@ use super::FilterSpecBuilder;
 /// `FilterSpec` follows a normalized-prototype convention: transmission zeros
 /// are stored as normalized prototype coordinates, not physical Hz values.
 /// Convert physical zeros before constructing the spec.
-
+///
 /// Defines one transmission zero in normalized low-pass prototype coordinates.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransmissionZero {

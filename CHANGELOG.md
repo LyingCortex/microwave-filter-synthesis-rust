@@ -4,6 +4,12 @@
 
 ### Changed (architecture remediation)
 
+- **`PolynomialSet::new` takes a `PolynomialSetParams` struct** (8 positional
+  args → 1). New `pub struct PolynomialSetParams { order, ripple_factor, eps,
+  eps_r, transmission_zeros_normalized, e, f, p }` (`mfs::approx`). **Breaking**
+  (tests-only in-tree callers updated). Same `QuadrupletExtraction`
+  parameter struct for the 8/9-arg quadruplet section-extraction APIs.
+
 - **N-channel mutual loading now propagates into output coupling matrices (P1).**
   The duplexer/multiplexer `recover_filter_design` rebuilt E/F from the
   perturbed S-roots but wrote only `PolynomialSet.e/f`; the synthesis engine
@@ -69,6 +75,9 @@
 
 ### Dependencies
 
+- **MSRV raised to 1.86** (`rust-version` + CI test matrix). The dependency
+  floor (faer 0.20 → 1.81, clap 4.6 → 1.85, criterion/proptest) made the old
+  1.75 CI leg unbuildable; 1.86 is a safe bound above it.
 - **touchstone 0.12.1 → 0.14.5.** Only breaking change touched:
   `Network::new` now returns `Result` (parse errors are mapped to
   `MfsError::PreconditionViolation` instead of the old panic). The upgrade

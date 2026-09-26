@@ -45,7 +45,7 @@ fn literature_triplet_fixture_supports_reported_response_checked_synthesis() -> 
     let (zero, center) = cameron_style_triplet_request();
     let grid = literature_reference_grid()?;
 
-    let outcome = SectionSynthesis::default().synthesize_triplet_with_response_check(
+    let outcome = SectionSynthesis {}.synthesize_triplet_with_response_check(
         &polynomials,
         zero,
         center,
@@ -68,7 +68,7 @@ fn literature_trisection_fixture_supports_reported_response_checked_synthesis() 
     let (zero, positions) = cameron_style_trisection_request();
     let grid = literature_reference_grid()?;
 
-    let outcome = SectionSynthesis::default().synthesize_trisection_with_response_check(
+    let outcome = SectionSynthesis {}.synthesize_trisection_with_response_check(
         &polynomials,
         zero,
         positions,

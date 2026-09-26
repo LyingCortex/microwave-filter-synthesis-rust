@@ -24,7 +24,7 @@ fn main() -> Result<()> {
     let polynomials = cameron_style_section_polynomials()?;
     let (zero, positions) = cameron_style_trisection_request();
     let grid = literature_reference_grid()?;
-    let verified = SectionSynthesis::default().synthesize_trisection_with_response_check(
+    let verified = SectionSynthesis {}.synthesize_trisection_with_response_check(
         &polynomials,
         zero,
         positions,

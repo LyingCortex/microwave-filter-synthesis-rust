@@ -13,7 +13,7 @@ use crate::spec::FilterSpec;
 use crate::transform::{TopologyKind, TransformOutcome};
 
 /// Options controlling pipeline behavior and stage configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PipelineOptions {
     /// Requested output topology for the matrix transform stage.
     pub topology: Option<TopologyKind>,
@@ -23,17 +23,6 @@ pub struct PipelineOptions {
     pub mapping: Option<MappingConfig>,
     /// Tolerance used for response invariance checks.
     pub response_tolerance: Option<ResponseToleranceConfig>,
-}
-
-impl Default for PipelineOptions {
-    fn default() -> Self {
-        Self {
-            topology: None,
-            grid: None,
-            mapping: None,
-            response_tolerance: None,
-        }
-    }
 }
 
 /// Frequency mapping configuration for physical-frequency evaluation.

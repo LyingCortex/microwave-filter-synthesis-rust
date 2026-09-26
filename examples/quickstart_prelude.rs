@@ -16,7 +16,7 @@ fn main() -> Result<()> {
         &grid,
         ResponseTolerance::default(),
     )?;
-    let response = ResponseSolver::default().evaluate_normalized(&transform.matrix, &grid)?;
+    let response = ResponseSolver {}.evaluate_normalized(&transform.matrix, &grid)?;
     print_terminal_synthesis_report(&spec, &synthesis, &transform, &response, false)?;
     Ok(())
 }

@@ -391,27 +391,27 @@ mod tests {
         // (CouplingMatrix.find_Ps / find_Es / coupling_matrix pipeline).
         assert_approx_eq(matrix.at(0, 1).unwrap(), 3.2436689194764357e-1, 1e-10,
             "reference value M[0,1]");
-        assert_approx_eq(matrix.at(0, 2).unwrap(), 6.3995494022614496e-1, 1e-10,
+        assert_approx_eq(matrix.at(0, 2).unwrap(), 6.399_549_402_261_45e-1, 1e-10,
             "reference value M[0,2]");
-        assert_approx_eq(matrix.at(0, 3).unwrap(), 6.3995494022614707e-1, 1e-10,
+        assert_approx_eq(matrix.at(0, 3).unwrap(), 6.399_549_402_261_471e-1, 1e-10,
             "reference value M[0,3]");
         assert_approx_eq(matrix.at(0, 4).unwrap(), 3.2436689194763746e-1, 1e-10,
             "reference value M[0,4]");
         assert_approx_eq(matrix.at(1, 1).unwrap(), 1.2452660363370787e0, 1e-10,
             "reference value M[1,1]");
-        assert_approx_eq(matrix.at(1, 5).unwrap(), -3.2436689194763552e-1, 1e-10,
+        assert_approx_eq(matrix.at(1, 5).unwrap(), -3.243_668_919_476_355e-1, 1e-10,
             "reference value M[1,5]");
-        assert_approx_eq(matrix.at(2, 2).unwrap(), 7.6299234763018264e-1, 1e-10,
+        assert_approx_eq(matrix.at(2, 2).unwrap(), 7.629_923_476_301_826e-1, 1e-10,
             "reference value M[2,2]");
-        assert_approx_eq(matrix.at(2, 5).unwrap(), 6.3995494022614674e-1, 1e-10,
+        assert_approx_eq(matrix.at(2, 5).unwrap(), 6.399_549_402_261_467e-1, 1e-10,
             "reference value M[2,5]");
-        assert_approx_eq(matrix.at(3, 3).unwrap(), -7.6299234763018497e-1, 1e-10,
+        assert_approx_eq(matrix.at(3, 3).unwrap(), -7.629_923_476_301_85e-1, 1e-10,
             "reference value M[3,3]");
-        assert_approx_eq(matrix.at(3, 5).unwrap(), -6.3995494022614741e-1, 1e-10,
+        assert_approx_eq(matrix.at(3, 5).unwrap(), -6.399_549_402_261_474e-1, 1e-10,
             "reference value M[3,5]");
         assert_approx_eq(matrix.at(4, 4).unwrap(), -1.2452660363370769e0, 1e-10,
             "reference value M[4,4]");
-        assert_approx_eq(matrix.at(4, 5).unwrap(), 3.2436689194764701e-1, 1e-10,
+        assert_approx_eq(matrix.at(4, 5).unwrap(), 3.243_668_919_476_47e-1, 1e-10,
             "reference value M[4,5]");
 
         Ok(())

@@ -220,9 +220,8 @@ proptest! {
         // even-order configs where the admittance denominator degenerates
         // (DimensionMismatch). These are a known limitation, not a bug in the
         // complex-to-real conversion path.
-        match &result {
-            Err(mfs::MfsError::DimensionMismatch { .. }) => return Ok(()),
-            _ => {}
+        if let Err(mfs::MfsError::DimensionMismatch { .. }) = &result {
+            return Ok(());
         }
 
         // The primary assertion: build_transversal_from_residues must succeed.
@@ -287,9 +286,8 @@ proptest! {
         let result = MatrixSynthesisEngine.synthesize(&polynomials);
 
         // Skip known-failing configurations (DimensionMismatch from denominator degeneration)
-        match &result {
-            Err(mfs::MfsError::DimensionMismatch { .. }) => return Ok(()),
-            _ => {}
+        if let Err(mfs::MfsError::DimensionMismatch { .. }) = &result {
+            return Ok(());
         }
 
         let matrix = result
@@ -352,9 +350,8 @@ proptest! {
         // Skip known DimensionMismatch failures (denominator degeneration for
         // even-order all-pole and certain even-order configs). These are a known
         // limitation, not a NumericalFailure regression.
-        match &result {
-            Err(mfs::MfsError::DimensionMismatch { .. }) => return Ok(()),
-            _ => {}
+        if let Err(mfs::MfsError::DimensionMismatch { .. }) = &result {
+            return Ok(());
         }
 
         // The core assertion: synthesis must not return a NumericalFailure error
@@ -399,9 +396,8 @@ proptest! {
         let synth_result = MatrixSynthesisEngine.synthesize(&polynomials);
 
         // Skip known DimensionMismatch failures (denominator degeneration)
-        match &synth_result {
-            Err(mfs::MfsError::DimensionMismatch { .. }) => return Ok(()),
-            _ => {}
+        if let Err(mfs::MfsError::DimensionMismatch { .. }) = &synth_result {
+            return Ok(());
         }
 
         let matrix = synth_result

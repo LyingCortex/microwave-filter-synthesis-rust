@@ -202,9 +202,9 @@ pub fn cameron_order3_generalized_pipeline_exact_case() -> ExactGeneralizedPipel
         // gauge used by the fuqtgui reference; previously captured as the
         // un-normalized `(-j)^N`-scaled polynomial (leading coeff `j`).
         expected_e_s: &[
-            (2.1181266318138743, -1.6246134822647851),
-            (3.4859663258509093, -9.4958042110088581e-1),
-            (2.3468768686414001, -2.6794919243112258e-1),
+            (2.1181266318138743, -1.624_613_482_264_785),
+            (3.4859663258509093, -9.495_804_211_008_858e-1),
+            (2.346_876_868_641_4, -2.679_491_924_311_226e-1),
             (1.0, 0.0),
         ],
         expected_eps: 0.7501704380150805,

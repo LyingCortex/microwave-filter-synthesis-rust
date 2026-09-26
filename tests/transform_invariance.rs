@@ -25,7 +25,7 @@ fn assert_invariant_after_transform(
     let matrix = sample_transversal_matrix()?;
     let grid = FrequencyGrid::linspace(-2.0, 2.0, 41)?;
 
-    let solver = ResponseSolver::default();
+    let solver = ResponseSolver {};
     let baseline = solver.evaluate_normalized(&matrix, &grid)?;
     let transformed = solver.evaluate_normalized(transformed, &grid)?;
     let comparison = compare_responses(&baseline, &transformed)?;

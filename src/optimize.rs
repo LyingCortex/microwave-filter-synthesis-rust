@@ -125,8 +125,8 @@ fn rebuild_matrix(
         for k in 1..=order {
             let val = template.at(0, k).unwrap_or(0.0);
             if val.abs() > 1e-15 {
-                data[0 * side + k] = params[idx];
-                data[k * side + 0] = params[idx];
+                data[k] = params[idx];
+                data[k * side] = params[idx];
                 idx += 1;
             }
         }
@@ -167,8 +167,8 @@ fn rebuild_matrix(
     // Direct source-load
     let direct = template.at(0, side - 1).unwrap_or(0.0);
     if direct.abs() > 1e-15 {
-        data[0 * side + (side - 1)] = params[idx];
-        data[(side - 1) * side + 0] = params[idx];
+        data[side - 1] = params[idx];
+        data[(side - 1) * side] = params[idx];
         // idx += 1;
     }
 
@@ -248,8 +248,8 @@ fn lm_step(
     }
 
     // Add damping: J^T J + λ * diag(J^T J)
-    for j in 0..n_params {
-        jtj[j][j] *= 1.0 + lambda;
+    for (j, row) in jtj.iter_mut().enumerate() {
+        row[j] *= 1.0 + lambda;
     }
 
     // Solve via Cholesky-like approach (simple Gaussian elimination for small systems)
@@ -282,10 +282,11 @@ fn solve_linear_system(a: &[Vec<f64>], b: &[f64]) -> Vec<f64> {
             continue;
         }
 
-        for row in (col + 1)..n {
-            let factor = aug[row][col] / pivot;
-            for k in col..=n {
-                aug[row][k] -= factor * aug[col][k];
+        let pivot_tail = aug[col][col..=n].to_vec();
+        for row_tail in aug.iter_mut().skip(col + 1).map(|row| &mut row[col..=n]) {
+            let factor = row_tail[0] / pivot;
+            for (dest, &pivot_val) in row_tail.iter_mut().zip(pivot_tail.iter()) {
+                *dest -= factor * pivot_val;
             }
         }
     }

@@ -233,6 +233,12 @@ pub struct DuplexerSynthesis {
     full_iteration: bool,
 }
 
+impl Default for DuplexerSynthesis {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DuplexerSynthesis {
     /// Creates a new duplexer synthesis builder with default parameters.
     pub fn new() -> Self {
@@ -539,12 +545,26 @@ impl DuplexerSynthesis {
 
         // Step 3: Recover filter designs from modified S roots
         let tx_design = self.recover_filter_design(
-            &s_tx_roots, &d_tx, &tx_polys,
-            self.tx_order, self.tx_rl, self.tx_center, self.tx_bw,
+            &s_tx_roots,
+            &d_tx,
+            &tx_polys,
+            &RecoveryChannel {
+                order: self.tx_order,
+                rl: self.tx_rl,
+                center_hz: self.tx_center,
+                bandwidth_hz: self.tx_bw,
+            },
         )?;
         let rx_design = self.recover_filter_design(
-            &s_rx_roots, &d_rx, &rx_polys,
-            self.rx_order, self.rx_rl, self.rx_center, self.rx_bw,
+            &s_rx_roots,
+            &d_rx,
+            &rx_polys,
+            &RecoveryChannel {
+                order: self.rx_order,
+                rl: self.rx_rl,
+                center_hz: self.rx_center,
+                bandwidth_hz: self.rx_bw,
+            },
         )?;
 
         Ok(DuplexerSynthesisResult {
@@ -821,10 +841,7 @@ impl DuplexerSynthesis {
         s_roots: &[Complex64],
         d_original: &ComplexPolynomial,
         original_polys: &crate::approx::PolynomialSet,
-        order: usize,
-        rl: f64,
-        center_hz: f64,
-        bandwidth_hz: f64,
+        channel: &RecoveryChannel,
     ) -> Result<FilterDesign> {
         use crate::synthesis::MatrixSynthesisEngine;
 
@@ -869,9 +886,23 @@ impl DuplexerSynthesis {
         let matrix = MatrixSynthesisEngine.synthesize(&new_polys)?;
 
         Ok(FilterDesign::from_polynomials_and_matrix(
-            order, rl, center_hz, bandwidth_hz, new_polys, matrix,
+            channel.order,
+            channel.rl,
+            channel.center_hz,
+            channel.bandwidth_hz,
+            new_polys,
+            matrix,
         ))
     }
+}
+
+/// Per-channel parameters needed to reconstruct a `FilterDesign` after the
+/// Macchiarella-Tamiazzo iteration converges.
+struct RecoveryChannel {
+    order: usize,
+    rl: f64,
+    center_hz: f64,
+    bandwidth_hz: f64,
 }
 
 #[cfg(test)]

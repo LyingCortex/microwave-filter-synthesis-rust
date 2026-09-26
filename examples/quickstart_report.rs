@@ -19,7 +19,7 @@ fn main() -> Result<()> {
         &grid,
         ResponseTolerance::default(),
     )?;
-    let response = ResponseSolver::default().evaluate_normalized(&transform.matrix, &grid)?;
+    let response = ResponseSolver {}.evaluate_normalized(&transform.matrix, &grid)?;
     let output_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("docs")
         .join("quickstart_report_output.md");

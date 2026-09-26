@@ -91,9 +91,8 @@ pub fn cepstrum_spectral_factor(
     // cepstrum[N/2+1..] zeroed (anti-causal part)
     let mut min_phase_cepstrum: Vec<FftComplex<f64>> = vec![FftComplex::new(0.0, 0.0); n_fft];
     min_phase_cepstrum[0] = FftComplex::new(fft_input[0].re * 0.5, 0.0);
-    for k in 1..n_fft / 2 {
-        min_phase_cepstrum[k] = fft_input[k]; // Full causal part
-    }
+    // Full causal part
+    min_phase_cepstrum[1..n_fft / 2].copy_from_slice(&fft_input[1..n_fft / 2]);
     if n_fft > 1 {
         min_phase_cepstrum[n_fft / 2] = FftComplex::new(fft_input[n_fft / 2].re * 0.5, 0.0);
     }
@@ -328,29 +327,29 @@ pub fn spectral_factor(
     target_degree: usize,
 ) -> Result<ComplexPolynomial> {
     // Try cepstrum method first (most robust for well-conditioned problems)
-    match cepstrum_spectral_factor(r_poly, target_degree) {
-        Ok(d) => {
-            // Verify: D(j)*D*(-j) should approximate R(j) within tolerance
-            let s_j = Complex64::new(0.0, 1.0);
-            let r_val = r_poly.evaluate(s_j);
-            let d_val = d.evaluate(s_j);
-            let d_conj = d.alternating_conjugate().ok()
-                .map(|dc| dc.evaluate(s_j))
-                .unwrap_or(Complex64::new(1.0, 0.0));
-            let product = d_val * d_conj;
+    if let Ok(d) = cepstrum_spectral_factor(r_poly, target_degree) {
+        // Verify: D(j)*D*(-j) should approximate R(j) within tolerance
+        let s_j = Complex64::new(0.0, 1.0);
+        let r_val = r_poly.evaluate(s_j);
+        let d_val = d.evaluate(s_j);
+        let d_conj = d
+            .alternating_conjugate()
+            .ok()
+            .map(|dc| dc.evaluate(s_j))
+            .unwrap_or(Complex64::new(1.0, 0.0));
+        let product = d_val * d_conj;
 
-            let rel_err = if r_val.norm() > 1e-10 {
-                (product - r_val).norm() / r_val.norm()
-            } else {
-                product.norm()
-            };
+        let rel_err = if r_val.norm() > 1e-10 {
+            (product - r_val).norm() / r_val.norm()
+        } else {
+            product.norm()
+        };
 
-            if rel_err < 0.1 {
-                return Ok(d);
-            }
-            // Fall through to companion matrix if cepstrum result is poor
+        if rel_err < 0.1 {
+            return Ok(d);
         }
-        Err(_) => {} // Fall through
+        // Fall through to companion matrix if the cepstrum result is poor,
+        // and likewise when the cepstrum method errors out.
     }
 
     // Fallback: balanced companion matrix approach

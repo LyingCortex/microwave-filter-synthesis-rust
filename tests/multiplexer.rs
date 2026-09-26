@@ -391,24 +391,24 @@ fn multiplexer_channel_isolation() -> mfs::error::Result<()> {
     let resp = mux.response(9.6e9, 10.8e9, 401)?;
 
     for i in 0..3 {
-        for j in 0..3 {
+        for (j, &center) in centers.iter().enumerate() {
             if i == j {
                 continue;
             }
             // Sample isolation[i][j] at channel j's center.
-            let idx = closest_index(&resp.frequencies, centers[j]);
+            let idx = closest_index(&resp.frequencies, center);
             let iso = resp.isolation_db[i][j][idx];
             assert!(
                 representable_db(iso),
                 "isolation between channel {i} and {j} at {:.3} GHz must be defined, got {iso}",
-                centers[j] / 1.0e9
+                center / 1.0e9
             );
             // Loose bound: isolation must not exceed 0 dB (product of two
             // bounded transmissions can never be a gain).
             assert!(
                 iso <= 0.5,
                 "isolation channel {i}->{j} at {:.3} GHz must not exceed 0 dB, got {iso}",
-                centers[j] / 1.0e9
+                center / 1.0e9
             );
         }
     }

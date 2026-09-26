@@ -351,7 +351,7 @@ use mfs::synthesis::SectionSynthesis;
 fn regression_triplet_extraction_order5_tz_1_5() -> Result<()> {
     let spec = build_spec(5, 20.0, &[-1.5]);
     let polynomials = generalized_chebyshev_polynomials(&spec)?;
-    let sections = SectionSynthesis::default();
+    let sections = SectionSynthesis {};
     // Triplet extraction succeeds (returns Ok) — the synthesized matrix is
     // compatible with the section extraction pipeline.
     let outcome = sections.synthesize_triplet(&polynomials, -1.5, 2)?;
@@ -363,7 +363,7 @@ fn regression_triplet_extraction_order5_tz_1_5() -> Result<()> {
 fn regression_triplet_extraction_order5_tz_2_0() -> Result<()> {
     let spec = build_spec(5, 20.0, &[-2.0]);
     let polynomials = generalized_chebyshev_polynomials(&spec)?;
-    let sections = SectionSynthesis::default();
+    let sections = SectionSynthesis {};
     // Triplet extraction succeeds (returns Ok) — the synthesized matrix is
     // compatible with the section extraction pipeline.
     let outcome = sections.synthesize_triplet(&polynomials, -2.0, 2)?;
@@ -375,7 +375,7 @@ fn regression_triplet_extraction_order5_tz_2_0() -> Result<()> {
 fn regression_trisection_extraction_order5_tz_1_5() -> Result<()> {
     let spec = build_spec(5, 20.0, &[-1.5]);
     let polynomials = generalized_chebyshev_polynomials(&spec)?;
-    let sections = SectionSynthesis::default();
+    let sections = SectionSynthesis {};
     let outcome = sections.synthesize_trisection(&polynomials, -1.5, (2, 4))?;
     assert!(
         outcome.verification.passes(),
@@ -388,7 +388,7 @@ fn regression_trisection_extraction_order5_tz_1_5() -> Result<()> {
 fn regression_trisection_extraction_order5_tz_2_0() -> Result<()> {
     let spec = build_spec(5, 20.0, &[-2.0]);
     let polynomials = generalized_chebyshev_polynomials(&spec)?;
-    let sections = SectionSynthesis::default();
+    let sections = SectionSynthesis {};
     let outcome = sections.synthesize_trisection(&polynomials, -2.0, (2, 4))?;
     assert!(
         outcome.verification.passes(),

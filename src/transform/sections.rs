@@ -9,6 +9,23 @@ use crate::verify::{
 
 use super::attach_response_invariance_check;
 
+/// Parameters describing a quadruplet section extraction: the two transmission
+/// zeros, the extraction position, the common resonator, and the zero-order
+/// swap flag.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct QuadrupletExtraction {
+    /// First transmission zero (normalized prototype coordinate).
+    pub first_zero: f64,
+    /// Second transmission zero (normalized prototype coordinate).
+    pub second_zero: f64,
+    /// Extraction position (1-based resonator numbering).
+    pub position: usize,
+    /// Common resonator index (`1` or `4`).
+    pub common_resonator: usize,
+    /// Whether to swap the zero extraction order.
+    pub swap_zero_order: bool,
+}
+
 /// Result of a section-extraction transform plus its structural verification.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SectionTransformOutcome {
@@ -158,21 +175,17 @@ pub fn extract_quadruplet_section_matrix(
 /// Convenience wrapper for reported quadruplet extraction plus response checking.
 pub fn extract_quadruplet_section_with_response_check(
     matrix: &CouplingMatrix,
-    first_zero: f64,
-    second_zero: f64,
-    position: usize,
-    common_resonator: usize,
-    swap_zero_order: bool,
+    extraction: QuadrupletExtraction,
     grid: &FrequencyGrid,
     tolerance: ResponseTolerance,
 ) -> Result<SectionTransformOutcome> {
     let mut outcome = extract_quadruplet_impl(
         matrix,
-        first_zero,
-        second_zero,
-        position,
-        common_resonator,
-        swap_zero_order,
+        extraction.first_zero,
+        extraction.second_zero,
+        extraction.position,
+        extraction.common_resonator,
+        extraction.swap_zero_order,
     )?;
     attach_response_check(&mut outcome, matrix, grid, tolerance)?;
     Ok(outcome)
@@ -306,11 +319,13 @@ mod tests {
 
         let outcome = extract_quadruplet_section_with_response_check(
             &matrix,
-            -1.1,
-            1.35,
-            2,
-            1,
-            false,
+            QuadrupletExtraction {
+                first_zero: -1.1,
+                second_zero: 1.35,
+                position: 2,
+                common_resonator: 1,
+                swap_zero_order: false,
+            },
             &grid,
             ResponseTolerance::default(),
         )?;

@@ -26,7 +26,7 @@ fn assert_folded_preserves_response(
 
     // 用更细的网格覆盖到阻带深处的传输零点(那里对符号错误最敏感)。
     let grid = FrequencyGrid::linspace(-4.0, 4.0, 801)?;
-    let solver = ResponseSolver::default();
+    let solver = ResponseSolver {};
     let baseline = solver.evaluate_normalized(&transversal, &grid)?;
     let transformed = solver.evaluate_normalized(&folded, &grid)?;
     let comparison = compare_responses(&baseline, &transformed)?;

@@ -168,6 +168,7 @@ impl Stage for ResponseEvaluationStage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::approx::PolynomialSetParams;
     use crate::error::MfsError;
     use crate::spec::FilterSpec;
 
@@ -204,16 +205,16 @@ mod tests {
 
     #[test]
     fn matrix_synthesis_stage_returns_error_without_generalized_data() -> Result<()> {
-        let polynomials = PolynomialSet::new(
-            3,
-            0.1,
-            0.1,
-            1.0,
-            vec![-1.5, 1.5],
-            vec![1.0, 0.2, 0.3, 0.4],
-            vec![0.8, 0.6, 0.4, 0.2],
-            vec![1.0, 0.5, -2.25],
-        )?;
+        let polynomials = PolynomialSet::new(&PolynomialSetParams {
+            order: 3,
+            ripple_factor: 0.1,
+            eps: 0.1,
+            eps_r: 1.0,
+            transmission_zeros_normalized: vec![-1.5, 1.5],
+            e: vec![1.0, 0.2, 0.3, 0.4],
+            f: vec![0.8, 0.6, 0.4, 0.2],
+            p: vec![1.0, 0.5, -2.25],
+        })?;
 
         let stage = MatrixSynthesisStage;
         let error = stage.execute(&polynomials).unwrap_err();

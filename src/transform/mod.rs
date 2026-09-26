@@ -15,7 +15,8 @@ pub use sections::{
     extract_quadruplet_section_with_response_check, extract_triplet_section,
     extract_triplet_section_matrix, extract_triplet_section_with_response_check,
     extract_trisection_section, extract_trisection_section_matrix,
-    extract_trisection_section_with_response_check, SectionTransformOutcome,
+    extract_trisection_section_with_response_check, QuadrupletExtraction,
+    SectionTransformOutcome,
 };
 use arrow::to_arrow;
 use folded::to_folded;
@@ -85,7 +86,7 @@ pub(crate) fn attach_response_invariance_check(
     grid: &FrequencyGrid,
     tolerance: ResponseTolerance,
 ) -> Result<(ResponseCheckReport, String)> {
-    let solver = ResponseSolver::default();
+    let solver = ResponseSolver {};
     let baseline = solver.evaluate_normalized(baseline_matrix, grid)?;
     let transformed = solver.evaluate_normalized(transformed_matrix, grid)?;
     let comparison = compare_responses(&baseline, &transformed)?;
