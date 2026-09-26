@@ -151,6 +151,94 @@ fn build_network_rejects_empty_response() {
 }
 
 #[test]
+fn cascade_with_identity_is_identity() -> Result<()> {
+    let design = FilterDesign::bandpass(4, 20.0, 6.75e9, 300e6).synthesize()?;
+    let net = design.build_network()?;
+
+    // Identity 2-port (S = [[0,1],[1,0]]) on the same frequency grid:
+    // cascading it onto `net` must leave `net` unchanged (ABCD = I).
+    let mut id_builder = ::touchstone::NetworkBuilder::new("identity.s2p", 2).z0(50.0);
+    for &freq in net.f.iter() {
+        let zero = ::touchstone::Complex { re: 0.0, im: 0.0 };
+        let one = ::touchstone::Complex { re: 1.0, im: 0.0 };
+        let matrix = ::touchstone::SMatrix {
+            rank: 2,
+            data: vec![vec![zero, one], vec![one, zero]],
+        };
+        id_builder = id_builder.point(freq, matrix);
+    }
+    let identity = id_builder.build().expect("identity network builds");
+
+    let cascaded = mfs::touchstone::cascade(&net, &identity)?;
+    assert_eq!(cascaded.rank, 2);
+    assert_eq!(cascaded.f.len(), net.f.len());
+    for i in [0, net.f.len() / 2, net.f.len() - 1] {
+        for (port, label) in [(1, "S11"), (2, "S21")] {
+            let orig = net.try_s_ri_at(i, port, 1).unwrap();
+            let casc = cascaded.try_s_ri_at(i, port, 1).unwrap();
+            assert!(
+                (orig.re - casc.re).abs() < 1e-6 && (orig.im - casc.im).abs() < 1e-6,
+                "{label} at point {i}: {orig:?} vs {casc:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn cascade_rejects_mismatched_grids() -> Result<()> {
+    // Different band centers -> different default response grids. The wrapper
+    // must return a typed error, not silently pair index-wise (upstream
+    // Network::cascade does the latter).
+    let a = FilterDesign::bandpass(4, 20.0, 6.75e9, 300e6).synthesize()?;
+    let b = FilterDesign::bandpass(4, 20.0, 7.0e9, 300e6).synthesize()?;
+    let net_a = a.build_network()?;
+    let net_b = b.build_network()?;
+    let err = mfs::touchstone::cascade(&net_a, &net_b).unwrap_err();
+    assert!(
+        matches!(err, mfs::MfsError::PreconditionViolation(_)),
+        "mismatched grids must be rejected, got {err:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn cascade_rejects_1_port_network() {
+    // A 1-port network must be rejected before it can hit upstream's panic.
+    let one_port = ::touchstone::NetworkBuilder::new("one_port.s1p", 1)
+        .point(
+            1.0e9,
+            ::touchstone::SMatrix {
+                rank: 1,
+                data: vec![vec![::touchstone::Complex { re: 0.5, im: -0.1 }]],
+            },
+        )
+        .build()
+        .expect("1-port network builds");
+    let two_port = ::touchstone::NetworkBuilder::new("two_port.s2p", 2)
+        .point(
+            1.0e9,
+            ::touchstone::SMatrix {
+                rank: 2,
+                data: vec![
+                    vec![
+                        ::touchstone::Complex { re: 0.1, im: 0.0 },
+                        ::touchstone::Complex { re: 0.9, im: 0.0 },
+                    ],
+                    vec![
+                        ::touchstone::Complex { re: 0.9, im: 0.0 },
+                        ::touchstone::Complex { re: 0.1, im: 0.0 },
+                    ],
+                ],
+            },
+        )
+        .build()
+        .expect("2-port network builds");
+    let err = mfs::touchstone::cascade(&one_port, &two_port).unwrap_err();
+    assert!(matches!(err, mfs::MfsError::PreconditionViolation(_)));
+}
+
+#[test]
 fn filter_design_to_touchstone_builder() -> Result<()> {
     let design = FilterDesign::bandpass(6, 23.0, 6.75e9, 300e6)
         .zeros_hz([6.4e9, 7.0e9])

@@ -104,6 +104,9 @@ design.to_touchstone()
 // Live touchstone::Network (NetworkBuilder, touchstone 0.14+):
 // resample / cascade / Y-Z-ABCD conversion, then save or inspect
 let network = design.build_network()?;
+
+// Cascade two designs (port 2 -> port 1) into one 2-port network
+let combined = design_a.cascade(&design_b)?;
 ```
 
 ## Python Bindings

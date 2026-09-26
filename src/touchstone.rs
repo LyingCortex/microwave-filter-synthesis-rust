@@ -188,6 +188,51 @@ pub fn build_network(response: &SParameterResponse, z0: f64) -> Result<touchston
         .map_err(|e| MfsError::PreconditionViolation(format!("failed to build network: {e}")))
 }
 
+/// Cascades two 2-port networks (port 2 of `a` → port 1 of `b`) and returns
+/// the combined 2-port network.
+///
+/// This wraps `touchstone::Network::cascade` (ABCD multiplication), which
+/// panics on invalid input and aligns frequency points *index-wise*. To stay
+/// consistent with mfs's typed-error, no-silent-degradation policy, this
+/// pre-validates the preconditions and returns a `MfsError` instead:
+/// both networks must be 2-port, share the same reference impedance and
+/// frequency unit, and be sampled on an identical frequency grid. When the
+/// grids differ, `resample` one onto the other's grid first.
+pub fn cascade(a: &touchstone::Network, b: &touchstone::Network) -> Result<touchstone::Network> {
+    for (net, label) in [(a, "a"), (b, "b")] {
+        if net.rank != 2 {
+            return Err(MfsError::PreconditionViolation(format!(
+                "cascade requires 2-port networks; network `{label}` is {rank}-port",
+                rank = net.rank
+            )));
+        }
+    }
+    if a.z0 != b.z0 {
+        return Err(MfsError::PreconditionViolation(format!(
+            "cascade requires equal reference impedance; got a={} Ω, b={} Ω",
+            a.z0, b.z0
+        )));
+    }
+    if a.frequency_unit != b.frequency_unit {
+        return Err(MfsError::PreconditionViolation(format!(
+            "cascade requires equal frequency units; got `{u_a}` and `{u_b}`",
+            u_a = a.frequency_unit,
+            u_b = b.frequency_unit
+        )));
+    }
+    let grids_match = a.f.len() == b.f.len()
+        && a.f
+            .iter()
+            .zip(&b.f)
+            .all(|(x, y)| (x - y).abs() <= 1e-9 * x.max(*y).max(1.0));
+    if !grids_match {
+        return Err(MfsError::PreconditionViolation(
+            "cascade requires both networks on the same frequency grid; resample one onto the other's grid first".into(),
+        ));
+    }
+    Ok(a.cascade(b))
+}
+
 fn format_data_line(freq: f64, s: &ResponseSample, fmt: DataFormat) -> String {
     match fmt {
         DataFormat::RI => {

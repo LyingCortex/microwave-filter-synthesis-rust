@@ -667,6 +667,28 @@ impl FilterDesign {
         crate::touchstone::build_network(&response, 50.0)
     }
 
+    /// Cascades this design with `other` (port 2 → port 1) into a single
+    /// 2-port `touchstone::Network`, both referenced to 50 Ω.
+    ///
+    /// Both designs are evaluated on their default response grid
+    /// (`center ± 1.5·bw`, 201 points), so the call returns a typed error
+    /// when the two grids differ — use `build_network` + `touchstone::cascade`
+    /// with explicit `resample` for non-default grids.
+    ///
+    /// ```no_run
+    /// # use mfs::prelude::*;
+    /// let a = FilterDesign::bandpass(4, 20.0, 6.75e9, 300e6).synthesize()?;
+    /// let b = FilterDesign::bandpass(4, 20.0, 6.75e9, 300e6).synthesize()?;
+    /// let net = a.cascade(&b)?;
+    /// assert_eq!(net.rank, 2);
+    /// # Ok::<(), MfsError>(())
+    /// ```
+    pub fn cascade(&self, other: &FilterDesign) -> Result<touchstone::Network> {
+        let net_a = self.build_network()?;
+        let net_b = other.build_network()?;
+        crate::touchstone::cascade(&net_a, &net_b)
+    }
+
     pub(crate) fn default_response(&self) -> Result<SParameterResponse> {
         if let (Some(center), Some(bw)) = (self.center_hz, self.bandwidth_hz) {
             // Default range: center ± 1.5*bw covers passband + nearby stopband
