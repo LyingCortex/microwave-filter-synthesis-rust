@@ -22,3 +22,6 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Agent session runtime state (plans/ stay tracked)
+.omo/run-continuation/
