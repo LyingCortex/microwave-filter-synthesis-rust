@@ -76,6 +76,15 @@
   programmatically generating S-parameter networks, plus in-memory
   `Network::from_str`/`from_bytes`.
 
+### Fixed
+
+- **`touchstone::cascade` rejected per-port reference impedance as a panic.**
+  Networks parsed from a 2-port v2 file with a per-port `[Reference]` line
+  (e.g. `R 50 75`) carry `ReferenceImpedance::PerPort` while their scalar `z0`
+  field holds the first port's value, so they passed the `z0` pre-validation
+  and hit an upstream panic. They are now rejected with
+  `MfsError::PreconditionViolation` (regression test added).
+
 ### Documentation
 
 - `docs/architecture.md` module list and dependency table now match the code;
@@ -83,6 +92,11 @@
   documented four contradictory ways). See
    `docs/internal/architecture-review-2026-09-25.md` for the full assessment.
 - Version aligned across `Cargo.toml`, `pyproject.toml`, and `README.md`.
+- Post-review doc hygiene: the 0.4.1 release notes (below) were separated out
+  from the 0.5.0 heading; the multiplexer "Known limitation" and the two
+  multiplexer design docs no longer assert the pre-P1 bit-identical no-op;
+  the numerical-optimization report's fallback chain now reads faer →
+  Durand-Kerner → Aberth (matching the code and README).
 
 ## [0.4.1] — 2026-09-25
 
