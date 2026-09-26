@@ -239,6 +239,33 @@ fn cascade_rejects_1_port_network() {
 }
 
 #[test]
+fn cascade_rejects_per_port_reference_impedance() {
+    // A 2-port v2 file with a per-port `[Reference]` line parses into
+    // ReferenceImpedance::PerPort while the scalar `z0` field holds the
+    // first port's 50 Ω — so two such networks pass the `a.z0 != b.z0`
+    // guard and would panic inside upstream `Network::cascade`. The wrapper
+    // must reject them with a typed error instead.
+    let text = "[Version] 2.1\n\
+                # GHZ S RI R 50\n\
+                [Number of Ports] 2\n\
+                [Reference] 50 75\n\
+                [Network Data]\n\
+                1.0 0.1 0.0 0.9 0.0 0.9 0.0 0.1 0.0\n\
+                2.0 0.2 0.0 0.8 0.0 0.8 0.0 0.2 0.0\n\
+                [End]\n";
+    let a = ::touchstone::Network::from_str("a.s2p", text).expect("parses per-port R network");
+    assert!(
+        matches!(a.reference_impedance(), ::touchstone::ReferenceImpedance::PerPort(_)),
+        "test setup: expected PerPort impedance"
+    );
+    let err = mfs::touchstone::cascade(&a, &a).unwrap_err();
+    assert!(
+        matches!(err, mfs::MfsError::PreconditionViolation(_)),
+        "per-port impedance must be rejected, got {err:?}"
+    );
+}
+
+#[test]
 fn filter_design_to_touchstone_builder() -> Result<()> {
     let design = FilterDesign::bandpass(6, 23.0, 6.75e9, 300e6)
         .zeros_hz([6.4e9, 7.0e9])

@@ -195,15 +195,23 @@ pub fn build_network(response: &SParameterResponse, z0: f64) -> Result<touchston
 /// panics on invalid input and aligns frequency points *index-wise*. To stay
 /// consistent with mfs's typed-error, no-silent-degradation policy, this
 /// pre-validates the preconditions and returns a `MfsError` instead:
-/// both networks must be 2-port, share the same reference impedance and
-/// frequency unit, and be sampled on an identical frequency grid. When the
-/// grids differ, `resample` one onto the other's grid first.
+/// both networks must be 2-port, share the same *common* (scalar) reference
+/// impedance and frequency unit, and be sampled on an identical frequency
+/// grid. Networks parsed from a per-port R line (e.g. `R 50 75`) are
+/// rejected, because upstream cascading panics on them even though their
+/// scalar `z0` field (first port) may compare equal. When the grids differ,
+/// `resample` one onto the other's grid first.
 pub fn cascade(a: &touchstone::Network, b: &touchstone::Network) -> Result<touchstone::Network> {
     for (net, label) in [(a, "a"), (b, "b")] {
         if net.rank != 2 {
             return Err(MfsError::PreconditionViolation(format!(
                 "cascade requires 2-port networks; network `{label}` is {rank}-port",
                 rank = net.rank
+            )));
+        }
+        if matches!(net.reference_impedance(), touchstone::ReferenceImpedance::PerPort(_)) {
+            return Err(MfsError::PreconditionViolation(format!(
+                "cascade requires a common reference impedance; network `{label}` has per-port impedances"
             )));
         }
     }
