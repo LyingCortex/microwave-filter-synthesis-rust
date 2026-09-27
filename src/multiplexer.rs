@@ -7,7 +7,9 @@
 //! other channels through the junction, following the simplified perturbation
 //! path used by the diplexer.
 
-use crate::approx::{ComplexPolynomial, generalized_chebyshev_polynomials, compute_root_displacement, pad_polynomial};
+use crate::approx::{
+    compute_root_displacement, generalized_chebyshev_polynomials, ComplexPolynomial,
+};
 use crate::design::FilterDesign;
 use crate::duplexer::{ChannelSpec, JunctionType};
 use crate::error::{MfsError, Result};
@@ -15,7 +17,7 @@ use crate::freq::{BandPassMapping, FrequencyGrid};
 use crate::matrix::CouplingMatrix;
 use crate::response::ResponseSolver;
 use crate::spec::FilterSpec;
-use crate::synthesis::{build_filter_spec, MatrixSynthesisEngine};
+use crate::synthesis::build_filter_spec;
 use num_complex::Complex64;
 
 /// N-channel multiplexer synthesis result.
@@ -31,6 +33,9 @@ pub struct MultiplexerSynthesisResult {
     pub junction: JunctionType,
     /// Per-channel S-polynomial roots (auxiliary polynomial).
     pub s_roots: Vec<Vec<Complex64>>,
+    /// The iteration budget in force, so a caller can distinguish "converged"
+    /// from "ran out of iterations" without holding the builder.
+    pub max_iterations: usize,
 }
 
 /// Builder for iterative N-channel multiplexer synthesis.
@@ -167,9 +172,7 @@ impl MultiplexerSynthesis {
                 let n_sq = n * n;
                 Complex64::new(n_sq, 0.0) / Complex64::new(1.0, -n_sq * b0)
             }
-            JunctionType::TypeII { c0 } => {
-                Complex64::new(1.0, 0.0) / Complex64::new(1.0, -c0)
-            }
+            JunctionType::TypeII { c0 } => Complex64::new(1.0, 0.0) / Complex64::new(1.0, -c0),
         };
 
         let mut iterations = 0;
@@ -251,7 +254,7 @@ impl MultiplexerSynthesis {
         // (e) Recover each channel's FilterDesign from its updated S roots.
         let mut channels = Vec::with_capacity(n);
         for i in 0..n {
-            let design = Self::recover_filter_design(
+            let design = crate::synthesis::recover_channel_design(
                 &s_roots[i],
                 &d_polys[i],
                 &original_polys[i],
@@ -269,62 +272,12 @@ impl MultiplexerSynthesis {
             convergence_error,
             junction: self.junction,
             s_roots,
+            max_iterations: self.max_iterations,
         })
     }
 
     fn build_spec(ch: &ChannelSpec) -> Result<FilterSpec> {
         build_filter_spec(ch.order, ch.return_loss_db, &ch.zeros, None)
-    }
-
-    /// Recovers a filter design from converged S-polynomial roots, mirroring
-    /// the diplexer's `recover_filter_design`.
-    fn recover_filter_design(
-        s_roots: &[Complex64],
-        d_original: &ComplexPolynomial,
-        original_polys: &crate::approx::PolynomialSet,
-        order: usize,
-        rl: f64,
-        center_hz: f64,
-        bandwidth_hz: f64,
-    ) -> Result<FilterDesign> {
-        let s_poly = ComplexPolynomial::from_complex_roots(s_roots)?;
-
-        let s_leading = s_poly.leading_coefficient();
-        let d_leading = d_original.leading_coefficient();
-
-        let d_scaled = if d_leading.norm() > 1e-15 {
-            let scale_factor = s_leading / d_leading;
-            d_original.scale(scale_factor)?
-        } else {
-            d_original.clone()
-        };
-
-        let d_padded = pad_polynomial(&d_scaled, s_poly.coefficients.len())?;
-
-        let e_poly = s_poly.add(&d_padded)?;
-        let f_poly = s_poly.sub(&d_padded)?;
-
-        // The synthesis engine reads generalized.e_s/f_s (not .e/.f), so the
-        // perturbed E/F must be written back there or the loading correction is
-        // silently ignored (see architecture-review P1).
-        let mut new_polys = original_polys.clone();
-        if let Some(g) = new_polys.generalized.as_mut() {
-            g.e_s = Some(e_poly.clone());
-            g.f_s = f_poly.clone();
-        }
-        new_polys.e = e_poly;
-        new_polys.f = f_poly;
-
-        let matrix = MatrixSynthesisEngine.synthesize(&new_polys)?;
-
-        Ok(FilterDesign::from_polynomials_and_matrix(
-            order,
-            rl,
-            center_hz,
-            bandwidth_hz,
-            new_polys,
-            matrix,
-        ))
     }
 }
 
@@ -350,7 +303,9 @@ mod tests {
 
     #[test]
     fn multiplexer_requires_two_or_more_channels() -> crate::error::Result<()> {
-        let result = MultiplexerSynthesis::new().channel(spec(5, 10.0e9)).synthesize();
+        let result = MultiplexerSynthesis::new()
+            .channel(spec(5, 10.0e9))
+            .synthesize();
         assert!(result.is_err());
         Ok(())
     }
@@ -358,11 +313,7 @@ mod tests {
     #[test]
     fn multiplexer_triplexer_converges() -> crate::error::Result<()> {
         let result = MultiplexerSynthesis::new()
-            .channels([
-                spec(5, 10.0e9),
-                spec(5, 10.2e9),
-                spec(5, 10.4e9),
-            ])
+            .channels([spec(5, 10.0e9), spec(5, 10.2e9), spec(5, 10.4e9)])
             .junction(JunctionType::TypeI { n: 1.0, b0: 0.0 })
             .synthesize()?;
 
@@ -395,16 +346,12 @@ mod tests {
     /// residue real parts only, which is zero for odd-order all-pole designs
     /// (an `s = j w` phase factor) — see `residue_real_component` in
     /// `crate::synthesis::residues`. That core defect (which also affected
-    /// `DuplexerSynthesis::recover_filter_design`) is now fixed, so the
+    /// `crate::synthesis::recover_channel_design`) is now fixed, so the
     /// recovered channels must exhibit a real passband.
     #[test]
     fn multiplexer_recovered_channel_is_passband() -> crate::error::Result<()> {
         let result = MultiplexerSynthesis::new()
-            .channels([
-                spec(5, 10.0e9),
-                spec(5, 10.2e9),
-                spec(5, 10.4e9),
-            ])
+            .channels([spec(5, 10.0e9), spec(5, 10.2e9), spec(5, 10.4e9)])
             .junction(JunctionType::TypeI { n: 1.0, b0: 0.0 })
             .synthesize()?;
 
@@ -471,11 +418,7 @@ mod tests {
     #[test]
     fn multiplexer_type_ii_junction_converges() -> crate::error::Result<()> {
         let result = MultiplexerSynthesis::new()
-            .channels([
-                spec(5, 10.0e9),
-                spec(5, 10.2e9),
-                spec(5, 10.4e9),
-            ])
+            .channels([spec(5, 10.0e9), spec(5, 10.2e9), spec(5, 10.4e9)])
             .junction(JunctionType::TypeII { c0: 0.2 })
             .synthesize()?;
 
@@ -490,11 +433,7 @@ mod tests {
     /// the converged S-roots must differ from the ideal `b₀ = 0` case.
     #[test]
     fn multiplexer_junction_susceptance_affects_synthesis() -> crate::error::Result<()> {
-        let specs = [
-            spec(5, 10.0e9),
-            spec(5, 10.2e9),
-            spec(5, 10.4e9),
-        ];
+        let specs = [spec(5, 10.0e9), spec(5, 10.2e9), spec(5, 10.4e9)];
         let ideal = MultiplexerSynthesis::new()
             .channels(specs.clone())
             .junction(JunctionType::TypeI { n: 1.0, b0: 0.0 })
@@ -626,8 +565,10 @@ impl Multiplexer {
         // reflection than the maximum. This keeps the N-channel and diplexer
         // analyses consistent.
         let mut antenna_s11_db = Vec::with_capacity(points);
-        let mut channel_s11_iters: Vec<_> =
-            channel_s11_mag.iter().map(|ch| ch.iter().copied()).collect();
+        let mut channel_s11_iters: Vec<_> = channel_s11_mag
+            .iter()
+            .map(|ch| ch.iter().copied())
+            .collect();
         for _ in 0..points {
             let mut log_sum = 0.0_f64;
             let mut nonzero = 0usize;
@@ -663,9 +604,7 @@ impl Multiplexer {
                     continue;
                 }
                 let mut row_db = Vec::with_capacity(points);
-                for (mag_i, mag_j) in
-                    channel_s21_mag[i].iter().zip(channel_s21_mag[j].iter())
-                {
+                for (mag_i, mag_j) in channel_s21_mag[i].iter().zip(channel_s21_mag[j].iter()) {
                     let prod = mag_i * mag_j;
                     let db = if prod > 1e-15 {
                         20.0 * prod.log10()

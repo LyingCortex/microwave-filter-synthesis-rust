@@ -61,12 +61,7 @@ impl Duplexer {
     /// The model assumes ideal T-junction combining (no junction reactance).
     /// Each filter's response is computed independently, and the isolation is
     /// estimated as the product of Tx rejection at Rx frequencies and vice versa.
-    pub fn response(
-        &self,
-        start_hz: f64,
-        stop_hz: f64,
-        points: usize,
-    ) -> Result<DuplexerResponse> {
+    pub fn response(&self, start_hz: f64, stop_hz: f64, points: usize) -> Result<DuplexerResponse> {
         let grid = FrequencyGrid::linspace(start_hz, stop_hz, points)?;
 
         // Compute Tx filter response
@@ -102,7 +97,11 @@ impl Duplexer {
             let tx_s11_mag = tx_s.s11_mag();
             let rx_s11_mag = rx_s.s11_mag();
             let combined_s11 = (tx_s11_mag * rx_s11_mag).sqrt(); // geometric mean approximation
-            let ant_s11 = if combined_s11 > 1e-15 { 20.0 * combined_s11.log10() } else { -300.0 };
+            let ant_s11 = if combined_s11 > 1e-15 {
+                20.0 * combined_s11.log10()
+            } else {
+                -300.0
+            };
             antenna_s11_db.push(ant_s11);
 
             // Isolation: Tx-to-Rx = Tx_S21 rejection at Rx band + Rx_S21 rejection at Tx band
@@ -110,7 +109,11 @@ impl Duplexer {
             let tx_s21_lin = tx_s.s21_mag();
             let rx_s21_lin = rx_s.s21_mag();
             let iso_lin = tx_s21_lin * rx_s21_lin;
-            let iso_db_val = if iso_lin > 1e-15 { 20.0 * iso_lin.log10() } else { -300.0 };
+            let iso_db_val = if iso_lin > 1e-15 {
+                20.0 * iso_lin.log10()
+            } else {
+                -300.0
+            };
             isolation_db.push(iso_db_val);
         }
 
@@ -126,23 +129,33 @@ impl Duplexer {
     }
 
     /// Returns the Tx filter's coupling matrix.
-    pub fn tx_matrix(&self) -> &CouplingMatrix { self.tx.matrix() }
+    pub fn tx_matrix(&self) -> &CouplingMatrix {
+        self.tx.matrix()
+    }
 
     /// Returns the Rx filter's coupling matrix.
-    pub fn rx_matrix(&self) -> &CouplingMatrix { self.rx.matrix() }
+    pub fn rx_matrix(&self) -> &CouplingMatrix {
+        self.rx.matrix()
+    }
 
     /// Returns the Tx filter's folded coupling matrix.
-    pub fn tx_folded(&self) -> Result<CouplingMatrix> { self.tx.to_folded() }
+    pub fn tx_folded(&self) -> Result<CouplingMatrix> {
+        self.tx.to_folded()
+    }
 
     /// Returns the Rx filter's folded coupling matrix.
-    pub fn rx_folded(&self) -> Result<CouplingMatrix> { self.rx.to_folded() }
+    pub fn rx_folded(&self) -> Result<CouplingMatrix> {
+        self.rx.to_folded()
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Macchiarella-Tamiazzo Iterative Duplexer Synthesis
 // ═══════════════════════════════════════════════════════════════════════════════
 
-use crate::approx::{ComplexPolynomial, generalized_chebyshev_polynomials, compute_root_displacement, multiply_by_s, pad_polynomial};
+use crate::approx::{
+    compute_root_displacement, generalized_chebyshev_polynomials, multiply_by_s, ComplexPolynomial,
+};
 use crate::spec::FilterSpec;
 use crate::synthesis::build_filter_spec;
 use num_complex::Complex64;
@@ -434,9 +447,8 @@ impl DuplexerSynthesis {
                 let pr = p_rx.multiply(&s_tx_current)?;
 
                 // Compute N(s) with frequency-offset correction
-                let n_poly = self.compute_n_polynomial(
-                    &s_tx_current, &s_rx_current, &d_tx, &d_rx,
-                )?;
+                let n_poly =
+                    self.compute_n_polynomial(&s_tx_current, &s_rx_current, &d_tx, &d_rx)?;
 
                 // Compute scaling constants
                 let (p0t_sq, p0r_sq) = self.solve_scaling_constants(&n_poly, &pt, &pr)?;
@@ -449,11 +461,9 @@ impl DuplexerSynthesis {
                 let pr_conj = pr.alternating_conjugate()?;
                 let prpr = pr.multiply(&pr_conj)?;
 
-                let r_poly = nn.add(
-                    &ptpt.scale(Complex64::new(p0t_sq, 0.0))?
-                )?.add(
-                    &prpr.scale(Complex64::new(p0r_sq, 0.0))?
-                )?;
+                let r_poly = nn
+                    .add(&ptpt.scale(Complex64::new(p0t_sq, 0.0))?)?
+                    .add(&prpr.scale(Complex64::new(p0r_sq, 0.0))?)?;
 
                 // Spectral factorization using cepstrum + balanced companion
                 let d_poly = crate::spectral::spectral_factor(&r_poly, n_tx + n_rx)?;
@@ -463,26 +473,33 @@ impl DuplexerSynthesis {
 
                 // Find roots and assign
                 let product_roots = product_poly.roots()?;
-                let (raw_tx, raw_rx) = self.assign_roots(
-                    &product_roots, n_tx, n_rx, &s_tx_roots, &s_rx_roots,
-                )?;
+                let (raw_tx, raw_rx) =
+                    self.assign_roots(&product_roots, n_tx, n_rx, &s_tx_roots, &s_rx_roots)?;
 
                 // Under-relaxation
                 let alpha = (0.3 + 0.04 * iter as f64).min(0.7);
-                let new_s_tx_roots: Vec<Complex64> = s_tx_roots.iter()
+                let new_s_tx_roots: Vec<Complex64> = s_tx_roots
+                    .iter()
                     .zip(raw_tx.iter())
                     .map(|(&old, &new_r)| {
                         if new_r.re.is_finite() && new_r.im.is_finite() && new_r.norm() < 50.0 {
                             old * (1.0 - alpha) + new_r * alpha
-                        } else { old }
-                    }).collect();
-                let new_s_rx_roots: Vec<Complex64> = s_rx_roots.iter()
+                        } else {
+                            old
+                        }
+                    })
+                    .collect();
+                let new_s_rx_roots: Vec<Complex64> = s_rx_roots
+                    .iter()
                     .zip(raw_rx.iter())
                     .map(|(&old, &new_r)| {
                         if new_r.re.is_finite() && new_r.im.is_finite() && new_r.norm() < 50.0 {
                             old * (1.0 - alpha) + new_r * alpha
-                        } else { old }
-                    }).collect();
+                        } else {
+                            old
+                        }
+                    })
+                    .collect();
 
                 let max_delta = compute_root_displacement(&s_tx_roots, &new_s_tx_roots)
                     .max(compute_root_displacement(&s_rx_roots, &new_s_rx_roots));
@@ -508,63 +525,81 @@ impl DuplexerSynthesis {
                 };
                 let alpha = n_sq * 0.3 / (1.0 + 0.3 * iter as f64);
 
-                let new_s_tx_roots: Vec<Complex64> = s_tx_roots.iter().map(|&root| {
-                    let rx_freq = root + Complex64::new(0.0, normalized_separation);
-                    let s_rx_val = s_rx_current.evaluate(rx_freq);
-                    let d_rx_val = d_rx.evaluate(rx_freq);
-                    if s_rx_val.norm() > 1e-10 {
-                        let correction = alpha * d_rx_val / s_rx_val;
-                        let new_root = root - correction;
-                        if new_root.re.is_finite() && new_root.im.is_finite() && new_root.norm() < 50.0 {
-                            Complex64::new(new_root.re.min(-1e-10), new_root.im)
-                        } else { root }
-                    } else { root }
-                }).collect();
+                let new_s_tx_roots: Vec<Complex64> = s_tx_roots
+                    .iter()
+                    .map(|&root| {
+                        let rx_freq = root + Complex64::new(0.0, normalized_separation);
+                        let s_rx_val = s_rx_current.evaluate(rx_freq);
+                        let d_rx_val = d_rx.evaluate(rx_freq);
+                        if s_rx_val.norm() > 1e-10 {
+                            let correction = alpha * d_rx_val / s_rx_val;
+                            let new_root = root - correction;
+                            if new_root.re.is_finite()
+                                && new_root.im.is_finite()
+                                && new_root.norm() < 50.0
+                            {
+                                Complex64::new(new_root.re.min(-1e-10), new_root.im)
+                            } else {
+                                root
+                            }
+                        } else {
+                            root
+                        }
+                    })
+                    .collect();
 
-                let new_s_rx_roots: Vec<Complex64> = s_rx_roots.iter().map(|&root| {
-                    let tx_freq = root - Complex64::new(0.0, normalized_separation);
-                    let s_tx_val = s_tx_current.evaluate(tx_freq);
-                    let d_tx_val = d_tx.evaluate(tx_freq);
-                    if s_tx_val.norm() > 1e-10 {
-                        let correction = alpha * d_tx_val / s_tx_val;
-                        let new_root = root - correction;
-                        if new_root.re.is_finite() && new_root.im.is_finite() && new_root.norm() < 50.0 {
-                            Complex64::new(new_root.re.min(-1e-10), new_root.im)
-                        } else { root }
-                    } else { root }
-                }).collect();
+                let new_s_rx_roots: Vec<Complex64> = s_rx_roots
+                    .iter()
+                    .map(|&root| {
+                        let tx_freq = root - Complex64::new(0.0, normalized_separation);
+                        let s_tx_val = s_tx_current.evaluate(tx_freq);
+                        let d_tx_val = d_tx.evaluate(tx_freq);
+                        if s_tx_val.norm() > 1e-10 {
+                            let correction = alpha * d_tx_val / s_tx_val;
+                            let new_root = root - correction;
+                            if new_root.re.is_finite()
+                                && new_root.im.is_finite()
+                                && new_root.norm() < 50.0
+                            {
+                                Complex64::new(new_root.re.min(-1e-10), new_root.im)
+                            } else {
+                                root
+                            }
+                        } else {
+                            root
+                        }
+                    })
+                    .collect();
 
                 let max_delta = compute_root_displacement(&s_tx_roots, &new_s_tx_roots)
                     .max(compute_root_displacement(&s_rx_roots, &new_s_rx_roots));
                 s_tx_roots = new_s_tx_roots;
                 s_rx_roots = new_s_rx_roots;
                 convergence_error = max_delta;
-                if max_delta < self.convergence_tol { break; }
+                if max_delta < self.convergence_tol {
+                    break;
+                }
             }
         }
 
         // Step 3: Recover filter designs from modified S roots
-        let tx_design = self.recover_filter_design(
+        let tx_design = crate::synthesis::recover_channel_design(
             &s_tx_roots,
             &d_tx,
             &tx_polys,
-            &RecoveryChannel {
-                order: self.tx_order,
-                rl: self.tx_rl,
-                center_hz: self.tx_center,
-                bandwidth_hz: self.tx_bw,
-            },
+            self.tx_order,
+            self.tx_rl,
+            self.tx_center,
+            self.tx_bw,
         )?;
-        let rx_design = self.recover_filter_design(
+        let rx_design = crate::synthesis::recover_channel_design(
             &s_rx_roots,
             &d_rx,
             &rx_polys,
-            &RecoveryChannel {
-                order: self.rx_order,
-                rl: self.rx_rl,
-                center_hz: self.rx_center,
-                bandwidth_hz: self.rx_bw,
-            },
+            self.rx_order,
+            self.rx_rl,
+            self.rx_center,
+            self.rx_bw,
         )?;
 
         Ok(DuplexerSynthesisResult {
@@ -721,9 +756,7 @@ impl DuplexerSynthesis {
                     && product_with_s.coefficients[0].norm() < 1e-10
                 {
                     // Shift down: remove constant term (which should be ~0)
-                    ComplexPolynomial::new(
-                        product_with_s.coefficients[1..].to_vec()
-                    )
+                    ComplexPolynomial::new(product_with_s.coefficients[1..].to_vec())
                 } else {
                     Ok(product_with_s)
                 }
@@ -749,10 +782,12 @@ impl DuplexerSynthesis {
         // previous roots with small perturbation.
         if product_roots.len() < total {
             // Perturb previous roots slightly to allow convergence progress
-            let perturbed_tx: Vec<Complex64> = prev_s_tx.iter()
+            let perturbed_tx: Vec<Complex64> = prev_s_tx
+                .iter()
                 .map(|r| r + Complex64::new(1e-6, 1e-6))
                 .collect();
-            let perturbed_rx: Vec<Complex64> = prev_s_rx.iter()
+            let perturbed_rx: Vec<Complex64> = prev_s_rx
+                .iter()
                 .map(|r| r + Complex64::new(1e-6, 1e-6))
                 .collect();
             return Ok((perturbed_tx, perturbed_rx));
@@ -810,9 +845,7 @@ impl DuplexerSynthesis {
             .filter(|(i, _)| !assigned[*i])
             .map(|(_, &r)| r)
             .collect();
-        remaining.sort_by(|a, b| {
-            a.im.partial_cmp(&b.im).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        remaining.sort_by(|a, b| a.im.partial_cmp(&b.im).unwrap_or(std::cmp::Ordering::Equal));
 
         while tx_roots.len() < n_tx && !remaining.is_empty() {
             tx_roots.push(remaining.remove(0));
@@ -831,78 +864,6 @@ impl DuplexerSynthesis {
 
         Ok((tx_roots, rx_roots))
     }
-
-    /// Recovers a filter design from converged S-polynomial roots.
-    ///
-    /// Uses the original D polynomial and the new S roots to reconstruct
-    /// E = S + D and F = S - D, then synthesizes the coupling matrix.
-    fn recover_filter_design(
-        &self,
-        s_roots: &[Complex64],
-        d_original: &ComplexPolynomial,
-        original_polys: &crate::approx::PolynomialSet,
-        channel: &RecoveryChannel,
-    ) -> Result<FilterDesign> {
-        use crate::synthesis::MatrixSynthesisEngine;
-
-        // Build S polynomial from converged roots
-        let s_poly = ComplexPolynomial::from_complex_roots(s_roots)?;
-
-        // E = S + D,  F = S - D
-        // Note: D here is the original D polynomial from initial synthesis.
-        // In a fully converged solution, D would be re-derived from the
-        // diplexer D polynomial via interpolation. For practical purposes,
-        // we use the original D scaled to match the new S polynomial's leading coeff.
-        let s_leading = s_poly.leading_coefficient();
-        let d_leading = d_original.leading_coefficient();
-
-        // Scale D to match S's normalization
-        let d_scaled = if d_leading.norm() > 1e-15 {
-            let scale_factor = s_leading / d_leading;
-            d_original.scale(scale_factor)?
-        } else {
-            d_original.clone()
-        };
-
-        // Pad D to same length as S if needed
-        let d_padded = pad_polynomial(&d_scaled, s_poly.coefficients.len())?;
-
-        let e_poly = s_poly.add(&d_padded)?;
-        let f_poly = s_poly.sub(&d_padded)?;
-
-        // Reconstruct PolynomialSet with new E and F. The synthesis engine
-        // reads generalized.e_s/f_s (not .e/.f), so the perturbed E/F must be
-        // written back there or the loading correction is silently ignored
-        // (see architecture-review P1).
-        let mut new_polys = original_polys.clone();
-        if let Some(g) = new_polys.generalized.as_mut() {
-            g.e_s = Some(e_poly.clone());
-            g.f_s = f_poly.clone();
-        }
-        new_polys.e = e_poly;
-        new_polys.f = f_poly;
-
-        // Synthesize coupling matrix from modified polynomials
-        let matrix = MatrixSynthesisEngine.synthesize(&new_polys)?;
-
-        Ok(FilterDesign::from_polynomials_and_matrix(
-            channel.order,
-            channel.rl,
-            channel.center_hz,
-            channel.bandwidth_hz,
-            new_polys,
-            matrix,
-        ))
-    }
-}
-
-/// Per-channel parameters needed to reconstruct a `FilterDesign` after the
-/// Macchiarella-Tamiazzo iteration converges.
-struct RecoveryChannel {
-    order: usize,
-    rl: f64,
-    center_hz: f64,
-    bandwidth_hz: f64,
 }
 
 #[cfg(test)]
@@ -928,13 +889,19 @@ mod tests {
 
         // Tx passband should have low insertion loss (near center)
         let tx_center_idx = 30; // approximately 1.95 GHz
-        assert!(resp.tx_s21_db[tx_center_idx] > -3.0,
-            "Tx IL at center: {:.1} dB", resp.tx_s21_db[tx_center_idx]);
+        assert!(
+            resp.tx_s21_db[tx_center_idx] > -3.0,
+            "Tx IL at center: {:.1} dB",
+            resp.tx_s21_db[tx_center_idx]
+        );
 
         // Isolation in Rx band should be high (very negative dB)
         let rx_center_idx = 70; // approximately 2.14 GHz
-        assert!(resp.isolation_db[rx_center_idx] < -20.0,
-            "Isolation at Rx center: {:.1} dB", resp.isolation_db[rx_center_idx]);
+        assert!(
+            resp.isolation_db[rx_center_idx] < -20.0,
+            "Isolation at Rx center: {:.1} dB",
+            resp.isolation_db[rx_center_idx]
+        );
 
         Ok(())
     }
@@ -966,8 +933,11 @@ mod tests {
         // (S21 -> -inf) rather than asserting pristine passband. The high-
         // fidelity model is the full Macchiarella spectral path (deferred).
         let tx_s21 = tx_resp.samples[mid].s21_db();
-        assert!(tx_s21 > -25.0,
-            "Tx S21 at center degenerate: {:.2} dB", tx_s21);
+        assert!(
+            tx_s21 > -25.0,
+            "Tx S21 at center degenerate: {:.2} dB",
+            tx_s21
+        );
 
         Ok(())
     }
@@ -987,8 +957,11 @@ mod tests {
         assert_eq!(result.tx.order(), 6);
         assert_eq!(result.rx.order(), 6);
         // With zeros, convergence may be slower
-        assert!(result.convergence_error < 1.0,
-            "Convergence error: {:.2e}", result.convergence_error);
+        assert!(
+            result.convergence_error < 1.0,
+            "Convergence error: {:.2e}",
+            result.convergence_error
+        );
 
         Ok(())
     }
@@ -1011,14 +984,8 @@ mod tests {
     #[test]
     fn polynomial_multiply_basic() -> Result<()> {
         // (1 + 2s) * (3 + s) = 3 + 7s + 2s²
-        let p1 = ComplexPolynomial::new(vec![
-            Complex64::new(1.0, 0.0),
-            Complex64::new(2.0, 0.0),
-        ])?;
-        let p2 = ComplexPolynomial::new(vec![
-            Complex64::new(3.0, 0.0),
-            Complex64::new(1.0, 0.0),
-        ])?;
+        let p1 = ComplexPolynomial::new(vec![Complex64::new(1.0, 0.0), Complex64::new(2.0, 0.0)])?;
+        let p2 = ComplexPolynomial::new(vec![Complex64::new(3.0, 0.0), Complex64::new(1.0, 0.0)])?;
         let prod = p1.multiply(&p2)?;
         assert_eq!(prod.coefficients.len(), 3);
         assert!((prod.coefficients[0].re - 3.0).abs() < 1e-12);
