@@ -1,0 +1,120 @@
+{
+  "schema_version": "1.0",
+  "contract_version": "1.0.0",
+  "note": "Stage / Gate / Backend 标识符与语义的规范定义。实现侧（Python、Rust、未来的 GUI/CLI）必须使用这里的 id 字符串，不得自造别名。",
+
+  "stages": {
+    "twoport": {
+      "synthesis": "广义切比雪夫多项式 (E/F/P) + transversal 耦合矩阵装配。fuqtgui: get_trans_zero..coupling_matrix; mfs: FilterDesign::synthesize()",
+      "folding": "Givens 旋转归约到折叠规范形。fuqtgui: coupling_matrix_to_folded_cm; mfs: FilterDesign::to_folded()",
+      "response": "N+2 矩阵逐点求逆扫 S 参数（默认 201 点, [-1.3, 1.3]）。fuqtgui: return_s_parameter; mfs: ResponseSolver.evaluate_normalized"
+    },
+    "multiplexer": {
+      "poly": "Algorithm 1 外层迭代: Remez 等波纹 + 拓扑约束根 + beta 缩放 + Feldtkeller 特征值更新。fuqtgui: build_rational_functions",
+      "cm": "留数矩阵解析合成初始多端口 CM ((37)-(42))。fuqtgui: synthesize_multiport_cm",
+      "star": "相似变换到星型结拓扑 (对角化 + 逐通道折叠)。fuqtgui: transform_to_star_junction",
+      "response": "N+NC+1 矩阵逐点求逆扫 S 参数（默认 401 点, [-1.3, 1.3]）。fuqtgui: multiport_response"
+    }
+  },
+
+  "gates": {
+    "response_invariance": {
+      "family": "twoport",
+      "semantics": "折叠前后 S 参数逐点不变 (相似变换)。折叠算法正确的充要条件。",
+      "kind": "hard",
+      "metric": "max|S11_t - S11_f|, min(max|S21_t-S21_f|, max|S21_t+S21_f|)",
+      "requires_backend": ["synthesis", "folding", "response"],
+      "tol_key": "response_invariance"
+    },
+    "folded_mask": {
+      "family": "twoport",
+      "semantics": "折叠结果必须落在 Cameron 折叠掩码内。掩码 = 主链 (i,i+1) + 两条交叉对角线 + 多重 I/O 耦合 (0,j)/(i,N+1)；只检查上三角 j>i，自耦合豁免。**接受两种折叠约定**：源端折叠（canonical，交叉档 index sum = N+1+shift / N+shift，shift=N%2）与负载端折叠（mirrored，上述集合的序号镜像）。二者互为镜像、都是合法折叠形（书 §8.3 折叠形不唯一），故判据取两者并集。",
+      "kind": "hard",
+      "metric": "max|M[i][j]| over upper-triangle (i,j) outside the union mask (canonical ∪ mirrored)",
+      "requires_backend": ["synthesis", "folding"],
+      "tol_key": "folded_mask",
+      "evidence": "实测（2026-09-27）：只认 canonical 时，书里 6 个印刷折叠矩阵全部越界（最大 0.77）；接受两种约定后全部为 0。fuqtgui 计算结果用 canonical，mfs 偶数阶用 mirrored，两者都合法。实现须声明自己产出哪种约定，或产出任意一种均可（default=either）。"
+    },
+    "book_matrix": {
+      "family": "twoport",
+      "semantics": "折叠结果落在书里折叠矩阵的平面旋转等价类内。比较**主链幅值集合**与**交叉耦合幅值集合**（两组各自排序后逐一比对），不逐元素相等——折叠形不唯一，交叉耦合可合法地落在不同交叉对角线上（如 M13 vs M24），书 §8.3/§9 明言可经平面旋转改造。",
+      "kind": "soft",
+      "metric": "max abs deviation of sorted |main-chain| and sorted |cross| coupling groups (groups derived from the folded mask)",
+      "requires_backend": ["synthesis", "folding"],
+      "tol_key": "coupling_abs",
+      "requires": "anchor 条目必须提供非 null 的 folded 矩阵；否则本门禁 SKIP。容差 0.02 由书里 4 位小数印刷的舍入量级决定。"
+    },
+    "return_loss": {
+      "family": "twoport",
+      "semantics": "合成出的滤波器通带最差 RL 与算例规格一致 (物理指标，不是逐点比较)。",
+      "kind": "soft",
+      "metric": "abs(worst_passband_rl_db - spec.rl)",
+      "requires_backend": ["synthesis", "response"],
+      "tol_key": "return_loss_db"
+    },
+    "convergence": {
+      "family": "multiplexer",
+      "semantics": "外层迭代收敛 (极点位移 < 收敛判据)。",
+      "kind": "hard",
+      "metric": "converged flag / final root displacement",
+      "requires_backend": ["poly"]
+    },
+    "matrix_size": {
+      "family": "multiplexer",
+      "semantics": "耦合矩阵尺寸 == n_total + n_ports (+1 if resonant junction)，与论文一致。",
+      "kind": "hard",
+      "metric": "cm.shape == invariants.cm_size",
+      "requires_backend": ["poly", "cm", "star"]
+    },
+    "rz_distribution": {
+      "family": "multiplexer",
+      "semantics": "F11 实根落各通带的个数 == 算例声明的 rz_per_band。",
+      "kind": "hard",
+      "metric": "per-band real-root counts",
+      "requires_backend": ["poly"]
+    },
+    "unitarity": {
+      "family": "multiplexer",
+      "semantics": "Feldtkeller 行功率守恒 max|1 - |S11|^2 - sum|S1i|^2| (扫全部响应点)。",
+      "kind": "hard",
+      "metric": "max|1 - |S11|^2 - sum|S1i|^2|",
+      "requires_backend": ["poly", "cm", "star", "response"],
+      "tol_key": "unitarity"
+    },
+    "equiripple": {
+      "family": "multiplexer",
+      "semantics": "公共口各带极值点上 |S11| 与 |Delta_i| 相对偏差。",
+      "kind": "hard",
+      "metric": "max relative deviation at band extrema",
+      "requires_backend": ["poly", "cm", "star", "response"],
+      "tol_key": "equiripple"
+    },
+    "s11_match": {
+      "family": "multiplexer",
+      "semantics": "CM 响应与有理函数 S11 复数一致 (S1i 允许整体符号自由度, 取 min(|D+|,|D-|))。",
+      "kind": "hard",
+      "metric": "max|S11_cm - S11_rational|",
+      "requires_backend": ["poly", "cm", "star", "response"],
+      "tol_key": "s11_match"
+    },
+    "cross_backend_equivalence": {
+      "family": "*",
+      "semantics": "同一算例在两个后端/两种实现上做的是同一个滤波器 (折叠矩阵归一化 Omega 域特征值一致)。跨语言对比前必须过。",
+      "kind": "hard",
+      "metric": "max|eig(A_py) - eig(A_other)| (sorted/paired)",
+      "requires_backend": ["synthesis", "folding"],
+      "tol_key": "cross_backend_equivalence"
+    }
+  },
+
+  "backends": {
+    "python": "fuqtgui domain.* (numpy/scipy)",
+    "mfs": "mfs PyO3 绑定 (含 FFI 开销)",
+    "rust-native": "mfs 原生 Rust (Criterion 或 --release 计时)"
+  },
+
+  "report": {
+    "schema": "schema/report.schema.json",
+    "note": "所有后端输出共用同一 report schema，便于跨语言 diff / 跨机对比 / 进 CI。"
+  }
+}

@@ -10,6 +10,19 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  bench-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # Compile-only: benches are never run in CI (wall-clock / noise), but they
+      # must keep building, and the benchmark-standard conformance test must
+      # stay green (it also verifies the vendored bench-data/ against
+      # MANIFEST.sha256, which is the only tier available without the sibling
+      # filter-bench checkout).
+      - run: cargo bench --no-run
+      - run: cargo test --test benchmark_standard
+
   test:
     runs-on: ${{ matrix.os }}
     strategy:

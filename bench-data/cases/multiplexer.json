@@ -1,0 +1,708 @@
+{
+  "schema_version": "1.0",
+  "family": "multiplexer",
+  "cases": [
+    {
+      "id": "a",
+      "provenance": {
+        "source": "Zhao et al. 2026 TMTT 74(8):7342, Sec. V-A (Table I / Fig. 6 / Fig. 7)",
+        "note": "论文 f0=757.4 MHz / BW=126 MHz 是 sqrt(697*823)=757.3843 的印刷取整; 用精确映射(首带下边频->-1, 末带上边频->+1), Table I 吻合度 7.0e-5 而非 3.1e-4"
+      },
+      "tags": [
+        "paper",
+        "type1",
+        "n19"
+      ],
+      "spec": {
+        "junction": "nonresonant",
+        "extra_rz_channel": null,
+        "channels": [
+          {
+            "f_low": 697.0,
+            "f_high": 717.0,
+            "n_rz": 4,
+            "rl_db": 18.0,
+            "tz": [
+              728.0
+            ]
+          },
+          {
+            "f_low": 727.0,
+            "f_high": 766.0,
+            "n_rz": 6,
+            "rl_db": 22.0,
+            "tz": [
+              714.5,
+              778.0
+            ]
+          },
+          {
+            "f_low": 776.0,
+            "f_high": 799.0,
+            "n_rz": 5,
+            "rl_db": 20.0,
+            "tz": [
+              767.0,
+              810.0
+            ]
+          },
+          {
+            "f_low": 808.0,
+            "f_high": 823.0,
+            "n_rz": 4,
+            "rl_db": 18.0,
+            "tz": [
+              800.0
+            ]
+          }
+        ]
+      },
+      "invariants": {
+        "n_total": 19,
+        "n_ports": 5,
+        "cm_size": 24,
+        "rz_per_band": [
+          4,
+          6,
+          5,
+          4
+        ]
+      },
+      "anchor_id": "table_i_converged"
+    },
+    {
+      "id": "b",
+      "provenance": {
+        "source": "Zhao et al. 2026 TMTT 74(8):7342, Sec. V-B (Fig. 8 / Fig. 9, WR75 waveguide prototype)",
+        "note": "公共谐振器 RZ 在中带; n1=4, n2=n3=5 (公共谐振器占中带走掉一个)"
+      },
+      "tags": [
+        "paper",
+        "type2",
+        "n15"
+      ],
+      "spec": {
+        "junction": "resonant",
+        "extra_rz_channel": 1,
+        "channels": [
+          {
+            "f_low": 11550.0,
+            "f_high": 11700.0,
+            "n_rz": 4,
+            "rl_db": 18.0,
+            "tz": []
+          },
+          {
+            "f_low": 11800.0,
+            "f_high": 12100.0,
+            "n_rz": 6,
+            "rl_db": 18.0,
+            "tz": [
+              11773.5,
+              12127.0
+            ]
+          },
+          {
+            "f_low": 12220.0,
+            "f_high": 12450.0,
+            "n_rz": 5,
+            "rl_db": 18.0,
+            "tz": []
+          }
+        ]
+      },
+      "invariants": {
+        "n_total": 15,
+        "n_ports": 4,
+        "cm_size": 19,
+        "resonators_per_channel": [
+          4,
+          5,
+          5
+        ],
+        "rz_per_band": [
+          4,
+          6,
+          5
+        ]
+      },
+      "anchor_id": "fig8"
+    },
+    {
+      "id": "c",
+      "provenance": {
+        "source": "Zhao et al. 2026 TMTT 74(8):7342, Sec. V-C (Fig. 15 / Fig. 16)",
+        "note": "公共谐振器 RZ 在上带; n1=4, n2=6, n3=4; C 的 TZ {11.77,12.13,12.17} GHz 与 B 的 {11.7735,12.127} 不同"
+      },
+      "tags": [
+        "paper",
+        "type2",
+        "n15"
+      ],
+      "spec": {
+        "junction": "resonant",
+        "extra_rz_channel": 2,
+        "channels": [
+          {
+            "f_low": 11550.0,
+            "f_high": 11700.0,
+            "n_rz": 4,
+            "rl_db": 18.0,
+            "tz": []
+          },
+          {
+            "f_low": 11800.0,
+            "f_high": 12100.0,
+            "n_rz": 6,
+            "rl_db": 18.0,
+            "tz": [
+              11770.0,
+              12130.0,
+              12170.0
+            ]
+          },
+          {
+            "f_low": 12220.0,
+            "f_high": 12450.0,
+            "n_rz": 5,
+            "rl_db": 18.0,
+            "tz": []
+          }
+        ]
+      },
+      "invariants": {
+        "n_total": 15,
+        "n_ports": 4,
+        "cm_size": 19,
+        "resonators_per_channel": [
+          4,
+          6,
+          4
+        ],
+        "rz_per_band": [
+          4,
+          6,
+          5
+        ]
+      }
+    },
+    {
+      "id": "d",
+      "provenance": {
+        "source": "Zhao et al. 2026 TMTT 74(8):7342, Sec. V-D (Fig. 17)",
+        "note": "论文公式: kth 通道通带 ([3.36,3.39]+0.04k) GHz, TZ ({3.355,3.395}+0.04k) GHz, k=1..25; Ni=12, RL=20 dB; 公共谐振器 RZ 在第 13 带 (n13=11). 此处按公式显式展开 25 通道"
+      },
+      "tags": [
+        "stress",
+        "type2",
+        "highorder",
+        "n300"
+      ],
+      "spec": {
+        "junction": "resonant",
+        "extra_rz_channel": 12,
+        "channels": [
+          {
+            "f_low": 3400.0,
+            "f_high": 3430.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              3395.0,
+              3435.0
+            ]
+          },
+          {
+            "f_low": 3440.0,
+            "f_high": 3470.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              3435.0,
+              3475.0
+            ]
+          },
+          {
+            "f_low": 3480.0,
+            "f_high": 3510.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              3475.0,
+              3515.0
+            ]
+          },
+          {
+            "f_low": 3520.0,
+            "f_high": 3550.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              3515.0,
+              3555.0
+            ]
+          },
+          {
+            "f_low": 3560.0,
+            "f_high": 3590.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              3555.0,
+              3595.0
+            ]
+          },
+          {
+            "f_low": 3600.0,
+            "f_high": 3630.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              3595.0,
+              3635.0
+            ]
+          },
+          {
+            "f_low": 3640.0,
+            "f_high": 3670.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              3635.0,
+              3675.0
+            ]
+          },
+          {
+            "f_low": 3680.0,
+            "f_high": 3710.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              3675.0,
+              3715.0
+            ]
+          },
+          {
+            "f_low": 3720.0,
+            "f_high": 3750.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              3715.0,
+              3755.0
+            ]
+          },
+          {
+            "f_low": 3760.0,
+            "f_high": 3790.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              3755.0,
+              3795.0
+            ]
+          },
+          {
+            "f_low": 3800.0,
+            "f_high": 3830.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              3795.0,
+              3835.0
+            ]
+          },
+          {
+            "f_low": 3840.0,
+            "f_high": 3870.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              3835.0,
+              3875.0
+            ]
+          },
+          {
+            "f_low": 3880.0,
+            "f_high": 3910.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              3875.0,
+              3915.0
+            ]
+          },
+          {
+            "f_low": 3920.0,
+            "f_high": 3950.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              3915.0,
+              3955.0
+            ]
+          },
+          {
+            "f_low": 3960.0,
+            "f_high": 3990.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              3955.0,
+              3995.0
+            ]
+          },
+          {
+            "f_low": 4000.0,
+            "f_high": 4030.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              3995.0,
+              4035.0
+            ]
+          },
+          {
+            "f_low": 4040.0,
+            "f_high": 4070.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              4035.0,
+              4075.0
+            ]
+          },
+          {
+            "f_low": 4080.0,
+            "f_high": 4110.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              4075.0,
+              4115.0
+            ]
+          },
+          {
+            "f_low": 4120.0,
+            "f_high": 4150.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              4115.0,
+              4155.0
+            ]
+          },
+          {
+            "f_low": 4160.0,
+            "f_high": 4190.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              4155.0,
+              4195.0
+            ]
+          },
+          {
+            "f_low": 4200.0,
+            "f_high": 4230.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              4195.0,
+              4235.0
+            ]
+          },
+          {
+            "f_low": 4240.0,
+            "f_high": 4270.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              4235.0,
+              4275.0
+            ]
+          },
+          {
+            "f_low": 4280.0,
+            "f_high": 4310.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              4275.0,
+              4315.0
+            ]
+          },
+          {
+            "f_low": 4320.0,
+            "f_high": 4350.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              4315.0,
+              4355.0
+            ]
+          },
+          {
+            "f_low": 4360.0,
+            "f_high": 4390.0,
+            "n_rz": 12,
+            "rl_db": 20.0,
+            "tz": [
+              4355.0,
+              4395.0
+            ]
+          }
+        ]
+      },
+      "invariants": {
+        "n_total": 300,
+        "n_ports": 26,
+        "cm_size": 326,
+        "resonators_per_channel": [
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          11,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12
+        ],
+        "rz_per_band": [
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12
+        ]
+      }
+    },
+    {
+      "id": "e",
+      "provenance": {
+        "source": "Zhao et al. 2026 TMTT 74(8):7342, Sec. VI (Fig. 18 / Fig. 19)",
+        "note": "B 的 spec, 第三带改为 12.10~12.45 GHz 与第二带在 12.10 GHz 连续 (guard band = 0)"
+      },
+      "tags": [
+        "stress",
+        "type2",
+        "contiguous",
+        "n15"
+      ],
+      "spec": {
+        "junction": "resonant",
+        "extra_rz_channel": 1,
+        "channels": [
+          {
+            "f_low": 11550.0,
+            "f_high": 11700.0,
+            "n_rz": 4,
+            "rl_db": 18.0,
+            "tz": []
+          },
+          {
+            "f_low": 11800.0,
+            "f_high": 12100.0,
+            "n_rz": 6,
+            "rl_db": 18.0,
+            "tz": [
+              11773.5,
+              12127.0
+            ]
+          },
+          {
+            "f_low": 12100.0,
+            "f_high": 12450.0,
+            "n_rz": 5,
+            "rl_db": 18.0,
+            "tz": []
+          }
+        ]
+      },
+      "invariants": {
+        "n_total": 15,
+        "n_ports": 4,
+        "cm_size": 19,
+        "resonators_per_channel": [
+          4,
+          5,
+          5
+        ],
+        "rz_per_band": [
+          4,
+          6,
+          5
+        ]
+      }
+    },
+    {
+      "id": "diplexer",
+      "provenance": {
+        "source": "本仓库合成算例 (非论文): 双工器退化情形",
+        "note": "两通道 4+4 谐振器, 第一类非谐振结; 用于单通道退化/酉性等基础不变量测试"
+      },
+      "tags": [
+        "synthetic",
+        "type1",
+        "n8"
+      ],
+      "spec": {
+        "junction": "nonresonant",
+        "extra_rz_channel": null,
+        "channels": [
+          {
+            "f_low": 880.0,
+            "f_high": 915.0,
+            "n_rz": 4,
+            "rl_db": 20.0,
+            "tz": []
+          },
+          {
+            "f_low": 925.0,
+            "f_high": 960.0,
+            "n_rz": 4,
+            "rl_db": 20.0,
+            "tz": []
+          }
+        ]
+      },
+      "invariants": {
+        "n_total": 8,
+        "n_ports": 3,
+        "cm_size": 11,
+        "rz_per_band": [
+          4,
+          4
+        ]
+      }
+    },
+    {
+      "id": "diplexer_type2",
+      "provenance": {
+        "source": "Zhao, Fan, Zhou et al., 'Three-Port Matrix Synthesis of Resonant-Junction Diplexers With Improved Selectivity', IEEE MWCL 36(2), 2026 (Zotero 5T7MEAE5)",
+        "note": "Sec IV 设计算例; type-2 谐振结, 公共谐振器 RZ 在 channel 1; 两带 guard band=60MHz 非连续"
+      },
+      "tags": [
+        "paper",
+        "type2",
+        "n8"
+      ],
+      "spec": {
+        "junction": "resonant",
+        "extra_rz_channel": 0,
+        "channels": [
+          {
+            "f_low": 11800.0,
+            "f_high": 12000.0,
+            "n_rz": 4,
+            "rl_db": 20.0,
+            "tz": [
+              12060.0
+            ]
+          },
+          {
+            "f_low": 12060.0,
+            "f_high": 12200.0,
+            "n_rz": 4,
+            "rl_db": 20.0,
+            "tz": [
+              12000.0
+            ]
+          }
+        ]
+      },
+      "invariants": {
+        "n_total": 8,
+        "n_ports": 3,
+        "cm_size": 11,
+        "rz_per_band": [
+          4,
+          4
+        ]
+      }
+    },
+    {
+      "id": "diplexer_contiguous",
+      "provenance": {
+        "source": "Zhao, Fan, Zhou, 'Constructing Three-Port S-Parameter Rational Functions for Coupling Matrix Synthesis of Contiguous-Band Diplexers', IEEE TMTT 73(8), 2025 (Zotero KC259J37)",
+        "note": "Sec IV-A 连续带设计算例; 两带在 12.04 GHz 相接 (guard band=0); type-1 非谐振结; 本引擎 tz 仅实数, 论文的共享复 TZ 由 Remez 自动落位"
+      },
+      "tags": [
+        "paper",
+        "type1",
+        "contiguous",
+        "n7"
+      ],
+      "spec": {
+        "junction": "nonresonant",
+        "extra_rz_channel": null,
+        "channels": [
+          {
+            "f_low": 11800.0,
+            "f_high": 12040.0,
+            "n_rz": 4,
+            "rl_db": 20.0,
+            "tz": [
+              12075.0
+            ]
+          },
+          {
+            "f_low": 12040.0,
+            "f_high": 12200.0,
+            "n_rz": 3,
+            "rl_db": 20.0,
+            "tz": [
+              11980.0
+            ]
+          }
+        ]
+      },
+      "invariants": {
+        "n_total": 7,
+        "n_ports": 3,
+        "cm_size": 10,
+        "rz_per_band": [
+          4,
+          3
+        ]
+      }
+    }
+  ]
+}

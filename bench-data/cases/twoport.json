@@ -1,0 +1,174 @@
+{
+  "schema_version": "1.0",
+  "family": "twoport",
+  "cases": [
+    {
+      "id": "4_4",
+      "provenance": {
+        "source": "Cameron 2018, Sec 8.4.3 / Fig 8.20+8.21 (pp.307/308)",
+        "note": "4-4 全规范非对称; 最强基准(transversal+folded 都给了)"
+      },
+      "tags": [
+        "paper",
+        "fully_canonical"
+      ],
+      "spec": {
+        "order": 4,
+        "rl": 22.0,
+        "zeros": [
+          3.7431,
+          1.8051,
+          -1.5699,
+          -6.191
+        ]
+      },
+      "invariants": {
+        "n_total": 4,
+        "n_ports": 2
+      },
+      "anchor_id": "FOUR_FOUR"
+    },
+    {
+      "id": "6_3",
+      "provenance": {
+        "source": "Cameron 2018, Sec 8.5 / Fig 8.31+8.32 (p.321)",
+        "note": "6-3 对称 lattice; 最强基准(lattice+folded)"
+      },
+      "tags": [
+        "paper",
+        "symmetric"
+      ],
+      "spec": {
+        "order": 6,
+        "rl": 22.0,
+        "zeros": [
+          1.09,
+          1.1691,
+          1.5057
+        ]
+      },
+      "invariants": {
+        "n_total": 6,
+        "n_ports": 2
+      },
+      "anchor_id": "SIX_THREE"
+    },
+    {
+      "id": "4_2_unity",
+      "provenance": {
+        "source": "Cameron 2018, Sec 8.4.4 / Fig 8.23b (p.311)",
+        "note": "4-2 非对称单位端接; 全书反复复用原型"
+      },
+      "tags": [
+        "paper"
+      ],
+      "spec": {
+        "order": 4,
+        "rl": 22.0,
+        "zeros": [
+          1.3217,
+          1.8082
+        ]
+      },
+      "invariants": {
+        "n_total": 4,
+        "n_ports": 2
+      },
+      "anchor_id": "FOUR_TWO_UNITY"
+    },
+    {
+      "id": "6_2_culdesac",
+      "provenance": {
+        "source": "Cameron 2018, Sec 9.6 / Fig 9.21 (p.346)",
+        "note": "6-2 对称 canonical cul-de-sac; 与 Fig 9.2 inline 同滤波器"
+      },
+      "tags": [
+        "paper",
+        "symmetric"
+      ],
+      "spec": {
+        "order": 6,
+        "rl": 23.0,
+        "zeros": [
+          1.5522,
+          -1.5522
+        ]
+      },
+      "invariants": {
+        "n_total": 6,
+        "n_ports": 2
+      },
+      "anchor_id": "SIX_TWO_CULDESAC"
+    },
+    {
+      "id": "8_3",
+      "provenance": {
+        "source": "Cameron 2018, Sec 9.6 / Fig 9.22a (p.347)",
+        "note": "8-3 非对称; 同滤波器在 Fig 9.22b (cul-de-sac) 与 Fig 10.39 (box) 复用"
+      },
+      "tags": [
+        "paper"
+      ],
+      "spec": {
+        "order": 8,
+        "rl": 23.0,
+        "zeros": [
+          -1.3553,
+          1.1093,
+          1.218
+        ]
+      },
+      "invariants": {
+        "n_total": 8,
+        "n_ports": 2
+      },
+      "anchor_id": "EIGHT_THREE_FOLDED"
+    },
+    {
+      "id": "4_1_trisection",
+      "provenance": {
+        "source": "Cameron 2018, Sec 10.3 / Fig 10.33a (p.394)",
+        "note": "4-1 非对称 trisection; Fig 10.33b/c 为 box 形态"
+      },
+      "tags": [
+        "paper"
+      ],
+      "spec": {
+        "order": 4,
+        "rl": 25.0,
+        "zeros": [
+          2.394
+        ]
+      },
+      "invariants": {
+        "n_total": 4,
+        "n_ports": 2
+      },
+      "anchor_id": "FOUR_ONE_TRISECTION"
+    },
+    {
+      "id": "7_1_2",
+      "provenance": {
+        "source": "Cameron 2018, Sec 8.3 / Fig 8.12+8.13 (single-ended 7-1-2)",
+        "note": "单端 7-1-2；spec 原仅存在于 mfs/tests/folded_response_invariance.rs (手抄常量)，此处收编进标准。书中矩阵未转录，anchor_id=SEVEN_ONE_TWO 指向的 anchors 条目矩阵字段为 null。"
+      },
+      "tags": [
+        "paper",
+        "single_ended"
+      ],
+      "spec": {
+        "order": 7,
+        "rl": 23.0,
+        "zeros": [
+          1.2576
+        ]
+      },
+      "invariants": {
+        "n_total": 7,
+        "n_ports": 2
+      },
+      "anchor_id": "SEVEN_ONE_TWO"
+    }
+  ],
+  "note": "跨语言共享算例：fuqtgui (src/benchmarks/cases/twoport.json) 与 mfs (tests/*.rs 手抄常量) 的并集；7_1_2 由 mfs 侧收编。"
+}
