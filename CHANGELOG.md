@@ -75,9 +75,11 @@
 
 ### Dependencies
 
-- **MSRV raised to 1.86** (`rust-version` + CI test matrix). The dependency
-  floor (faer 0.20 → 1.81, clap 4.6 → 1.85, criterion/proptest) made the old
-  1.75 CI leg unbuildable; 1.86 is a safe bound above it.
+- **MSRV raised to 1.86** (`rust-version` + CI test matrix). The locked
+  dependency floor (faer 0.20 → 1.81, clap 4.6 → 1.85) made the old 1.75 CI
+  leg unbuildable; 1.86 is a safe bound above it. Downstream consumers that
+  build this crate's Python bindings (e.g. `maturin develop --features
+  python`) must use a Rust toolchain ≥ 1.86.
 - **touchstone 0.12.1 → 0.14.5.** Only breaking change touched:
   `Network::new` now returns `Result` (parse errors are mapped to
   `MfsError::PreconditionViolation` instead of the old panic). The upgrade
@@ -88,8 +90,8 @@
 ### Fixed
 
 - **`touchstone::cascade` rejected per-port reference impedance as a panic.**
-  Networks parsed from a 2-port v2 file with a per-port `[Reference]` line
-  (e.g. `R 50 75`) carry `ReferenceImpedance::PerPort` while their scalar `z0`
+  Networks parsed from a 2-port v2 file with a per-port `[Reference] 50 75`
+  keyword line carry `ReferenceImpedance::PerPort` while their scalar `z0`
   field holds the first port's value, so they passed the `z0` pre-validation
   and hit an upstream panic. They are now rejected with
   `MfsError::PreconditionViolation` (regression test added).
@@ -99,7 +101,7 @@
 - `docs/architecture.md` module list and dependency table now match the code;
   the root-finder fallback order is stated once, canonically (it was previously
   documented four contradictory ways). See
-   `docs/internal/architecture-review-2026-09-25.md` for the full assessment.
+  `docs/internal/architecture-review-2026-09-25.md` for the full assessment.
 - Version aligned across `Cargo.toml`, `pyproject.toml`, and `README.md`.
 - Post-review doc hygiene: the 0.4.1 release notes (below) were separated out
   from the 0.5.0 heading; the multiplexer "Known limitation" and the two

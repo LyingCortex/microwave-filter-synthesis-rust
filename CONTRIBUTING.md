@@ -4,9 +4,23 @@ Thanks for contributing to `mfs`.
 
 ## Before You Start
 
-- Read [docs/development-guide.md](docs/development-guide.md)
-- Check [docs/refactor-roadmap.md](docs/refactor-roadmap.md)
+- Check [CHANGELOG.md](CHANGELOG.md) and [docs/architecture.md](docs/architecture.md)
+  for the current module layout and known limitations.
 - Prefer small, focused changes over mixed refactors
+
+## Toolchain & Gates
+
+- Rust **≥ 1.86** (see `rust-version` in `Cargo.toml`; CI tests stable + 1.86).
+- CI gates that must stay green:
+  ```
+  cargo clippy --all-targets -- -D warnings
+  RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+  cargo test --all-targets
+  ```
+- Formatting: the codebase is **intentionally not `cargo fmt`-gated** and is not
+  rustfmt-clean. Do NOT run a repo-wide `cargo fmt` — keep your diff's local
+  style consistent with the surrounding code instead. (A fmt baseline + gate is
+  a candidate follow-up; it would be a dedicated reformat PR, not drive-by.)
 
 ## Development Workflow
 

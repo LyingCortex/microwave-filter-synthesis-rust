@@ -197,10 +197,11 @@ pub fn build_network(response: &SParameterResponse, z0: f64) -> Result<touchston
 /// pre-validates the preconditions and returns a `MfsError` instead:
 /// both networks must be 2-port, share the same *common* (scalar) reference
 /// impedance and frequency unit, and be sampled on an identical frequency
-/// grid. Networks parsed from a per-port R line (e.g. `R 50 75`) are
-/// rejected, because upstream cascading panics on them even though their
-/// scalar `z0` field (first port) may compare equal. When the grids differ,
-/// `resample` one onto the other's grid first.
+/// grid. Networks with per-port reference impedances (a Touchstone v2
+/// `[Reference] 50 75` keyword line — not a v1 option line) are rejected,
+/// because upstream cascading panics on them even though their scalar `z0`
+/// field (first port) may compare equal. When the grids differ, `resample`
+/// one onto the other's grid first.
 pub fn cascade(a: &touchstone::Network, b: &touchstone::Network) -> Result<touchstone::Network> {
     for (net, label) in [(a, "a"), (b, "b")] {
         if net.rank != 2 {

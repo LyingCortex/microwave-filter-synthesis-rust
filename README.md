@@ -111,6 +111,8 @@ let combined = design_a.cascade(&design_b)?;
 
 ## Python Bindings
 
+Requires Rust ≥ 1.86 (mfs MSRV) and a Python whose ABI matches the build.
+
 ```bash
 pip install maturin
 maturin develop --features python
