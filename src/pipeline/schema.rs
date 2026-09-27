@@ -277,9 +277,7 @@ pub fn validate_request(request: &Value) -> Vec<String> {
         } else if let Some(arr) = tz.as_array() {
             for (i, item) in arr.iter().enumerate() {
                 if !item.is_number() {
-                    errors.push(format!(
-                        "field 'transmission_zeros[{i}]' must be a number"
-                    ));
+                    errors.push(format!("field 'transmission_zeros[{i}]' must be a number"));
                 }
             }
         }
@@ -346,8 +344,14 @@ mod tests {
 
         // Top-level structure
         assert!(schema["input"].is_object(), "schema must have 'input' key");
-        assert!(schema["output"].is_object(), "schema must have 'output' key");
-        assert_eq!(schema["version"].as_str().unwrap(), env!("CARGO_PKG_VERSION"));
+        assert!(
+            schema["output"].is_object(),
+            "schema must have 'output' key"
+        );
+        assert_eq!(
+            schema["version"].as_str().unwrap(),
+            env!("CARGO_PKG_VERSION")
+        );
     }
 
     #[test]
@@ -356,7 +360,9 @@ mod tests {
         let schema: Value = serde_json::from_str(&schema_str).unwrap();
 
         let input = &schema["input"];
-        let required = input["required"].as_array().expect("input must have 'required'");
+        let required = input["required"]
+            .as_array()
+            .expect("input must have 'required'");
         let required_strs: Vec<&str> = required.iter().map(|v| v.as_str().unwrap()).collect();
 
         assert!(required_strs.contains(&"order"));
@@ -384,11 +390,26 @@ mod tests {
 
         let output_props = &schema["output"]["properties"];
 
-        assert!(output_props["spec"].is_object(), "output must include 'spec'");
-        assert!(output_props["polynomials"].is_object(), "output must include 'polynomials'");
-        assert!(output_props["matrix"].is_object(), "output must include 'matrix'");
-        assert!(output_props["transform"].is_object(), "output must include 'transform'");
-        assert!(output_props["response"].is_object(), "output must include 'response'");
+        assert!(
+            output_props["spec"].is_object(),
+            "output must include 'spec'"
+        );
+        assert!(
+            output_props["polynomials"].is_object(),
+            "output must include 'polynomials'"
+        );
+        assert!(
+            output_props["matrix"].is_object(),
+            "output must include 'matrix'"
+        );
+        assert!(
+            output_props["transform"].is_object(),
+            "output must include 'transform'"
+        );
+        assert!(
+            output_props["response"].is_object(),
+            "output must include 'response'"
+        );
     }
 
     #[test]
@@ -430,14 +451,18 @@ mod tests {
     fn validate_request_rejects_invalid_order() {
         let request = json!({ "order": 0, "return_loss_db": 20.0 });
         let errors = validate_request(&request);
-        assert!(errors.iter().any(|e| e.contains("order") && e.contains(">= 1")));
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("order") && e.contains(">= 1")));
     }
 
     #[test]
     fn validate_request_rejects_invalid_return_loss() {
         let request = json!({ "order": 4, "return_loss_db": -5.0 });
         let errors = validate_request(&request);
-        assert!(errors.iter().any(|e| e.contains("return_loss_db") && e.contains("> 0")));
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("return_loss_db") && e.contains("> 0")));
     }
 
     #[test]
@@ -472,6 +497,8 @@ mod tests {
             "grid": { "start": 1.0, "stop": 2.0, "points": 1 }
         });
         let errors = validate_request(&request);
-        assert!(errors.iter().any(|e| e.contains("grid.points") && e.contains(">= 2")));
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("grid.points") && e.contains(">= 2")));
     }
 }

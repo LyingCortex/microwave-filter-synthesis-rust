@@ -133,20 +133,17 @@ impl SynthesisRequest {
     }
 }
 
-/// Executes the full synthesis pipeline from a validated request.
+/// Builds the pipeline context from a validated request.
 ///
-/// The pipeline runs stages in sequence:
-/// 1. Approximation (always)
-/// 2. Matrix synthesis (always)
-/// 3. Topology transform (if `topology` is specified)
-/// 4. Response evaluation (if `grid` is specified)
-///
-/// Each stage's execution time is tracked in the context metadata.
-pub fn run_full_pipeline(request: SynthesisRequest) -> Result<SynthesisContext> {
+/// This is the single canonical "request -> context" prologue shared by the
+/// full pipeline and the CLI's incremental stage execution: validate, build
+/// the `FilterSpec`, build the `PipelineOptions`, and create the context.
+/// No stages are executed.
+pub fn context_from_request(request: SynthesisRequest) -> Result<SynthesisContext> {
     // Validate the request, converting validation errors to MfsError
-    request.validate().map_err(|ve| {
-        MfsError::PreconditionViolation(ve.to_string())
-    })?;
+    request
+        .validate()
+        .map_err(|ve| MfsError::PreconditionViolation(ve.to_string()))?;
 
     // Build FilterSpec from request
     let spec = crate::synthesis::build_filter_spec(
@@ -164,8 +161,20 @@ pub fn run_full_pipeline(request: SynthesisRequest) -> Result<SynthesisContext> 
         response_tolerance: None,
     };
 
-    // Create context
-    let mut ctx = SynthesisContext::with_options(spec, options);
+    Ok(SynthesisContext::with_options(spec, options))
+}
+
+/// Executes the full synthesis pipeline from a validated request.
+///
+/// The pipeline runs stages in sequence:
+/// 1. Approximation (always)
+/// 2. Matrix synthesis (always)
+/// 3. Topology transform (if `topology` is specified)
+/// 4. Response evaluation (if `grid` is specified)
+///
+/// Each stage's execution time is tracked in the context metadata.
+pub fn run_full_pipeline(request: SynthesisRequest) -> Result<SynthesisContext> {
+    let mut ctx = context_from_request(request)?;
 
     // Stage 1: Approximation
     {
@@ -195,7 +204,7 @@ pub fn run_full_pipeline(request: SynthesisRequest) -> Result<SynthesisContext> 
     }
 
     // Stage 3: Topology transform (optional)
-    if let Some(topology) = request.topology {
+    if let Some(topology) = ctx.options.topology {
         let start = Instant::now();
         let stage = TopologyTransformStage;
         let matrix = ctx.matrix().ok_or_else(|| {
@@ -215,7 +224,7 @@ pub fn run_full_pipeline(request: SynthesisRequest) -> Result<SynthesisContext> 
     }
 
     // Stage 4: Response evaluation (optional, requires grid)
-    if let Some(ref grid_config) = request.grid {
+    if let Some(grid_config) = &ctx.options.grid {
         let start = Instant::now();
         let stage = ResponseEvaluationStage;
         // Use the transformed matrix if available, otherwise the synthesis matrix
@@ -230,7 +239,8 @@ pub fn run_full_pipeline(request: SynthesisRequest) -> Result<SynthesisContext> 
                 })?
                 .clone()
         };
-        let grid = FrequencyGrid::linspace(grid_config.start, grid_config.stop, grid_config.points)?;
+        let grid =
+            FrequencyGrid::linspace(grid_config.start, grid_config.stop, grid_config.points)?;
         // When a mapping is present the grid is physical Hz and is evaluated in
         // the physical domain; otherwise it is a normalized-prototype grid.
         let input = ResponseEvaluationInput {
@@ -366,7 +376,12 @@ mod tests {
         let center_idx = freqs
             .iter()
             .enumerate()
-            .min_by(|a, b| (a.1 - center).abs().partial_cmp(&(b.1 - center).abs()).unwrap())
+            .min_by(|a, b| {
+                (a.1 - center)
+                    .abs()
+                    .partial_cmp(&(b.1 - center).abs())
+                    .unwrap()
+            })
             .unwrap()
             .0;
         let s21_db = response.samples[center_idx].s21_db();
@@ -517,7 +532,8 @@ mod tests {
         let json = r#"{"order": 4, "return_loss_db": 20.0, "transmission_zeros": [-1.5, 1.5]}"#;
         let result = run_from_json(json)?;
         // Result should be valid JSON
-        let _: serde_json::Value = serde_json::from_str(&result).expect("output should be valid JSON");
+        let _: serde_json::Value =
+            serde_json::from_str(&result).expect("output should be valid JSON");
         Ok(())
     }
 
@@ -532,7 +548,8 @@ mod tests {
             "grid": { "start": -3.0, "stop": 3.0, "points": 51 }
         }"#;
         let result = run_from_json(json)?;
-        let value: serde_json::Value = serde_json::from_str(&result).expect("output should be valid JSON");
+        let value: serde_json::Value =
+            serde_json::from_str(&result).expect("output should be valid JSON");
         // Check metadata is present
         assert!(value.get("metadata").is_some());
         Ok(())

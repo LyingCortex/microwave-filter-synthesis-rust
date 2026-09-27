@@ -48,22 +48,16 @@ impl MappingConfig {
         match self.kind.as_str() {
             "bandpass" => {
                 let center_hz = self.center_hz.ok_or_else(|| {
-                    MfsError::InvalidFrequency(
-                        "bandpass mapping requires center_hz".to_string(),
-                    )
+                    MfsError::InvalidFrequency("bandpass mapping requires center_hz".to_string())
                 })?;
                 let bandwidth_hz = self.bandwidth_hz.ok_or_else(|| {
-                    MfsError::InvalidFrequency(
-                        "bandpass mapping requires bandwidth_hz".to_string(),
-                    )
+                    MfsError::InvalidFrequency("bandpass mapping requires bandwidth_hz".to_string())
                 })?;
                 Ok(Box::new(BandPassMapping::new(center_hz, bandwidth_hz)?))
             }
             "lowpass" => {
                 let cutoff_hz = self.cutoff_hz.ok_or_else(|| {
-                    MfsError::InvalidFrequency(
-                        "lowpass mapping requires cutoff_hz".to_string(),
-                    )
+                    MfsError::InvalidFrequency("lowpass mapping requires cutoff_hz".to_string())
                 })?;
                 Ok(Box::new(LowPassMapping::new(cutoff_hz)?))
             }
@@ -222,7 +216,12 @@ impl Serialize for SynthesisContext {
         let spec_summary = SpecSummary {
             order: self.spec.order,
             return_loss_db: self.spec.return_loss_db,
-            transmission_zeros: self.spec.transmission_zeros.iter().map(|tz| tz.value).collect(),
+            transmission_zeros: self
+                .spec
+                .transmission_zeros
+                .iter()
+                .map(|tz| tz.value)
+                .collect(),
             unloaded_q: self.spec.unloaded_q,
         };
         state.serialize_field("spec", &spec_summary)?;
@@ -370,10 +369,7 @@ mod tests {
             serde_json::from_str(&json).expect("deserialization should succeed");
 
         assert_eq!(deserialized.grid.as_ref().unwrap().points, 201);
-        assert_eq!(
-            deserialized.mapping.as_ref().unwrap().kind,
-            "bandpass"
-        );
+        assert_eq!(deserialized.mapping.as_ref().unwrap().kind, "bandpass");
     }
 
     #[test]

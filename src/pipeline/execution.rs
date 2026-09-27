@@ -20,11 +20,11 @@ use serde::{Deserialize, Serialize};
 use crate::error::{MfsError, Result};
 use crate::freq::FrequencyGrid;
 use crate::pipeline::context::{PipelineMetadata, PipelineOptions, SynthesisContext};
-use crate::synthesis::build_filter_spec;
 use crate::pipeline::stages::{
     ApproximationStage, MatrixSynthesisStage, ResponseEvaluationInput, ResponseEvaluationStage,
     Stage, TopologyTransformInput, TopologyTransformStage,
 };
+use crate::synthesis::build_filter_spec;
 
 /// Executes a single named pipeline stage, storing the result in the context.
 ///
@@ -58,7 +58,10 @@ fn run_approximation_stage(context: &mut SynthesisContext) -> Result<()> {
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
 
     context.polynomials = Some(Arc::new(polynomials));
-    context.metadata.stages_executed.push("approximation".to_string());
+    context
+        .metadata
+        .stages_executed
+        .push("approximation".to_string());
     context.metadata.stage_timings_ms.push(elapsed_ms);
     Ok(())
 }
@@ -77,7 +80,10 @@ fn run_matrix_synthesis_stage(context: &mut SynthesisContext) -> Result<()> {
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
 
     context.matrix = Some(Arc::new(matrix));
-    context.metadata.stages_executed.push("matrix_synthesis".to_string());
+    context
+        .metadata
+        .stages_executed
+        .push("matrix_synthesis".to_string());
     context.metadata.stage_timings_ms.push(elapsed_ms);
     Ok(())
 }
@@ -107,7 +113,10 @@ fn run_topology_transform_stage(context: &mut SynthesisContext) -> Result<()> {
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
 
     context.transform = Some(outcome);
-    context.metadata.stages_executed.push("topology_transform".to_string());
+    context
+        .metadata
+        .stages_executed
+        .push("topology_transform".to_string());
     context.metadata.stage_timings_ms.push(elapsed_ms);
     Ok(())
 }
@@ -147,11 +156,9 @@ fn run_response_evaluation_stage(context: &mut SynthesisContext) -> Result<()> {
 /// normalized grid if no grid configuration is provided.
 fn build_frequency_grid(options: &PipelineOptions) -> Result<FrequencyGrid> {
     match &options.grid {
-        Some(grid_config) => FrequencyGrid::linspace(
-            grid_config.start,
-            grid_config.stop,
-            grid_config.points,
-        ),
+        Some(grid_config) => {
+            FrequencyGrid::linspace(grid_config.start, grid_config.stop, grid_config.points)
+        }
         None => {
             // Default: normalized prototype grid spanning [-3, 3] with 101 points
             FrequencyGrid::linspace(-3.0, 3.0, 101)
@@ -334,8 +341,7 @@ mod tests {
 
     #[test]
     fn run_stage_approximation_populates_polynomials() -> Result<()> {
-        let spec = FilterSpec::new(4, 20.0)?
-            .with_normalized_transmission_zeros(vec![-2.0, 1.5]);
+        let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros(vec![-2.0, 1.5]);
         let mut ctx = SynthesisContext::new(spec);
 
         run_stage(&mut ctx, "approximation")?;
@@ -359,8 +365,7 @@ mod tests {
 
     #[test]
     fn run_stage_topology_transform_requires_matrix_and_topology() -> Result<()> {
-        let spec = FilterSpec::new(4, 20.0)?
-            .with_normalized_transmission_zeros(vec![-2.0, 1.5]);
+        let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros(vec![-2.0, 1.5]);
         let mut ctx = SynthesisContext::new(spec);
 
         // Missing matrix
@@ -400,8 +405,7 @@ mod tests {
 
     #[test]
     fn incremental_execution_produces_complete_context() -> Result<()> {
-        let spec = FilterSpec::new(4, 20.0)?
-            .with_normalized_transmission_zeros(vec![-2.0, 1.5]);
+        let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros(vec![-2.0, 1.5]);
         let mut ctx = SynthesisContext::with_options(
             spec,
             PipelineOptions {
@@ -449,8 +453,7 @@ mod tests {
 
     #[test]
     fn save_and_load_context_round_trip() -> Result<()> {
-        let spec = FilterSpec::new(4, 20.0)?
-            .with_normalized_transmission_zeros(vec![-2.0, 1.5]);
+        let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros(vec![-2.0, 1.5]);
         let mut ctx = SynthesisContext::new(spec);
 
         run_stage(&mut ctx, "approximation")?;
@@ -483,8 +486,7 @@ mod tests {
 
     #[test]
     fn loaded_context_can_resume_execution() -> Result<()> {
-        let spec = FilterSpec::new(4, 20.0)?
-            .with_normalized_transmission_zeros(vec![-1.5, 1.5]);
+        let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros(vec![-1.5, 1.5]);
         let mut ctx = SynthesisContext::with_options(
             spec,
             PipelineOptions {
@@ -523,8 +525,7 @@ mod tests {
 
     #[test]
     fn incremental_execution_matches_full_pipeline_result() -> Result<()> {
-        let spec = FilterSpec::new(4, 20.0)?
-            .with_normalized_transmission_zeros(vec![-2.0, 1.5]);
+        let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros(vec![-2.0, 1.5]);
         let options = PipelineOptions {
             topology: Some(TopologyKind::Folded),
             grid: Some(GridConfig {

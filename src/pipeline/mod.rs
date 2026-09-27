@@ -23,7 +23,8 @@ pub use context::{
 };
 pub use execution::{load_context, run_stage, save_context};
 pub use request::{
-    run_from_json, run_full_pipeline, SynthesisRequest, ValidationError, ValidationErrors,
+    context_from_request, run_from_json, run_full_pipeline, SynthesisRequest, ValidationError,
+    ValidationErrors,
 };
 pub use schema::describe_schema;
 pub use stages::{

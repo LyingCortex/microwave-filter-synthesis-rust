@@ -24,8 +24,8 @@ use clap::Parser;
 use serde::Serialize;
 
 use mfs::pipeline::{
-    load_context, run_from_json, run_full_pipeline, run_stage, PipelineOptions, SynthesisContext,
-    SynthesisRequest,
+    context_from_request, load_context, run_from_json, run_full_pipeline, run_stage,
+    SynthesisContext, SynthesisRequest,
 };
 
 /// MFS — Microwave Filter Synthesis CLI
@@ -43,7 +43,13 @@ struct Cli {
     input: Option<PathBuf>,
 
     /// Output format: json (default) or table.
-    #[arg(short, long, value_name = "FORMAT", default_value = "json", global = true)]
+    #[arg(
+        short,
+        long,
+        value_name = "FORMAT",
+        default_value = "json",
+        global = true
+    )]
     format: OutputFormat,
 
     /// Execute only this pipeline stage.
@@ -201,9 +207,8 @@ fn main() {
                 message: e.to_string(),
                 context: None,
             };
-            let json = serde_json::to_string(&cli_error).unwrap_or_else(|_| {
-                format!(r#"{{"error_type":"internal","message":"{}"}}"#, e)
-            });
+            let json = serde_json::to_string(&cli_error)
+                .unwrap_or_else(|_| format!(r#"{{"error_type":"internal","message":"{}"}}"#, e));
             eprintln!("{json}");
             process::exit(1);
         }
@@ -212,12 +217,58 @@ fn main() {
 
 fn run(cli: &Cli) -> Result<(), CliRunError> {
     // Handle subcommands first
-    if let Some(Command::Design { order, return_loss, center, bandwidth, start, stop, zeros, q, topology, points, resp_start, resp_stop, s2p }) = &cli.command {
-        return run_design(*order, *return_loss, *center, *bandwidth, *start, *stop, zeros.as_deref(), *q, topology, *points, *resp_start, *resp_stop, s2p.as_deref(), &cli.format);
+    if let Some(Command::Design {
+        order,
+        return_loss,
+        center,
+        bandwidth,
+        start,
+        stop,
+        zeros,
+        q,
+        topology,
+        points,
+        resp_start,
+        resp_stop,
+        s2p,
+    }) = &cli.command
+    {
+        return run_design(
+            *order,
+            *return_loss,
+            *center,
+            *bandwidth,
+            *start,
+            *stop,
+            zeros.as_deref(),
+            *q,
+            topology,
+            *points,
+            *resp_start,
+            *resp_stop,
+            s2p.as_deref(),
+            &cli.format,
+        );
     }
 
-    if let Some(Command::Multiplexer { channel, max_iterations, tol, resp_start, resp_stop, points }) = &cli.command {
-        return run_multiplexer(channel, *max_iterations, *tol, *resp_start, *resp_stop, *points, &cli.format);
+    if let Some(Command::Multiplexer {
+        channel,
+        max_iterations,
+        tol,
+        resp_start,
+        resp_stop,
+        points,
+    }) = &cli.command
+    {
+        return run_multiplexer(
+            channel,
+            *max_iterations,
+            *tol,
+            *resp_start,
+            *resp_stop,
+            *points,
+            &cli.format,
+        );
     }
 
     // Determine execution mode based on flags
@@ -244,7 +295,7 @@ fn run(cli: &Cli) -> Result<(), CliRunError> {
             let json_input = read_input(cli)?;
             let request: SynthesisRequest = serde_json::from_str(&json_input)
                 .map_err(|e| CliRunError::InputParse(e.to_string()))?;
-            let mut ctx = build_context_from_request(request).map_err(CliRunError::Pipeline)?;
+            let mut ctx = context_from_request(request).map_err(CliRunError::Pipeline)?;
 
             run_stage(&mut ctx, stage_name.as_str()).map_err(CliRunError::Pipeline)?;
             output_stage_artifact(&ctx, stage_name, &cli.format)?;
@@ -294,7 +345,7 @@ fn run_design(
 ) -> Result<(), CliRunError> {
     use mfs::design::FilterDesign;
     use mfs::matrix::MatrixTopology;
-    use mfs::touchstone::{self, FreqUnit, DataFormat, TouchstoneConfig, TouchstoneVersion};
+    use mfs::touchstone::{self, DataFormat, FreqUnit, TouchstoneConfig, TouchstoneVersion};
 
     // Resolve center/bandwidth from either (center, bw) or (start, stop) notation
     let (resolved_center, resolved_bw) = match (center, bandwidth, start, stop) {
@@ -358,17 +409,25 @@ fn run_design(
         let r_start = resp_start.unwrap_or(c - 1.5 * bw);
         let r_stop = resp_stop.unwrap_or(c + 1.5 * bw);
         if let Some(q_val) = q {
-            design.response_lossy(r_start, r_stop, points, q_val).map_err(CliRunError::Pipeline)?
+            design
+                .response_lossy(r_start, r_stop, points, q_val)
+                .map_err(CliRunError::Pipeline)?
         } else {
-            design.response(r_start, r_stop, points).map_err(CliRunError::Pipeline)?
+            design
+                .response(r_start, r_stop, points)
+                .map_err(CliRunError::Pipeline)?
         }
     } else {
         let r_start = resp_start.unwrap_or(-3.0);
         let r_stop = resp_stop.unwrap_or(3.0);
         if let Some(q_val) = q {
-            design.response_lossy_normalized(r_start, r_stop, points, q_val).map_err(CliRunError::Pipeline)?
+            design
+                .response_lossy_normalized(r_start, r_stop, points, q_val)
+                .map_err(CliRunError::Pipeline)?
         } else {
-            design.response_normalized(r_start, r_stop, points).map_err(CliRunError::Pipeline)?
+            design
+                .response_normalized(r_start, r_stop, points)
+                .map_err(CliRunError::Pipeline)?
         }
     };
 
@@ -393,15 +452,19 @@ fn run_design(
             let matrix_data: Vec<Vec<f64>> = (0..side)
                 .map(|r| (0..side).map(|c| matrix.at(r, c).unwrap_or(0.0)).collect())
                 .collect();
-            let samples: Vec<serde_json::Value> = response.samples.iter().map(|s| {
-                serde_json::json!({
-                    "frequency_hz": s.frequency_hz,
-                    "s11_db": s.s11_db(),
-                    "s21_db": s.s21_db(),
-                    "s11_phase_deg": s.s11_phase_deg(),
-                    "s21_phase_deg": s.s21_phase_deg(),
+            let samples: Vec<serde_json::Value> = response
+                .samples
+                .iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "frequency_hz": s.frequency_hz,
+                        "s11_db": s.s11_db(),
+                        "s21_db": s.s21_db(),
+                        "s11_phase_deg": s.s11_phase_deg(),
+                        "s21_phase_deg": s.s21_phase_deg(),
+                    })
                 })
-            }).collect();
+                .collect();
 
             let output = serde_json::json!({
                 "order": order,
@@ -413,8 +476,11 @@ fn run_design(
                     "samples": samples,
                 },
             });
-            println!("{}", serde_json::to_string_pretty(&output)
-                .map_err(|e| CliRunError::Serialization(e.to_string()))?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&output)
+                    .map_err(|e| CliRunError::Serialization(e.to_string()))?
+            );
         }
         OutputFormat::Table => {
             println!("── Filter Design ──");
@@ -423,7 +489,11 @@ fn run_design(
             if let (Some(c), Some(bw)) = (resolved_center, resolved_bw) {
                 println!("  Center:      {:.6} GHz", c / 1e9);
                 println!("  Bandwidth:   {:.3} MHz", bw / 1e6);
-                println!("  Passband:    {:.6} – {:.6} GHz", (c - bw / 2.0) / 1e9, (c + bw / 2.0) / 1e9);
+                println!(
+                    "  Passband:    {:.6} – {:.6} GHz",
+                    (c - bw / 2.0) / 1e9,
+                    (c + bw / 2.0) / 1e9
+                );
             }
             if let Some(z) = zeros {
                 let zs: Vec<String> = z.iter().map(|v| format!("{v:.4}")).collect();
@@ -449,7 +519,10 @@ fn run_design(
             }
 
             // Response summary
-            println!("── S-Parameter Response ({} points) ──", response.samples.len());
+            println!(
+                "── S-Parameter Response ({} points) ──",
+                response.samples.len()
+            );
             println!("  {:>12} {:>10} {:>10}", "Freq", "S21 (dB)", "S11 (dB)");
             println!("  {:>12} {:>10} {:>10}", "────────", "────────", "────────");
             let n = response.samples.len();
@@ -460,9 +533,16 @@ fn run_design(
                 } else {
                     format!("{:.4}", s.frequency_hz)
                 };
-                println!("  {:>12} {:>10.3} {:>10.3}", freq_label, s.s21_db(), s.s11_db());
+                println!(
+                    "  {:>12} {:>10.3} {:>10.3}",
+                    freq_label,
+                    s.s21_db(),
+                    s.s11_db()
+                );
             }
-            if n > show * 2 { println!("  {:>12}", "..."); }
+            if n > show * 2 {
+                println!("  {:>12}", "...");
+            }
             if n > show {
                 for s in response.samples.iter().skip(n - show) {
                     let freq_label = if resolved_center.is_some() {
@@ -470,7 +550,12 @@ fn run_design(
                     } else {
                         format!("{:.4}", s.frequency_hz)
                     };
-                    println!("  {:>12} {:>10.3} {:>10.3}", freq_label, s.s21_db(), s.s11_db());
+                    println!(
+                        "  {:>12} {:>10.3} {:>10.3}",
+                        freq_label,
+                        s.s21_db(),
+                        s.s11_db()
+                    );
                 }
             }
         }
@@ -501,7 +586,10 @@ fn run_multiplexer(
             )));
         }
         let order = parts[0].trim().parse::<usize>().map_err(|_| {
-            CliRunError::InputParse(format!("invalid order '{}' in channel spec '{raw}'", parts[0]))
+            CliRunError::InputParse(format!(
+                "invalid order '{}' in channel spec '{raw}'",
+                parts[0]
+            ))
         })?;
         let return_loss_db = parts[1].trim().parse::<f64>().map_err(|_| {
             CliRunError::InputParse(format!(
@@ -616,7 +704,10 @@ fn run_multiplexer(
             }
             println!("── Response ({} points) ──", response.frequencies.len());
             println!("  Freq: {:.4} GHz – {:.4} GHz", r_start / 1e9, r_stop / 1e9);
-            println!("  Antenna S11:   min {:.1} dB", min_db(&response.antenna_s11_db));
+            println!(
+                "  Antenna S11:   min {:.1} dB",
+                min_db(&response.antenna_s11_db)
+            );
             for (i, s21) in response.channel_s21_db.iter().enumerate() {
                 println!("  Channel {i} S21: peak {:.1} dB", max_db(s21));
             }
@@ -651,38 +742,21 @@ fn max_db(values: &[f64]) -> f64 {
     values.iter().copied().fold(f64::NEG_INFINITY, f64::max)
 }
 
-/// Builds a `SynthesisContext` from a `SynthesisRequest` without running any stages.
-/// This prepares the context for incremental stage execution via `run_stage`.
-fn build_context_from_request(request: SynthesisRequest) -> mfs::Result<SynthesisContext> {
-    request.validate().map_err(|ve| {
-        mfs::MfsError::PreconditionViolation(ve.to_string())
-    })?;
-
-    // Build FilterSpec from request
-    let spec = mfs::synthesis::build_filter_spec(
-        request.order,
-        request.return_loss_db,
-        &request.transmission_zeros,
-        request.unloaded_q,
-    )?;
-
-    // Build PipelineOptions from request
-    let options = PipelineOptions {
-        topology: request.topology,
-        grid: request.grid,
-        mapping: request.mapping,
-        response_tolerance: None,
-    };
-
-    Ok(SynthesisContext::with_options(spec, options))
-}
-
 /// Determines which stages haven't been executed yet and runs them in order.
 fn run_remaining_stages(ctx: &mut SynthesisContext) -> mfs::Result<()> {
-    let all_stages = ["approximation", "matrix_synthesis", "topology_transform", "response_evaluation"];
+    let all_stages = [
+        "approximation",
+        "matrix_synthesis",
+        "topology_transform",
+        "response_evaluation",
+    ];
 
     for stage_name in &all_stages {
-        if ctx.metadata.stages_executed.contains(&stage_name.to_string()) {
+        if ctx
+            .metadata
+            .stages_executed
+            .contains(&stage_name.to_string())
+        {
             continue;
         }
         // Skip optional stages that lack required configuration
@@ -729,7 +803,9 @@ fn serialize_stage_artifact(
     let value: serde_json::Value = match stage {
         StageName::Approximation => {
             let polys = ctx.polynomials().ok_or_else(|| {
-                CliRunError::Serialization("approximation stage has not produced output".to_string())
+                CliRunError::Serialization(
+                    "approximation stage has not produced output".to_string(),
+                )
             })?;
             serde_json::json!({
                 "stage": "approximation",
@@ -863,8 +939,14 @@ fn print_stage_table(ctx: &SynthesisContext, stage: &StageName) {
                 println!("  Samples: {}", response.samples.len());
                 let n = response.samples.len();
                 let show = 5.min(n);
-                println!("  {:>14} {:>10} {:>10}", "Freq (Hz)", "S11 (dB)", "S21 (dB)");
-                println!("  {:>14} {:>10} {:>10}", "──────────", "────────", "────────");
+                println!(
+                    "  {:>14} {:>10} {:>10}",
+                    "Freq (Hz)", "S11 (dB)", "S21 (dB)"
+                );
+                println!(
+                    "  {:>14} {:>10} {:>10}",
+                    "──────────", "────────", "────────"
+                );
                 for sample in response.samples.iter().take(show) {
                     let s11_db = 10.0 * (sample.s11_re.powi(2) + sample.s11_im.powi(2)).log10();
                     let s21_db = 10.0 * (sample.s21_re.powi(2) + sample.s21_im.powi(2)).log10();
@@ -878,10 +960,8 @@ fn print_stage_table(ctx: &SynthesisContext, stage: &StageName) {
                 }
                 if n > show {
                     for sample in response.samples.iter().skip(n - show) {
-                        let s11_db =
-                            10.0 * (sample.s11_re.powi(2) + sample.s11_im.powi(2)).log10();
-                        let s21_db =
-                            10.0 * (sample.s21_re.powi(2) + sample.s21_im.powi(2)).log10();
+                        let s11_db = 10.0 * (sample.s11_re.powi(2) + sample.s11_im.powi(2)).log10();
+                        let s21_db = 10.0 * (sample.s21_re.powi(2) + sample.s21_im.powi(2)).log10();
                         println!(
                             "  {:>14.4} {:>10.3} {:>10.3}",
                             sample.frequency_hz, s11_db, s21_db
@@ -915,20 +995,15 @@ fn read_input(cli: &Cli) -> Result<String, CliRunError> {
     let path = cli.input.as_ref().or(cli.input_file.as_ref());
 
     match path {
-        Some(file_path) => {
-            std::fs::read_to_string(file_path).map_err(|e| {
-                CliRunError::InputRead(format!(
-                    "failed to read '{}': {e}",
-                    file_path.display()
-                ))
-            })
-        }
+        Some(file_path) => std::fs::read_to_string(file_path).map_err(|e| {
+            CliRunError::InputRead(format!("failed to read '{}': {e}", file_path.display()))
+        }),
         None => {
             // Read from stdin
             let mut buffer = String::new();
-            io::stdin().read_to_string(&mut buffer).map_err(|e| {
-                CliRunError::InputRead(format!("failed to read from stdin: {e}"))
-            })?;
+            io::stdin()
+                .read_to_string(&mut buffer)
+                .map_err(|e| CliRunError::InputRead(format!("failed to read from stdin: {e}")))?;
             Ok(buffer)
         }
     }
@@ -945,13 +1020,18 @@ fn print_table_output(ctx: &mfs::pipeline::SynthesisContext) {
     println!("  Order:          {}", ctx.spec.order);
     println!("  Return Loss:    {:.2} dB", ctx.spec.return_loss_db);
     if !ctx.spec.transmission_zeros.is_empty() {
-        let zeros: Vec<String> = ctx.spec.transmission_zeros.iter().map(|tz| {
-            if tz.value.is_infinite() {
-                "∞".to_string()
-            } else {
-                format!("{:.4}", tz.value)
-            }
-        }).collect();
+        let zeros: Vec<String> = ctx
+            .spec
+            .transmission_zeros
+            .iter()
+            .map(|tz| {
+                if tz.value.is_infinite() {
+                    "∞".to_string()
+                } else {
+                    format!("{:.4}", tz.value)
+                }
+            })
+            .collect();
         println!("  Zeros:          [{}]", zeros.join(", "));
     }
     if let Some(q) = ctx.spec.unloaded_q {
@@ -962,9 +1042,15 @@ fn print_table_output(ctx: &mfs::pipeline::SynthesisContext) {
     // Metadata
     println!("── Execution Metadata ──");
     println!("  Version:        {}", ctx.metadata.version);
-    println!("  Stages:         {}", ctx.metadata.stages_executed.join(" → "));
+    println!(
+        "  Stages:         {}",
+        ctx.metadata.stages_executed.join(" → ")
+    );
     if !ctx.metadata.stage_timings_ms.is_empty() {
-        let timings: Vec<String> = ctx.metadata.stages_executed.iter()
+        let timings: Vec<String> = ctx
+            .metadata
+            .stages_executed
+            .iter()
             .zip(ctx.metadata.stage_timings_ms.iter())
             .map(|(name, ms)| format!("{name}: {ms:.2}ms"))
             .collect();
@@ -982,7 +1068,9 @@ fn print_table_output(ctx: &mfs::pipeline::SynthesisContext) {
         println!("  Epsilon:          {:.6}", polys.eps);
         println!("  Epsilon_R:        {:.6}", polys.eps_r);
         if !polys.transmission_zeros_normalized.is_empty() {
-            let tz: Vec<String> = polys.transmission_zeros_normalized.iter()
+            let tz: Vec<String> = polys
+                .transmission_zeros_normalized
+                .iter()
                 .map(|z| {
                     if z.is_infinite() {
                         "∞".to_string()
@@ -1038,12 +1126,21 @@ fn print_table_output(ctx: &mfs::pipeline::SynthesisContext) {
         // Show first few and last few samples
         let n = response.samples.len();
         let show = 5.min(n);
-        println!("  {:>14} {:>10} {:>10}", "Freq (Hz)", "S11 (dB)", "S21 (dB)");
-        println!("  {:>14} {:>10} {:>10}", "──────────", "────────", "────────");
+        println!(
+            "  {:>14} {:>10} {:>10}",
+            "Freq (Hz)", "S11 (dB)", "S21 (dB)"
+        );
+        println!(
+            "  {:>14} {:>10} {:>10}",
+            "──────────", "────────", "────────"
+        );
         for sample in response.samples.iter().take(show) {
             let s11_db = 10.0 * (sample.s11_re.powi(2) + sample.s11_im.powi(2)).log10();
             let s21_db = 10.0 * (sample.s21_re.powi(2) + sample.s21_im.powi(2)).log10();
-            println!("  {:>14.4} {:>10.3} {:>10.3}", sample.frequency_hz, s11_db, s21_db);
+            println!(
+                "  {:>14.4} {:>10.3} {:>10.3}",
+                sample.frequency_hz, s11_db, s21_db
+            );
         }
         if n > show * 2 {
             println!("  {:>14}", "...");
@@ -1052,7 +1149,10 @@ fn print_table_output(ctx: &mfs::pipeline::SynthesisContext) {
             for sample in response.samples.iter().skip(n - show) {
                 let s11_db = 10.0 * (sample.s11_re.powi(2) + sample.s11_im.powi(2)).log10();
                 let s21_db = 10.0 * (sample.s21_re.powi(2) + sample.s21_im.powi(2)).log10();
-                println!("  {:>14.4} {:>10.3} {:>10.3}", sample.frequency_hz, s11_db, s21_db);
+                println!(
+                    "  {:>14.4} {:>10.3} {:>10.3}",
+                    sample.frequency_hz, s11_db, s21_db
+                );
             }
         }
         println!();

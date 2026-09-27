@@ -174,8 +174,7 @@ mod tests {
 
     #[test]
     fn approximation_stage_produces_polynomials_from_spec() -> Result<()> {
-        let spec = FilterSpec::new(4, 20.0)?
-            .with_normalized_transmission_zeros(vec![-2.0, 1.5]);
+        let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros(vec![-2.0, 1.5]);
 
         let stage = ApproximationStage;
         assert_eq!(stage.name(), "approximation");
@@ -188,8 +187,7 @@ mod tests {
 
     #[test]
     fn matrix_synthesis_stage_produces_matrix_from_polynomials() -> Result<()> {
-        let spec = FilterSpec::new(4, 20.0)?
-            .with_normalized_transmission_zeros(vec![-1.5, 1.5]);
+        let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros(vec![-1.5, 1.5]);
         let polynomials = generalized_chebyshev_polynomials(&spec)?;
 
         let stage = MatrixSynthesisStage;
@@ -224,8 +222,7 @@ mod tests {
 
     #[test]
     fn topology_transform_stage_converts_to_folded() -> Result<()> {
-        let spec = FilterSpec::new(4, 20.0)?
-            .with_normalized_transmission_zeros(vec![-1.5, 1.5]);
+        let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros(vec![-1.5, 1.5]);
         let polynomials = generalized_chebyshev_polynomials(&spec)?;
         let matrix = MatrixSynthesisEngine.synthesize(&polynomials)?;
 
@@ -244,8 +241,7 @@ mod tests {
 
     #[test]
     fn topology_transform_stage_converts_to_arrow() -> Result<()> {
-        let spec = FilterSpec::new(4, 20.0)?
-            .with_normalized_transmission_zeros(vec![-1.5, 1.5]);
+        let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros(vec![-1.5, 1.5]);
         let polynomials = generalized_chebyshev_polynomials(&spec)?;
         let matrix = MatrixSynthesisEngine.synthesize(&polynomials)?;
 
@@ -262,8 +258,7 @@ mod tests {
 
     #[test]
     fn response_evaluation_stage_produces_samples() -> Result<()> {
-        let spec = FilterSpec::new(4, 20.0)?
-            .with_normalized_transmission_zeros(vec![-1.5, 1.5]);
+        let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros(vec![-1.5, 1.5]);
         let polynomials = generalized_chebyshev_polynomials(&spec)?;
         let matrix = MatrixSynthesisEngine.synthesize(&polynomials)?;
         let grid = FrequencyGrid::linspace(-2.0, 2.0, 21)?;
@@ -285,8 +280,7 @@ mod tests {
 
     #[test]
     fn response_evaluation_stage_preserves_power_conservation() -> Result<()> {
-        let spec = FilterSpec::new(4, 20.0)?
-            .with_normalized_transmission_zeros(vec![-1.5, 1.5]);
+        let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros(vec![-1.5, 1.5]);
         let polynomials = generalized_chebyshev_polynomials(&spec)?;
         let matrix = MatrixSynthesisEngine.synthesize(&polynomials)?;
         let grid = FrequencyGrid::linspace(-1.5, 1.5, 11)?;
