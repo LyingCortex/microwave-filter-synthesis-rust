@@ -43,6 +43,13 @@ pub struct CompanionMatrixRootSolver;
 /// Companion matrix root solver using the faer linear algebra library.
 /// Uses complex eigenvalue decomposition for maximum precision.
 /// Preserves polynomial symmetry better than iterative methods.
+///
+/// The returned eigenvalues are gated on a backward-residual check
+/// (`max_backward_residual` ≤ [`FAER_BACKWARD_RESIDUAL_TOL`]) and a
+/// non-finiteness check: a companion matrix whose eigenvalue problem is
+/// ill-conditioned can yield garbage eigenvalues without the call reporting
+/// an error, and the gate converts that silent corruption into a typed error
+/// so [`AdaptiveRootSolver`] falls through to the iterative methods.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct FaerRootSolver;
 
@@ -52,7 +59,9 @@ pub struct FaerRootSolver;
 /// Strategy chain (canonical — see also `roots` and README "High-order
 /// support"):
 /// 1. Companion matrix via **faer** complex eigenvalues (accurate, preserves
-///    polynomial symmetry; sound for complex-coefficient polynomials).
+///    polynomial symmetry; sound for complex-coefficient polynomials). The
+///    result is gated on a backward-residual check (see `FaerRootSolver`):
+///    ill-conditioned eigenvalue problems fail the gate and fall through.
 /// 2. Durand-Kerner (iterative fallback).
 /// 3. Aberth-Ehrlich (last-resort fallback).
 ///
@@ -199,7 +208,8 @@ impl ComplexPolynomial {
     pub fn from_real_roots(roots: &[f64]) -> Result<Self> {
         let mut coefficients = vec![COMPLEX_ONE];
         for &root in roots {
-            coefficients = multiply_by_monic_root(&coefficients, ComplexCoefficient::new(root, 0.0));
+            coefficients =
+                multiply_by_monic_root(&coefficients, ComplexCoefficient::new(root, 0.0));
         }
         Self::new(coefficients)
     }
@@ -222,10 +232,7 @@ impl ComplexPolynomial {
     }
 
     /// Estimates all roots with an explicit complex root solver.
-    pub fn roots_with<S: ComplexRootSolver>(
-        &self,
-        solver: &S,
-    ) -> Result<Vec<ComplexCoefficient>> {
+    pub fn roots_with<S: ComplexRootSolver>(&self, solver: &S) -> Result<Vec<ComplexCoefficient>> {
         solver.roots_of(self)
     }
 }
@@ -238,7 +245,9 @@ impl ComplexRootSolver for DurandKernerRootSolver {
         }
 
         let leading = *polynomial.coefficients.last().ok_or_else(|| {
-            MfsError::PreconditionViolation("polynomial is missing a leading coefficient".to_string())
+            MfsError::PreconditionViolation(
+                "polynomial is missing a leading coefficient".to_string(),
+            )
         })?;
         if leading.norm_sqr() <= 1e-24 {
             return Err(MfsError::PreconditionViolation(
@@ -296,7 +305,10 @@ impl ComplexRootSolver for DurandKernerRootSolver {
                 max_delta = max_delta.max(delta.norm());
             }
 
-            if max_delta <= convergence_tol {
+            // `f64::max` swallows NaN, so `max_delta` can read 0.0 even when an
+            // update overflowed to a NaN root. Check the roots directly so a NaN
+            // set is never returned as "converged".
+            if max_delta <= convergence_tol && !roots_contain_non_finite(&roots) {
                 return Ok(roots);
             }
         }
@@ -307,7 +319,7 @@ impl ComplexRootSolver for DurandKernerRootSolver {
             .iter()
             .map(|&root| evaluate_monic_polynomial(&normalized, root).norm())
             .fold(0.0_f64, f64::max);
-        if max_residual < 1e-8 {
+        if !roots_contain_non_finite(&roots) && max_residual < 1e-8 {
             return Ok(roots);
         }
 
@@ -424,7 +436,9 @@ impl ComplexRootSolver for AberthRootSolver {
                 max_delta = max_delta.max(delta.norm());
             }
 
-            if max_delta <= convergence_tol {
+            // Same NaN guard as Durand-Kerner: `f64::max` swallows NaN in
+            // `max_delta`, so a NaN root set would otherwise read as converged.
+            if max_delta <= convergence_tol && !roots_contain_non_finite(&roots) {
                 return Ok(roots);
             }
         }
@@ -434,7 +448,7 @@ impl ComplexRootSolver for AberthRootSolver {
             .iter()
             .map(|&root| evaluate_monic_polynomial(&normalized, root).norm())
             .fold(0.0_f64, f64::max);
-        if max_residual < 1e-8 {
+        if !roots_contain_non_finite(&roots) && max_residual < 1e-8 {
             return Ok(roots);
         }
 
@@ -490,9 +504,7 @@ impl ComplexRootSolver for CompanionMatrixRootSolver {
         // However, for polynomials with real coefficients (common in filter synthesis
         // after domain transforms), we can use the standard real companion matrix directly.
 
-        let is_real_polynomial = normalized
-            .iter()
-            .all(|c| c.im.abs() < 1e-15);
+        let is_real_polynomial = normalized.iter().all(|c| c.im.abs() < 1e-15);
 
         if is_real_polynomial {
             // Standard real companion matrix approach
@@ -632,7 +644,9 @@ impl ComplexRootSolver for FaerRootSolver {
         }
 
         let leading = *polynomial.coefficients.last().ok_or_else(|| {
-            MfsError::PreconditionViolation("polynomial is missing a leading coefficient".to_string())
+            MfsError::PreconditionViolation(
+                "polynomial is missing a leading coefficient".to_string(),
+            )
         })?;
         if leading.norm_sqr() <= 1e-24 {
             return Err(MfsError::PreconditionViolation(
@@ -676,6 +690,21 @@ impl ComplexRootSolver for FaerRootSolver {
             )));
         }
 
+        // Backward-residual gate: faer's eigenvalues can be garbage (e.g. from
+        // a defective companion matrix) without the call reporting an error.
+        // A backward-stable solve returns exact roots of a slightly perturbed
+        // polynomial, so the backward residual is ~1e-15..1e-6 (worst observed:
+        // 3e-6 for an order-30 production F_s). Garbage outputs are O(1e-2)+.
+        // Failing here lets `AdaptiveRootSolver` fall through to the iterative
+        // methods instead of silently shipping bad roots.
+        let max_backward = max_backward_residual(&normalized, &roots);
+        if roots_contain_non_finite(&roots) || max_backward > FAER_BACKWARD_RESIDUAL_TOL {
+            return Err(MfsError::NumericalFailure(format!(
+                "faer companion-matrix eigenvalues failed the backward-residual \
+                 check for degree {degree} (max backward residual: {max_backward:.2e})"
+            )));
+        }
+
         Ok(roots)
     }
 }
@@ -708,7 +737,10 @@ impl ComplexRootSolver for AdaptiveRootSolver {
 }
 
 /// Evaluates a polynomial given as a coefficient slice (ascending powers) at point x.
-fn evaluate_polynomial_slice(coefficients: &[ComplexCoefficient], x: ComplexCoefficient) -> ComplexCoefficient {
+fn evaluate_polynomial_slice(
+    coefficients: &[ComplexCoefficient],
+    x: ComplexCoefficient,
+) -> ComplexCoefficient {
     coefficients
         .iter()
         .rev()
@@ -716,7 +748,9 @@ fn evaluate_polynomial_slice(coefficients: &[ComplexCoefficient], x: ComplexCoef
         .fold(COMPLEX_ZERO, |acc, c| acc * x + c)
 }
 
-fn trim_trailing_complex_zeros(mut coefficients: Vec<ComplexCoefficient>) -> Vec<ComplexCoefficient> {
+fn trim_trailing_complex_zeros(
+    mut coefficients: Vec<ComplexCoefficient>,
+) -> Vec<ComplexCoefficient> {
     while coefficients.len() > 1
         && coefficients
             .last()
@@ -738,6 +772,45 @@ fn evaluate_monic_polynomial(
         .fold(COMPLEX_ZERO, |acc, coefficient| acc * x + coefficient)
 }
 
+/// Maximum backward residual a `FaerRootSolver` root set may exhibit and
+/// still be accepted. See the gate in `FaerRootSolver::roots_of` for the
+/// calibration behind this value.
+const FAER_BACKWARD_RESIDUAL_TOL: f64 = 1e-3;
+
+/// True when any root has a non-finite real or imaginary part.
+///
+/// Needed because the residual folds use `f64::max`, which swallows NaN — a
+/// root set containing a NaN would otherwise pass a `residual < tol` check
+/// and be silently shipped.
+fn roots_contain_non_finite(roots: &[ComplexCoefficient]) -> bool {
+    roots.iter().any(|r| !r.re.is_finite() || !r.im.is_finite())
+}
+
+/// Largest backward residual of `roots` for the monic polynomial whose
+/// ascending coefficients are `coefficients`.
+///
+/// For a candidate root `r`, the backward residual is
+/// `|p(r)| / sum_k |c_k| |r|^k`. It measures "the roots are exact for some
+/// nearly-perturbed polynomial" (a backward-stable-solve certificate) and is
+/// scale-free — unlike the raw residual `|p(r)|`, it does not blow up with
+/// root magnitude or polynomial coefficient spread.
+fn max_backward_residual(coefficients: &[ComplexCoefficient], roots: &[ComplexCoefficient]) -> f64 {
+    roots
+        .iter()
+        .map(|&root| {
+            let p_at_root = evaluate_monic_polynomial(coefficients, root).norm();
+            let mut scale = 0.0_f64;
+            let mut r_pow = 1.0_f64;
+            let r_mag = root.norm();
+            for coefficient in coefficients {
+                scale += coefficient.norm() * r_pow;
+                r_pow *= r_mag;
+            }
+            p_at_root / scale.max(1e-300)
+        })
+        .fold(0.0_f64, f64::max)
+}
+
 /// Multiplies a polynomial by `s`, shifting coefficients up by one power.
 ///
 /// Shared by the duplexer and multiplexer synthesis helpers.
@@ -750,10 +823,7 @@ pub fn multiply_by_s(poly: &ComplexPolynomial) -> Result<ComplexPolynomial> {
 /// Pads a polynomial to a given length with zero coefficients.
 ///
 /// Shared by the duplexer and multiplexer `recover_filter_design` paths.
-pub fn pad_polynomial(
-    poly: &ComplexPolynomial,
-    target_len: usize,
-) -> Result<ComplexPolynomial> {
+pub fn pad_polynomial(poly: &ComplexPolynomial, target_len: usize) -> Result<ComplexPolynomial> {
     if poly.coefficients.len() >= target_len {
         return Ok(poly.clone());
     }
@@ -766,7 +836,10 @@ pub fn pad_polynomial(
 /// imaginary part). Returns [`f64::INFINITY`] if the two sets differ in size.
 ///
 /// Shared by the duplexer and multiplexer convergence metrics.
-pub fn compute_root_displacement(prev: &[ComplexCoefficient], current: &[ComplexCoefficient]) -> f64 {
+pub fn compute_root_displacement(
+    prev: &[ComplexCoefficient],
+    current: &[ComplexCoefficient],
+) -> f64 {
     if prev.len() != current.len() {
         return f64::INFINITY;
     }
@@ -788,7 +861,11 @@ pub fn compute_root_displacement(prev: &[ComplexCoefficient], current: &[Complex
         .zip(curr_sorted.iter())
         .map(|(p, c)| {
             let d = (p - c).norm();
-            if d.is_finite() { d } else { 1.0 }
+            if d.is_finite() {
+                d
+            } else {
+                1.0
+            }
         })
         .fold(0.0_f64, f64::max)
 }
@@ -796,7 +873,8 @@ pub fn compute_root_displacement(prev: &[ComplexCoefficient], current: &[Complex
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use crate::approx::generalized_chebyshev_polynomials;
+    use crate::spec::FilterSpec;
     fn approx_eq(lhs: f64, rhs: f64, tol: f64) {
         let diff = (lhs - rhs).abs();
         assert!(
@@ -904,9 +982,7 @@ mod tests {
     #[test]
     fn adaptive_solver_handles_high_degree_polynomial() -> Result<()> {
         // Build a degree-25 polynomial with known roots on the unit circle
-        let roots_expected: Vec<f64> = (0..25)
-            .map(|i| -1.2 + 0.1 * i as f64)
-            .collect();
+        let roots_expected: Vec<f64> = (0..25).map(|i| -1.2 + 0.1 * i as f64).collect();
         let polynomial = ComplexPolynomial::from_real_roots(&roots_expected)?;
         let solver = AdaptiveRootSolver;
         let mut roots = solver.roots_of(&polynomial)?;
@@ -960,10 +1036,7 @@ mod tests {
             .fold(0.0_f64, f64::max)
     }
 
-    fn max_root_residual(
-        polynomial: &ComplexPolynomial,
-        roots: &[ComplexCoefficient],
-    ) -> f64 {
+    fn max_root_residual(polynomial: &ComplexPolynomial, roots: &[ComplexCoefficient]) -> f64 {
         roots
             .iter()
             .map(|&root| polynomial.evaluate(root).norm())
@@ -1027,7 +1100,11 @@ mod tests {
                 .collect();
             let max_error = nearest_neighbor_max_error(&recovered, &expected_c);
             println!("companion_matrix(real) degree {degree}: max root error = {max_error:.3e}");
-            let bound = if degree == 30 { COMPANION_REAL_DEG30_BOUND } else { 1e-6 };
+            let bound = if degree == 30 {
+                COMPANION_REAL_DEG30_BOUND
+            } else {
+                1e-6
+            };
             assert!(
                 max_error <= bound,
                 "companion_matrix(real) degree {degree}: max root error {max_error:.3e} exceeds {bound}"
@@ -1062,8 +1139,14 @@ mod tests {
              nearest-neighbor error = {nn_error:.3e}"
         );
 
-        assert!(residual > 1.0, "expected flipped non-roots (large residual), got {residual:.3e}");
-        assert!(nn_error > 1.0, "expected conjugate-flip (large nn error), got {nn_error:.3e}");
+        assert!(
+            residual > 1.0,
+            "expected flipped non-roots (large residual), got {residual:.3e}"
+        );
+        assert!(
+            nn_error > 1.0,
+            "expected conjugate-flip (large nn error), got {nn_error:.3e}"
+        );
     }
 
     #[test]
@@ -1079,6 +1162,163 @@ mod tests {
                 max_error <= 1e-6,
                 "faer degree {degree}: max root error {max_error:.3e} exceeds 1e-6"
             );
+        }
+        Ok(())
+    }
+
+    /// Unit test for the backward-residual helper: a root set that is
+    /// genuinely close to the true roots must have a tiny residual, while a
+    /// crafted garbage set (offset roots) must have a large one. This is the
+    /// metric the faer gate on, so it is tested directly and independently of
+    /// faer.
+    #[test]
+    fn max_backward_residual_separates_good_roots_from_garbage() {
+        let expected = fixed_complex_roots(12);
+        let polynomial = ComplexPolynomial::from_complex_roots(&expected).unwrap();
+
+        let good = max_backward_residual(&polynomial.coefficients, &expected);
+        assert!(
+            good < 1e-10,
+            "expected ~machine-precision residual, got {good:.3e}"
+        );
+
+        // Shift every root by a sizeable amount: no longer roots of (any
+        // nearby) polynomial, so the residual must blow up. The metric is
+        // scale-free and measures the relative perturbation of the
+        // coefficients, so the absolute value is shape-dependent — assert
+        // separation from machine precision, not an absolute bound.
+        let garbage: Vec<ComplexCoefficient> = expected
+            .iter()
+            .map(|r| *r + ComplexCoefficient::new(3.0, -2.0))
+            .collect();
+        let bad = max_backward_residual(&polynomial.coefficients, &garbage);
+        assert!(bad > 0.1, "expected large backward residual, got {bad:.3e}");
+        assert!(
+            bad > good * 1e6,
+            "garbage residual {bad:.3e} should exceed good residual {good:.3e} by orders of magnitude"
+        );
+    }
+
+    /// Deterministic gate-firing case: roots spanning many decades make the
+    /// companion matrix badly ill-conditioned, so faer's eigenvalues fail the
+    /// backward-residual check. Regression-locks the gate itself — without it
+    /// `FaerRootSolver` returns `Ok` on garbage eigenvalues (the silent
+    /// corruption that motivated the fix).
+    #[test]
+    fn faer_backward_residual_gate_rejects_garbage_on_ill_conditioned_polynomial() {
+        // Roots 1e-10 .. 1e10 (11 roots, geometric): observed backward
+        // residual ~1.75e-2, far above the 1e-3 gate threshold.
+        let roots: Vec<ComplexCoefficient> = (0..11)
+            .map(|k| ComplexCoefficient::new(10f64.powi(k - 5), 0.0))
+            .collect();
+        let polynomial = ComplexPolynomial::from_complex_roots(&roots).unwrap();
+
+        let result = FaerRootSolver.roots_of(&polynomial);
+        match result {
+            Err(e) => {
+                // The typed error must name the residual failure.
+                let msg = format!("{e}");
+                assert!(
+                    msg.contains("backward residual"),
+                    "expected a backward-residual error, got: {msg}"
+                );
+            }
+            Ok(recovered) => {
+                // If a future faer version does recover it, the roots must at
+                // least be backward-respectable — never silently garbage.
+                let br = max_backward_residual(&polynomial.coefficients, &recovered);
+                panic!(
+                    "faer unexpectedly succeeded with backward residual {br:.3e} \
+                     (gate threshold {:.1e}); the test premise changed",
+                    FAER_BACKWARD_RESIDUAL_TOL
+                );
+            }
+        }
+    }
+
+    /// The adaptive chain must fall through the (gated) faer solver to the
+    /// iterative methods on an ill-conditioned polynomial and either recover
+    /// or fail loudly — it must never return a non-finite root set.
+    #[test]
+    fn adaptive_chain_falls_through_on_ill_conditioned_polynomial() {
+        let roots: Vec<ComplexCoefficient> = (0..11)
+            .map(|k| ComplexCoefficient::new(10f64.powi(k - 5), 0.0))
+            .collect();
+        let polynomial = ComplexPolynomial::from_complex_roots(&roots).unwrap();
+
+        // Premise: the gate fires for faer on this shape.
+        assert!(
+            FaerRootSolver.roots_of(&polynomial).is_err(),
+            "test premise: faer should be gated on this polynomial"
+        );
+
+        let recovered = AdaptiveRootSolver.roots_of(&polynomial);
+        if let Ok(r) = recovered {
+            let finite = !r.iter().any(|x| !x.re.is_finite() || !x.im.is_finite());
+            assert!(finite, "adaptive chain returned a non-finite root set");
+        }
+        // Err: failing loudly is acceptable for an extreme case
+    }
+
+    /// Regression for the `f64::max`-swallows-NaN defect: both iterative
+    /// solvers' in-loop convergence check used to treat a NaN root set as
+    /// converged (NaN updates keep `max_delta` at 0.0). A polynomial whose
+    /// iterates overflow must return `Err`, never `Ok` with NaN roots.
+    #[test]
+    fn iterative_solvers_fail_loud_instead_of_returning_nan_roots() {
+        // Roots on a huge circle: iterates overflow to NaN in the
+        // Durand-Kerner / Aberth updates (observed: order-45 E_s via DK).
+        let roots: Vec<ComplexCoefficient> = (0..15)
+            .map(|k| {
+                let a = 2.0 * std::f64::consts::PI * (k as f64 / 15.0);
+                ComplexCoefficient::new(1e15 * a.cos(), 1e15 * a.sin())
+            })
+            .collect();
+        let polynomial = ComplexPolynomial::from_complex_roots(&roots).unwrap();
+
+        for (name, result) in [
+            ("DurandKerner", DurandKernerRootSolver.roots_of(&polynomial)),
+            ("Aberth", AberthRootSolver.roots_of(&polynomial)),
+        ] {
+            if let Ok(recovered) = result {
+                let finite = !recovered
+                    .iter()
+                    .any(|x| !x.re.is_finite() || !x.im.is_finite());
+                assert!(
+                    finite,
+                    "{name} returned a non-finite root set: {recovered:?}"
+                );
+            }
+        }
+    }
+
+    /// The faer gate must NOT fire on legitimate production filter polynomials.
+    /// Calibration (order 4..40, E_s/F_s/P_s) shows the production backward
+    /// residual stays ≤ ~3e-2 up to order 40 where the companion matrix
+    /// degrades; the 1e-3 gate with fall-through is safe because production
+    /// polynomials up to order 30 sit at ~6e-6 (170x margin).
+    #[test]
+    fn faer_gate_does_not_fire_on_production_polynomials_up_to_order_30() -> Result<()> {
+        for order in [4usize, 8, 12, 16, 20, 24, 30] {
+            let zeros: Vec<f64> = (0..order.min(8))
+                .map(|k| (1.2 + 0.5 * (k as f64)) * if k % 2 == 0 { 1.0 } else { -1.0 })
+                .collect();
+            let spec = FilterSpec::builder()
+                .order(order)
+                .return_loss_db(20.0)
+                .normalized_transmission_zeros(zeros)
+                .build()?;
+            let ps = generalized_chebyshev_polynomials(&spec)?;
+            if let Some(g) = &ps.generalized {
+                for p in [g.e_s.as_ref().unwrap(), &g.f_s, &g.p_s] {
+                    let recovered = FaerRootSolver.roots_of(p)?;
+                    let br = max_backward_residual(&p.coefficients, &recovered);
+                    assert!(
+                        br < FAER_BACKWARD_RESIDUAL_TOL,
+                        "order {order}: faer gate would fire (br={br:.3e}) on a production polynomial"
+                    );
+                }
+            }
         }
         Ok(())
     }
