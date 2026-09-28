@@ -425,10 +425,10 @@ All errors are `Serialize + Deserialize` for structured JSON error reporting.
 
 ### Test Layers
 
-1. **Unit tests** (198 in `src/`, as of 0.5.0) — per-function validation with known inputs
+1. **Unit tests** (202 in `src/`, as of 2026-09-28) — per-function validation with known inputs
 2. **Property-based tests** (10 properties, 100 iterations each in `tests/synthesis_properties.rs`)
 3. **Regression tests** (36 in `tests/synthesis_regression.rs`) — previously-failing configurations
-4. **Integration tests** (14 files in `tests/`) — end-to-end pipeline validation
+4. **Integration tests** (15 files in `tests/`) — end-to-end pipeline validation
 5. **Literature fixtures** — reference values from Cameron textbook and published papers
 
 ### Correctness Properties
