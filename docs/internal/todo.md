@@ -7,6 +7,31 @@ traceable. Authoritative architecture/limitation references:
 `docs/architecture.md` (Known Limitations / Future Roadmap) and
 `docs/internal/architecture-review-2026-09-25.md`.
 
+## Current state (2026-09-28)
+
+Working tree clean, `master` == `gitlab/master` (head `75c6dba`), all
+CI-parity checks green on that head:
+
+- `cargo test --all-targets` — green (lib 202 passed + 15 integration
+  binaries, 0 failed)
+- `cargo clippy --all-targets -- -D warnings` — zero warnings
+- `cargo doc --no-deps` — zero warnings (a `rustdoc::private_intra_doc_links`
+  warning in `FaerRootSolver`'s doc, introduced by the faer residual gate,
+  was fixed by the 2026-09-28 docs-sync commit)
+
+The uncommitted work found after the 2026-09-28 session interruption was
+verified complete (not lost): functional code (faer backward-residual gate,
+DK/Aberth NaN guards, `recover_channel_design`, `context_from_request`,
+benchmark standard) was already committed in `3dab2ff`..`24e5880`; the
+remaining 62 files were one whole-crate `cargo fmt` pass plus the doc/
+changelog syncs, committed as `df8ee83` (style), `a59e055`
+([Unreleased] changelog), `75c6dba` (docs sync) and pushed to
+`gitlab/master`.
+
+Next steps: nothing blocking; see the Open sections below. The
+`[Unreleased]` changelog section should be released as the next version tag
+when the maintainer cuts it.
+
 ## Open
 
 ### High priority (core functionality)
