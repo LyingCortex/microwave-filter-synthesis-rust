@@ -155,60 +155,86 @@ output matches duplexer output (single loop proves parity).
 
 ---
 
-## C. Multi-band — design first, then scope
+## C. Multi-band — true multi-passband synthesis (scope-1)
 
-**Goal:** filters with more than one passband. This is the largest planning
-gap of the four areas: no code, no design doc, one roadmap line.
+**Goal:** filters with more than one passband in a single structure —
+equiripple response in ≥ 2 passbands, rejection in between and outside.
+**Scope decision (2026-09-29, maintainer):** scope-1 confirmed — a real
+multi-passband synthesis, not per-band design composition. This is the
+largest planning gap of the four areas: no code, no design doc, one
+roadmap line — and the one that most needs new mathematics.
 
 ### Status
 
-- `src/freq.rs` implements `LowPassMapping` and `BandPassMapping` only.
-  `BandPassMapping`'s inverse takes the positive branch
-  (`freq.rs` `map_normalized_to_hz`).
+- `src/freq.rs` implements `LowPassMapping` and `BandPassMapping` only
+  (`BandPassMapping`'s inverse takes the positive branch).
 - No multi-band mapping, no multi-band approximation, no tests.
-- The vendored benchmark standard has **no** multi-band case family, so
-  there is no external gate to aim at yet.
+- The vendored benchmark standard has **no** multi-band case family —
+  there is no external gate; literature fixtures will have to define the
+  acceptance bar (the fixture tool is `tests/extract_from_pdf.py`).
 
-### Scope decision (needs maintainer input before code)
+### Why generalized Chebyshev cannot do this
 
-Multi-band has two fundamentally different targets, and the plan branches
-on which one is wanted:
+The shipped approximation family represents one lowpass prototype (one
+passband, stopband zeros) mapped to a band. A K-passband spec needs an
+approximation with **K equiripple passbands and 2K−1+ stopbands**, i.e. a
+different E(s)/F(s) structure. Two candidate routes (the design doc
+C0 must decide between them before any code):
 
-- **C-scope-1 — "multi-band" = several passbands in one filter** (true
-  multi-band, e.g. comb-line or step-impedance resonator response). This
-  requires a new approximation family — generalized Chebyshev cannot
-  represent multi-passband specs. This is a research-grade item and
-  belongs in `approx` as a new family (the todo.md
-  "Butterworth/Elliptic families" slot is the right home for a second
-  family too).
-- **C-scope-2 — "multi-band" = design convenience for several unrelated
-  bands** (design N separate filters, cascade/combine their responses).
-  This is pure composition of existing machinery: per-band
-  `FilterDesign` + a `freq` multi-grid + response combination. Small.
+- **C-route-α — multi-band Chebyshev approximation.** Equiripple in each
+  band via a product of per-band band-Chebyshev factors
+  (∏ over bands of the band mapping's (1+s²)-type term), with the
+  characteristic polynomial's zeros placed in every stopband. Yields a
+  Cameron-style transversal ladder: each stopband gap contributes
+  transmission zeros, so a 2-band filter already carries inter-band TZs.
+  Pro: reuses `MatrixSynthesisEngine` if the output is expressed as a
+  `PolynomialSet`; consistent with the crate's model. Con: the
+  inter-band TZs are *passband* zeros relative to the per-band
+  prototypes — this is the direct, large-scale application of E1
+  (passband TZ handling), which must therefore be designed together
+  with C, not after it.
+- **C-route-β — step-impedance-resonator / comb-line ladder.** Classical
+  multi-band topology; per-band impedance levels set by the band
+  Chebyshev ladder; response is a rational function with known zeros.
+  Pro: literature is deep and each band's behavior is independently
+  verifiable. Con: the synthesis route is not the residue-expansion
+  engine (it is impedance-level extraction), so it is a genuinely new
+  `synthesis` path with its own verification surface.
 
-**Recommended sequence (defaulting to C-scope-2, C-scope-1 deferred):**
+### Work items (ordered)
 
-1. **C1 — Multi-band frequency mapping.** `MultiBandMapping` in `freq`:
-   a list of `(center_hz, bandwidth_hz)` bands; forward map is piecewise
-   (each physical band edge maps to ±1 in its own normalized domain),
-   inverse is band-local. Tests: round-trip per band, band-edge
-   consistency with the existing `edges_to_center_bandwidth` geometric-mean
-   convention (S4 invariant).
-2. **C2 — Multi-band response composition.** A
-   `MultiBandResponse` helper (in `response` or a new `src/multiband.rs`)
-   that evaluates per-band `FilterDesign`s on a shared physical grid and
-   composes them; document the composition law (independent filters →
-   sum of through-couplings at the common port, mirroring B1's model).
-3. **C3 — Design doc for C-scope-1** (only if the maintainer wants true
-   multi-band synthesis): a `docs/internal/multi-band-synthesis-design.md`
-   covering the resonator topology, the approximation family, and the
-   synthesis route — written before any code, the way
-   `docs/multiplexer-synthesis.md` was.
+1. **C0 — Design doc (gate for everything else).** Write
+   `docs/internal/multi-band-synthesis-design.md` *before any code*, the
+   way `docs/multiplexer-synthesis.md` was: the chosen route (α or β) with
+   the math, the spec structure (`MultiBandSpec`: per-band
+   `{center_hz, bandwidth_hz, return_loss_db}` + out-of-band rejection
+   requirements), the TZ placement law (which zeros in which gap, and the
+   per-band passband-zero analysis that E1 must cover), the target matrix
+   topology, and a 2-band reference design from the literature as the
+   first acceptance fixture.
+2. **C1 — `MultiBandMapping` in `freq`.** A list of `(center_hz,
+   bandwidth_hz)` bands; forward map piecewise (each band's physical
+   edges map to ±1 in its own normalized domain), inverse band-local.
+   Tests: per-band round-trip; band-edge consistency with
+   `edges_to_center_bandwidth`'s geometric-mean convention (S4
+   invariant). Independent of the C0 route decision — safe to start in
+   parallel.
+3. **C2 — Approximation + synthesis (route-dependent).** Per C0:
+   route-α → new family in `approx` (candidate `approx/multi_band.rs`)
+   producing a `PolynomialSet`-shaped output so `MatrixSynthesisEngine`
+   is reused; route-β → new impedance-level extraction path in
+   `synthesis`. Either way: 2-band first (3-band is the extension
+   check), with the literature fixture from C0 as the RED→GREEN anchor.
+4. **C3 — Verification surface.** Response invariance checks per band
+   (each band's response must match its standalone equiripple spec to
+   within the ripple tolerance), stopband rejection assertions in every
+   gap, and an example in `examples/` rendering the multi-band response.
 
-**Acceptance (C1+C2 done):** `MultiBandMapping` round-trip tests green;
-a 2-band example in `examples/` produces per-band specs that match their
-standalone `FilterDesign` counterparts; `docs/architecture.md` module list
-updated.
+**Acceptance (section done):** C0 doc reviewed and route committed;
+C1 round-trip tests green; a 2-band design reproduces the C0 literature
+fixture (all couplings within 1e-4 relative, per-band ripple within the
+spec); `docs/architecture.md` module list and Known Limitations updated
+(item "multi-band" removed from the roadmap table).
 
 ---
 
@@ -267,13 +293,15 @@ doctests; `docs/numerical-optimization-report.md` gains a short
 
 ---
 
-## E. Cross-cutting numeric enablers (blockers for A/B)
+## E. Cross-cutting numeric enablers (blockers for A/B, and C via route-α)
 
 Ordered by how much they block the areas above:
 
 1. **Passband transmission zeros (`|zero| < 1`).** Blocks high-fidelity
    duplexer/multiplexer designs where TZs land in-band after the N-channel
-   perturbation shifts the roots. Work: complex-zero handling in
+   perturbation shifts the roots — and is a hard dependency of multi-band
+   route-α (section C), whose inter-band TZs are passband zeros relative to
+   the per-band prototypes. Work: complex-zero handling in
    `generalized_ops.rs` (relax `safe_sqrt_term`), plus the spec-layer
    decision — today `FilterSpec` *accepts* `|z| < 1` (see
    `spec/types.rs` test storing 0.75) and the rejection is deferred to the
@@ -295,12 +323,12 @@ Ordered by how much they block the areas above:
 ## Suggested execution order
 
 ```
-Wave 1 (parallel):  E3 (HP/BS maps) · E4 (N=8 regression) · D1-opt (RED)
+Wave 1 (parallel):  E3 (HP/BS maps) · E4 (N=8 regression) · D1-opt (RED) · C1 (MultiBandMapping)
 Wave 2 (serial):    D1–D4 (duplexer full path)  ← critical path for B
-Wave 3 (parallel):  D2–D4-opt (optimizer) · C1–C2 (multi-band scope-2)
+Wave 3 (parallel):  D2–D4-opt (optimizer) · C0 (multi-band design doc + route choice)
 Wave 4 (serial):    B1 → B2 → B3 → B4 (multiplexer; needs Wave 2)
-Wave 5:             E1 (passband TZ) · E2 (Laurent) — as B3's fidelity work
-                    starts to need them; C3 (scope-1 design doc) if chosen
+Wave 5:             E1 (passband TZ) · E2 (Laurent) — needed by B3's fidelity work and
+                    by C2 when route-α is chosen (inter-band TZs); then C2 → C3
 ```
 
 Rationale: the duplexer full path (Wave 2) is the only item on the critical

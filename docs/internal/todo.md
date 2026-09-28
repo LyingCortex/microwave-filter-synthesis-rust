@@ -50,6 +50,10 @@ section should be released as the next version tag when the maintainer cuts it.
 
 ### Medium priority (engineering quality)
 
+- **Multi-band synthesis (scope-1, decided 2026-09-29)** — true
+  multi-passband synthesis, not per-band composition. Design doc first
+  (`docs/internal/multi-band-synthesis-design.md`); sequencing and
+  acceptance in `docs/continuation-plan.md` section C.
 - **HighPass / BandStop frequency mappings** — `freq` currently supports
   LowPass and BandPass only.
 - **Fold the duplexer synthesis into the multiplexer (N=2)** — the
@@ -69,7 +73,6 @@ section should be released as the next version tag when the maintainer cuts it.
 ### Low priority (ecosystem)
 
 - **Butterworth / Elliptic approximation families** in `approx`.
-- **Multi-band frequency mapping**.
 - **Real Wheel topology transform** — `transform/wheel.rs` is still an alias
   of the Arrow reduction path (deprecated enum variant).
 - **Docs.rs polish** — more doc examples on the module APIs (crate docs and

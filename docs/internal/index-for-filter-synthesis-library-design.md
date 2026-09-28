@@ -127,7 +127,8 @@ This path is best if your first question is:
 - [Current Code Architecture Review 2026-09-25](./architecture-review-2026-09-25.md) — *(current)*
 - [Continuation Plan](../continuation-plan.md) — *(current, 2026-09-28)*
   Next steps for duplexer (full Macchiarella path), multiplexer (N+1-port
-  response, N-channel fidelity), multi-band (mapping + composition), and
+  response, N-channel fidelity), multi-band (true multi-passband synthesis,
+  scope-1), and
   optimization (LM tune/extract), with acceptance criteria and sequencing.
 - [Development Guide](./development-guide.md) — *(mostly current)*
   Build/test/doc workflow for contributors.

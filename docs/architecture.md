@@ -551,6 +551,9 @@ let context = run_full_pipeline(request)?;
 
 ## Future Roadmap
 
+Worked plan with sequencing and acceptance criteria:
+`docs/continuation-plan.md`.
+
 | Phase | Feature | Priority |
 |-------|---------|----------|
 | Next | Passband transmission zeros | High |
@@ -558,7 +561,7 @@ let context = run_full_pipeline(request)?;
 | Next | Converge the full Macchiarella spectral path (order ≥ 4) for high-fidelity N-channel loading | High |
 | Later | HighPass/BandStop frequency mappings | Medium |
 | Later | Butterworth/Elliptic approximation families | Low |
-| Later | Multi-band frequency mapping | Low |
+| Later | Multi-band synthesis (true multi-passband, scope-1) — design doc first | Medium |
 
 > Touchstone export, Python bindings, and criterion benchmarks are already
 > implemented (see `src/touchstone.rs`, `src/python.rs`, `benches/`).
