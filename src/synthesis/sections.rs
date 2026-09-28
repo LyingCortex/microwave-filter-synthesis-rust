@@ -7,8 +7,7 @@ use crate::transform::{
     extract_quadruplet_section_with_response_check, extract_triplet_section,
     extract_triplet_section_matrix, extract_triplet_section_with_response_check,
     extract_trisection_section, extract_trisection_section_matrix,
-    extract_trisection_section_with_response_check, QuadrupletExtraction,
-    SectionTransformOutcome,
+    extract_trisection_section_with_response_check, QuadrupletExtraction, SectionTransformOutcome,
 };
 use crate::verify::ResponseTolerance;
 
@@ -120,12 +119,7 @@ impl SectionSynthesis {
         tolerance: ResponseTolerance,
     ) -> Result<SectionTransformOutcome> {
         let canonical = self.synthesize_canonical_matrix(polynomials)?;
-        extract_quadruplet_section_with_response_check(
-            &canonical,
-            extraction,
-            grid,
-            tolerance,
-        )
+        extract_quadruplet_section_with_response_check(&canonical, extraction, grid, tolerance)
     }
 
     /// Synthesizes a matrix and pulls one trisection into the requested resonator window.

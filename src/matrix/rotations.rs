@@ -10,7 +10,12 @@ pub(crate) enum RotationAxis {
 }
 
 #[allow(dead_code)]
-pub(crate) fn rotation_matrix_basic(order: usize, theta: f64, row: usize, col: usize) -> Result<CouplingMatrix> {
+pub(crate) fn rotation_matrix_basic(
+    order: usize,
+    theta: f64,
+    row: usize,
+    col: usize,
+) -> Result<CouplingMatrix> {
     let mut rotation = CouplingMatrix::identity(order)?;
     let cosine = theta.cos();
     let sine = theta.sin();
@@ -33,9 +38,12 @@ pub(crate) fn safe_angle(y: f64, x: f64) -> f64 {
     }
 }
 
-pub(crate) fn diagonal_rotation_angle(matrix: &CouplingMatrix, index_a: usize, index_b: usize) -> f64 {
-    let diagonal_delta = matrix.get(index_b, index_b)
-        - matrix.get(index_a, index_a);
+pub(crate) fn diagonal_rotation_angle(
+    matrix: &CouplingMatrix,
+    index_a: usize,
+    index_b: usize,
+) -> f64 {
+    let diagonal_delta = matrix.get(index_b, index_b) - matrix.get(index_a, index_a);
     if diagonal_delta.abs() < 1e-10 {
         0.0
     } else {

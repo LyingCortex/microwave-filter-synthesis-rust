@@ -2,9 +2,8 @@ use crate::error::Result;
 use crate::freq::FrequencyGrid;
 use crate::matrix::CouplingMatrix;
 use crate::verify::{
-    verify_quadruplet_extraction, verify_triplet_extraction,
-    verify_trisection_extraction, MatrixPatternTolerance, ResponseCheckReport,
-    ResponseTolerance, SectionVerificationReport,
+    verify_quadruplet_extraction, verify_triplet_extraction, verify_trisection_extraction,
+    MatrixPatternTolerance, ResponseCheckReport, ResponseTolerance, SectionVerificationReport,
 };
 
 use super::attach_response_invariance_check;

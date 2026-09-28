@@ -23,8 +23,7 @@ fn main() -> Result<()> {
     let output_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("docs")
         .join("quickstart_report_output.md");
-    let report =
-        render_markdown_synthesis_report(&spec, &synthesis, &transform, &response, false)?;
+    let report = render_markdown_synthesis_report(&spec, &synthesis, &transform, &response, false)?;
     fs::write(&output_path, report).map_err(|error| {
         MfsError::PreconditionViolation(format!(
             "failed to write quickstart report {}: {error}",
@@ -32,6 +31,9 @@ fn main() -> Result<()> {
         ))
     })?;
 
-    println!("quickstart markdown report written to {}", output_path.display());
+    println!(
+        "quickstart markdown report written to {}",
+        output_path.display()
+    );
     Ok(())
 }

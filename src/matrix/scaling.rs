@@ -43,7 +43,8 @@ impl CouplingMatrix {
         let fractional_bw = mapping.bandwidth_hz() / mapping.center_hz();
         let source_coupling = self.get(0, 1);
         let load_coupling = self.get(self.order(), self.side() - 1);
-        let source_external_q = external_q_from_normalized_coupling(source_coupling, fractional_bw)?;
+        let source_external_q =
+            external_q_from_normalized_coupling(source_coupling, fractional_bw)?;
         let load_external_q = external_q_from_normalized_coupling(load_coupling, fractional_bw)?;
 
         matrix_hz.set_entry(0, 1, source_external_q);
@@ -111,7 +112,11 @@ fn denormalize_resonator_frequency(normalized: f64, center_hz: f64, bandwidth_hz
             - normalized * fractional_bw / 2.0)
 }
 
-fn normalize_resonator_frequency(physical_hz: f64, center_hz: f64, bandwidth_hz: f64) -> Result<f64> {
+fn normalize_resonator_frequency(
+    physical_hz: f64,
+    center_hz: f64,
+    bandwidth_hz: f64,
+) -> Result<f64> {
     if !physical_hz.is_finite() || physical_hz <= 0.0 {
         return Err(MfsError::InvalidFrequency(format!(
             "physical resonator frequency must be > 0, got {physical_hz}"

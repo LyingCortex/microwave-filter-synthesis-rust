@@ -11,7 +11,7 @@
 use crate::approx::ComplexPolynomial;
 use crate::error::{MfsError, Result};
 use num_complex::Complex64;
-use rustfft::{FftPlanner, num_complex::Complex as FftComplex};
+use rustfft::{num_complex::Complex as FftComplex, FftPlanner};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Cepstrum-based spectral factorization
@@ -69,10 +69,8 @@ pub fn cepstrum_spectral_factor(
 
     // Step 3: Compute real cepstrum via IFFT
     // Convert to complex for FFT
-    let mut fft_input: Vec<FftComplex<f64>> = log_r
-        .iter()
-        .map(|&x| FftComplex::new(x, 0.0))
-        .collect();
+    let mut fft_input: Vec<FftComplex<f64>> =
+        log_r.iter().map(|&x| FftComplex::new(x, 0.0)).collect();
 
     let mut planner = FftPlanner::new();
     let ifft = planner.plan_fft_inverse(n_fft);
@@ -239,14 +237,20 @@ fn select_lhp_roots(all_roots: &[Complex64], target_count: usize) -> Vec<Complex
     // Sort by real part
     let mut indices: Vec<usize> = (0..all_roots.len()).collect();
     indices.sort_by(|&a, &b| {
-        all_roots[a].re.partial_cmp(&all_roots[b].re)
+        all_roots[a]
+            .re
+            .partial_cmp(&all_roots[b].re)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     // Take roots from LHP first
     for &idx in &indices {
-        if used[idx] { continue; }
-        if stable.len() >= target_count { break; }
+        if used[idx] {
+            continue;
+        }
+        if stable.len() >= target_count {
+            break;
+        }
 
         let root = all_roots[idx];
         if !root.re.is_finite() || !root.im.is_finite() {
@@ -260,7 +264,9 @@ fn select_lhp_roots(all_roots: &[Complex64], target_count: usize) -> Vec<Complex
 
             // Mark mirror partner (-conj(z)) as used
             for &j in &indices {
-                if used[j] { continue; }
+                if used[j] {
+                    continue;
+                }
                 let mirror = all_roots[j];
                 if (mirror.re + root.re).abs() < 1e-6 * (1.0 + root.re.abs())
                     && (mirror.im + root.im).abs() < 1e-6 * (1.0 + root.im.abs())
@@ -275,8 +281,12 @@ fn select_lhp_roots(all_roots: &[Complex64], target_count: usize) -> Vec<Complex
     // Handle imaginary axis roots
     if stable.len() < target_count {
         for &idx in &indices {
-            if used[idx] { continue; }
-            if stable.len() >= target_count { break; }
+            if used[idx] {
+                continue;
+            }
+            if stable.len() >= target_count {
+                break;
+            }
 
             let root = all_roots[idx];
             if root.re.abs() <= 1e-12 && root.re.is_finite() && root.im.is_finite() {
@@ -284,7 +294,9 @@ fn select_lhp_roots(all_roots: &[Complex64], target_count: usize) -> Vec<Complex
                 used[idx] = true;
                 // Mark conjugate pair
                 for &j in &indices {
-                    if used[j] { continue; }
+                    if used[j] {
+                        continue;
+                    }
                     let m = all_roots[j];
                     if (m.re.abs()) <= 1e-10
                         && (m.im + root.im).abs() < 1e-6 * (1.0 + root.im.abs())
@@ -299,13 +311,16 @@ fn select_lhp_roots(all_roots: &[Complex64], target_count: usize) -> Vec<Complex
 
     // Fill remaining with closest-to-LHP roots
     if stable.len() < target_count {
-        let mut remaining: Vec<(usize, f64)> = indices.iter()
+        let mut remaining: Vec<(usize, f64)> = indices
+            .iter()
             .filter(|&&i| !used[i] && all_roots[i].re.is_finite())
             .map(|&i| (i, all_roots[i].re))
             .collect();
         remaining.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
         for (idx, _) in remaining {
-            if stable.len() >= target_count { break; }
+            if stable.len() >= target_count {
+                break;
+            }
             stable.push(all_roots[idx]);
         }
     }
@@ -364,7 +379,7 @@ mod tests {
     fn cepstrum_factors_simple_polynomial() -> Result<()> {
         // R(s) = (s+1)(s-1)(-s+1)(-s-1) = (1-s²)(1-s²) = (1-s²)²
         // But in s-domain: R(s) = D(s)*D*(-s) where D(s) = s+1 (degree 1)
-        // Actually: (s+1)*(-s+1) = -(s²-1) = 1-s²... 
+        // Actually: (s+1)*(-s+1) = -(s²-1) = 1-s²...
         //
         // Simpler: R(s) = (s+1)(-s+1) = 1 - s² evaluated as poly:
         // coefficients [1, 0, -1] in ascending power
@@ -383,8 +398,11 @@ mod tests {
 
         // D should have root at s = -1 (LHP)
         let roots = d.roots()?;
-        assert!((roots[0].re + 1.0).abs() < 0.1 || (roots[0].re - (-1.0)).abs() < 0.1,
-            "Root should be near -1, got {:.4}", roots[0]);
+        assert!(
+            (roots[0].re + 1.0).abs() < 0.1 || (roots[0].re - (-1.0)).abs() < 0.1,
+            "Root should be near -1, got {:.4}",
+            roots[0]
+        );
 
         Ok(())
     }

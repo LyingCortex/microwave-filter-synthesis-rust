@@ -86,10 +86,7 @@ impl CouplingMatrix {
                 matrix.get(tail - 3, tail - 2),
             )
         } else {
-            safe_angle(
-                matrix.get(tail, tail - 2),
-                matrix.get(tail - 1, tail),
-            )
+            safe_angle(matrix.get(tail, tail - 2), matrix.get(tail - 1, tail))
         };
 
         let cosine = theta.cos();
@@ -240,7 +237,7 @@ impl CouplingMatrix {
         // Classify z_locs into CQ pairs and CT singles
         // span=3 → quadruplet diagonal, span=2 → trisection
         let mut quad_indices: Vec<(usize, usize, usize)> = Vec::new(); // (zero_idx, start, end)
-        let mut tri_indices: Vec<(usize, usize, usize)> = Vec::new();  // (zero_idx, start, end)
+        let mut tri_indices: Vec<(usize, usize, usize)> = Vec::new(); // (zero_idx, start, end)
 
         for (i, z) in z_locs.iter().enumerate() {
             let span = z[1].abs_diff(z[0]);
@@ -249,9 +246,12 @@ impl CouplingMatrix {
             match span {
                 3 => quad_indices.push((i, start, end)),
                 2 => tri_indices.push((i, start, end)),
-                _ => return Err(MfsError::InvalidTransmissionZero(
-                    format!("z_loc[{}]=[{},{}] has invalid span {}. Must be 2 (CT) or 3 (CQ).", i, z[0], z[1], span)
-                )),
+                _ => {
+                    return Err(MfsError::InvalidTransmissionZero(format!(
+                        "z_loc[{}]=[{},{}] has invalid span {}. Must be 2 (CT) or 3 (CQ).",
+                        i, z[0], z[1], span
+                    )))
+                }
             }
         }
 
@@ -264,7 +264,9 @@ impl CouplingMatrix {
             // Find matching trisection within this quadruplet range
             let mut partner = None;
             for (ti, &(t_zero_idx, t_start, t_end)) in tri_indices.iter().enumerate() {
-                if used_tri[ti] { continue; }
+                if used_tri[ti] {
+                    continue;
+                }
                 if t_start >= q_start && t_end <= _q_end {
                     partner = Some((ti, t_zero_idx, t_start));
                     break;
@@ -276,9 +278,10 @@ impl CouplingMatrix {
                 let common_res = if t_start == q_start { 1 } else { 4 };
                 cq_ops.push((zeros[t_zero_idx], zeros[q_zero_idx], position, common_res));
             } else {
-                return Err(MfsError::InvalidTransmissionZero(
-                    format!("Quadruplet ({},{}) has no matching trisection partner", q_start, _q_end)
-                ));
+                return Err(MfsError::InvalidTransmissionZero(format!(
+                    "Quadruplet ({},{}) has no matching trisection partner",
+                    q_start, _q_end
+                )));
             }
         }
 
@@ -402,7 +405,11 @@ impl CouplingMatrix {
         let theta = if denom.abs() > 1e-12 {
             -0.5 * (2.0 * mij / denom).atan()
         } else {
-            if mij > 0.0 { -std::f64::consts::FRAC_PI_4 } else { std::f64::consts::FRAC_PI_4 }
+            if mij > 0.0 {
+                -std::f64::consts::FRAC_PI_4
+            } else {
+                std::f64::consts::FRAC_PI_4
+            }
         };
 
         matrix.apply_givens_similarity_inplace(i, j, theta.cos(), theta.sin());
@@ -414,11 +421,7 @@ impl CouplingMatrix {
     /// Each span is [start, end] with end-start=3.
     // kept: real algorithm, not yet wired to a topology path (see P7 dead-code policy)
     #[allow(dead_code)]
-    pub(crate) fn extract_box_sections(
-        &self,
-        zeros: &[f64],
-        spans: &[[usize; 2]],
-    ) -> Result<Self> {
+    pub(crate) fn extract_box_sections(&self, zeros: &[f64], spans: &[[usize; 2]]) -> Result<Self> {
         if zeros.len() != spans.len() {
             return Err(MfsError::DimensionMismatch {
                 expected: zeros.len(),
@@ -427,7 +430,8 @@ impl CouplingMatrix {
         }
         let mut matrix = self.clone();
         // Process from high position to low (tail first)
-        let mut ops: Vec<(f64, usize)> = zeros.iter()
+        let mut ops: Vec<(f64, usize)> = zeros
+            .iter()
             .zip(spans.iter())
             .map(|(&z, s)| (z, s[0].min(s[1])))
             .collect();

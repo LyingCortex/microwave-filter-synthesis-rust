@@ -1,5 +1,5 @@
 use mfs::prelude::*;
-use mfs::touchstone::{self, FreqUnit, DataFormat, TouchstoneConfig};
+use mfs::touchstone::{self, DataFormat, FreqUnit, TouchstoneConfig};
 
 #[test]
 fn export_bandpass_to_touchstone_string() -> Result<()> {
@@ -54,7 +54,12 @@ fn save_and_read_roundtrip() -> Result<()> {
     // Compare S21 magnitudes
     for (orig, read) in response.samples.iter().zip(loaded.samples.iter()) {
         let diff = (orig.s21_mag() - read.s21_mag()).abs();
-        assert!(diff < 1e-6, "S21 mismatch: orig={}, read={}", orig.s21_mag(), read.s21_mag());
+        assert!(
+            diff < 1e-6,
+            "S21 mismatch: orig={}, read={}",
+            orig.s21_mag(),
+            read.s21_mag()
+        );
     }
 
     std::fs::remove_file(tmp).ok();
@@ -124,9 +129,11 @@ fn build_network_roundtrip_in_memory() -> Result<()> {
     assert_eq!(net.rank, 2);
     assert!(net.f.len() > 100); // default_response is a 201-point sweep
 
-    let text = net.to_touchstone_string().expect("serialize network to text");
-    let reparsed = ::touchstone::Network::from_str("roundtrip.s2p", &text)
-        .expect("parse network text back");
+    let text = net
+        .to_touchstone_string()
+        .expect("serialize network to text");
+    let reparsed =
+        ::touchstone::Network::from_str("roundtrip.s2p", &text).expect("parse network text back");
     assert_eq!(reparsed.rank, 2);
     assert_eq!(reparsed.f.len(), net.f.len());
     for i in [0, reparsed.f.len() / 2, reparsed.f.len() - 1] {
@@ -145,7 +152,9 @@ fn build_network_roundtrip_in_memory() -> Result<()> {
 #[test]
 fn build_network_rejects_empty_response() {
     use mfs::response::SParameterResponse;
-    let empty = SParameterResponse { samples: Vec::new() };
+    let empty = SParameterResponse {
+        samples: Vec::new(),
+    };
     let err = mfs::touchstone::build_network(&empty, 50.0).unwrap_err();
     assert!(matches!(err, mfs::MfsError::PreconditionViolation(_)));
 }
@@ -255,7 +264,10 @@ fn cascade_rejects_per_port_reference_impedance() {
                 [End]\n";
     let a = ::touchstone::Network::from_str("a.s2p", text).expect("parses per-port R network");
     assert!(
-        matches!(a.reference_impedance(), ::touchstone::ReferenceImpedance::PerPort(_)),
+        matches!(
+            a.reference_impedance(),
+            ::touchstone::ReferenceImpedance::PerPort(_)
+        ),
         "test setup: expected PerPort impedance"
     );
     let err = mfs::touchstone::cascade(&a, &a).unwrap_err();
@@ -271,7 +283,8 @@ fn filter_design_to_touchstone_builder() -> Result<()> {
         .zeros_hz([6.4e9, 7.0e9])
         .synthesize()?;
 
-    let content = design.to_touchstone()
+    let content = design
+        .to_touchstone()
         .freq_unit(FreqUnit::GHz)
         .format(DataFormat::DB)
         .comment("Custom comment")

@@ -291,25 +291,20 @@ mod tests {
 
     #[test]
     fn spec_validates_return_loss() {
-        let error = NormalizedFilterSpec::new(4, 0.0)
-            .expect_err("return loss must be positive");
+        let error = NormalizedFilterSpec::new(4, 0.0).expect_err("return loss must be positive");
         assert!(matches!(error, MfsError::InvalidReturnLoss { .. }));
     }
 
     #[test]
     fn spec_can_store_out_of_band_attenuation_and_unloaded_q() -> Result<()> {
-        let out_of_band_attenuation = OutOfBandAttenuationSpec::new([
-            OutOfBandAttenuationWindow::new(7.0e9, 7.2e9, 40.0)?,
-        ]);
+        let out_of_band_attenuation =
+            OutOfBandAttenuationSpec::new([OutOfBandAttenuationWindow::new(7.0e9, 7.2e9, 40.0)?]);
         let spec = NormalizedFilterSpec::new(5, 22.0)?
             .with_unloaded_q(3500.0)
             .with_out_of_band_attenuation(out_of_band_attenuation.clone());
 
         assert_eq!(spec.unloaded_q, Some(3500.0));
-        assert_eq!(
-            spec.out_of_band_attenuation,
-            Some(out_of_band_attenuation)
-        );
+        assert_eq!(spec.out_of_band_attenuation, Some(out_of_band_attenuation));
         Ok(())
     }
 }

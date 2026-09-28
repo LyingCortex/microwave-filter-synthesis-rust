@@ -65,12 +65,8 @@ pub fn synthesize_admittance_polynomials(
         complex_from_real(-1.0)
     };
 
-    let conjugated_e = e_normalized
-        .alternating_conjugate()?
-        .scale(parity_sign)?;
-    let conjugated_f = f_over_eps_r
-        .alternating_conjugate()?
-        .scale(parity_sign)?;
+    let conjugated_e = e_normalized.alternating_conjugate()?.scale(parity_sign)?;
+    let conjugated_f = f_over_eps_r.alternating_conjugate()?.scale(parity_sign)?;
 
     let denominator = e_normalized
         .add(&f_over_eps_r)?

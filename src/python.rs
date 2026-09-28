@@ -23,8 +23,8 @@
 //! m = design.scaled_matrix()
 //! ```
 
-use pyo3::prelude::*;
 use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
 
 use crate::design::FilterDesign;
 use crate::matrix::CouplingMatrix;
@@ -90,13 +90,19 @@ impl PyFilterDesign {
 
     /// Returns the folded coupling matrix as a 2D list.
     fn folded(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let m = self.inner.to_folded().map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let m = self
+            .inner
+            .to_folded()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(matrix_to_pylist(py, &m))
     }
 
     /// Returns the arrow coupling matrix as a 2D list.
     fn arrow(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let m = self.inner.to_arrow().map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let m = self
+            .inner
+            .to_arrow()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(matrix_to_pylist(py, &m))
     }
 
@@ -104,10 +110,14 @@ impl PyFilterDesign {
     /// positions: list of [from_node, to_node] pairs (1-indexed resonator numbers).
     #[pyo3(signature = (positions))]
     fn ct(&self, py: Python<'_>, positions: Vec<[usize; 2]>) -> PyResult<PyObject> {
-        let arrow = self.inner.to_arrow().map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let arrow = self
+            .inner
+            .to_arrow()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
         let zeros = self.inner.transmission_zeros_normalized();
         let pos: Vec<(usize, usize)> = positions.iter().map(|p| (p[0], p[1])).collect();
-        let m = arrow.extract_cascade_trisections(&zeros, &pos)
+        let m = arrow
+            .extract_cascade_trisections(&zeros, &pos)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(matrix_to_pylist(py, &m))
     }
@@ -116,9 +126,13 @@ impl PyFilterDesign {
     /// z_locs: list of [from, to] pairs. span=2 for trisection, span=3 for quadruplet diagonal.
     #[pyo3(signature = (z_locs))]
     fn cq(&self, py: Python<'_>, z_locs: Vec<[usize; 2]>) -> PyResult<PyObject> {
-        let arrow = self.inner.to_arrow().map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let arrow = self
+            .inner
+            .to_arrow()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
         let zeros = self.inner.transmission_zeros_normalized();
-        let m = arrow.extract_cascade_quadruplets(&zeros, &z_locs)
+        let m = arrow
+            .extract_cascade_quadruplets(&zeros, &z_locs)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(matrix_to_pylist(py, &m))
     }
@@ -127,16 +141,23 @@ impl PyFilterDesign {
     /// spans: list of [start, end] pairs with end-start=3, one per zero.
     #[pyo3(signature = (spans))]
     fn box_topology(&self, py: Python<'_>, spans: Vec<[usize; 2]>) -> PyResult<PyObject> {
-        let arrow = self.inner.to_arrow().map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let arrow = self
+            .inner
+            .to_arrow()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
         let zeros = self.inner.transmission_zeros_normalized();
-        let m = arrow.extract_box_sections(&zeros, &spans)
+        let m = arrow
+            .extract_box_sections(&zeros, &spans)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(matrix_to_pylist(py, &m))
     }
 
     /// Returns the band-pass scaled matrix as a 2D list.
     fn scaled_matrix(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let m = self.inner.scale().map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let m = self
+            .inner
+            .scale()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(matrix_to_pylist(py, &m))
     }
 
@@ -150,7 +171,12 @@ impl PyFilterDesign {
     /// For bandpass designs: `response(start_hz, stop_hz, points)`
     /// For prototype designs: `response(start, stop, points)`
     #[pyo3(signature = (start=None, stop=None, points=201))]
-    fn response(&self, start: Option<f64>, stop: Option<f64>, points: usize) -> PyResult<(Vec<f64>, Vec<f64>, Vec<f64>)> {
+    fn response(
+        &self,
+        start: Option<f64>,
+        stop: Option<f64>,
+        points: usize,
+    ) -> PyResult<(Vec<f64>, Vec<f64>, Vec<f64>)> {
         let resp = match (start, stop) {
             (Some(s), Some(e)) => {
                 if self.inner.center_hz().is_some() {
@@ -178,7 +204,13 @@ impl PyFilterDesign {
     /// s21_phase, s11_phase, group_delay (float, or None where the solver path
     /// does not compute group delay).
     #[pyo3(signature = (start=None, stop=None, points=201))]
-    fn response_full(&self, py: Python<'_>, start: Option<f64>, stop: Option<f64>, points: usize) -> PyResult<PyObject> {
+    fn response_full(
+        &self,
+        py: Python<'_>,
+        start: Option<f64>,
+        stop: Option<f64>,
+        points: usize,
+    ) -> PyResult<PyObject> {
         use pyo3::types::PyDict;
 
         let resp = match (start, stop) {
@@ -193,18 +225,22 @@ impl PyFilterDesign {
         };
         let resp = resp.map_err(|e| PyValueError::new_err(e.to_string()))?;
 
-        let result: Vec<_> = resp.samples.iter().map(|s| {
-            let dict = PyDict::new(py);
-            dict.set_item("freq", s.frequency_hz).unwrap();
-            dict.set_item("s21_db", s.s21_db()).unwrap();
-            dict.set_item("s11_db", s.s11_db()).unwrap();
-            dict.set_item("s21_mag", s.s21_mag()).unwrap();
-            dict.set_item("s11_mag", s.s11_mag()).unwrap();
-            dict.set_item("s21_phase", s.s21_phase_deg()).unwrap();
-            dict.set_item("s11_phase", s.s11_phase_deg()).unwrap();
-            dict.set_item("group_delay", s.group_delay).unwrap();
-            dict.into()
-        }).collect::<Vec<PyObject>>();
+        let result: Vec<_> = resp
+            .samples
+            .iter()
+            .map(|s| {
+                let dict = PyDict::new(py);
+                dict.set_item("freq", s.frequency_hz).unwrap();
+                dict.set_item("s21_db", s.s21_db()).unwrap();
+                dict.set_item("s11_db", s.s11_db()).unwrap();
+                dict.set_item("s21_mag", s.s21_mag()).unwrap();
+                dict.set_item("s11_mag", s.s11_mag()).unwrap();
+                dict.set_item("s21_phase", s.s21_phase_deg()).unwrap();
+                dict.set_item("s11_phase", s.s11_phase_deg()).unwrap();
+                dict.set_item("group_delay", s.group_delay).unwrap();
+                dict.into()
+            })
+            .collect::<Vec<PyObject>>();
 
         Ok({
             use pyo3::types::PyList;
@@ -238,8 +274,14 @@ impl PyFilterDesign {
 
     /// Returns the Touchstone-formatted string.
     #[pyo3(signature = (freq_unit="GHz", format="RI", impedance=50.0, version=1))]
-    fn to_touchstone(&self, freq_unit: &str, format: &str, impedance: f64, version: u8) -> PyResult<String> {
-        use crate::touchstone::{FreqUnit, DataFormat, TouchstoneVersion, TouchstoneConfig};
+    fn to_touchstone(
+        &self,
+        freq_unit: &str,
+        format: &str,
+        impedance: f64,
+        version: u8,
+    ) -> PyResult<String> {
+        use crate::touchstone::{DataFormat, FreqUnit, TouchstoneConfig, TouchstoneVersion};
 
         let fu = match freq_unit.to_uppercase().as_str() {
             "HZ" => FreqUnit::Hz,
@@ -252,11 +294,23 @@ impl PyFilterDesign {
             "DB" => DataFormat::DB,
             "RI" | _ => DataFormat::RI,
         };
-        let ver = if version >= 2 { TouchstoneVersion::V2 } else { TouchstoneVersion::V1 };
+        let ver = if version >= 2 {
+            TouchstoneVersion::V2
+        } else {
+            TouchstoneVersion::V1
+        };
 
-        let response = self.inner.default_response()
+        let response = self
+            .inner
+            .default_response()
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        let mut config = TouchstoneConfig { freq_unit: fu, format: df, impedance, version: ver, comments: Vec::new() };
+        let mut config = TouchstoneConfig {
+            freq_unit: fu,
+            format: df,
+            impedance,
+            version: ver,
+            comments: Vec::new(),
+        };
         config.comments = self.inner.auto_comments();
         crate::touchstone::to_touchstone_string(&response, &config)
             .map_err(|e| PyValueError::new_err(e.to_string()))
@@ -264,8 +318,15 @@ impl PyFilterDesign {
 
     /// Saves the Touchstone file to disk.
     #[pyo3(signature = (path, freq_unit="GHz", format="RI", impedance=50.0, version=1))]
-    fn save_touchstone(&self, path: &str, freq_unit: &str, format: &str, impedance: f64, version: u8) -> PyResult<()> {
-        use crate::touchstone::{FreqUnit, DataFormat, TouchstoneVersion, TouchstoneConfig};
+    fn save_touchstone(
+        &self,
+        path: &str,
+        freq_unit: &str,
+        format: &str,
+        impedance: f64,
+        version: u8,
+    ) -> PyResult<()> {
+        use crate::touchstone::{DataFormat, FreqUnit, TouchstoneConfig, TouchstoneVersion};
 
         let fu = match freq_unit.to_uppercase().as_str() {
             "HZ" => FreqUnit::Hz,
@@ -278,11 +339,23 @@ impl PyFilterDesign {
             "DB" => DataFormat::DB,
             _ => DataFormat::RI,
         };
-        let ver = if version >= 2 { TouchstoneVersion::V2 } else { TouchstoneVersion::V1 };
+        let ver = if version >= 2 {
+            TouchstoneVersion::V2
+        } else {
+            TouchstoneVersion::V1
+        };
 
-        let response = self.inner.default_response()
+        let response = self
+            .inner
+            .default_response()
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        let mut config = TouchstoneConfig { freq_unit: fu, format: df, impedance, version: ver, comments: Vec::new() };
+        let mut config = TouchstoneConfig {
+            freq_unit: fu,
+            format: df,
+            impedance,
+            version: ver,
+            comments: Vec::new(),
+        };
         config.comments = self.inner.auto_comments();
         crate::touchstone::write_touchstone(&response, &config, path)
             .map_err(|e| PyValueError::new_err(e.to_string()))
@@ -292,7 +365,13 @@ impl PyFilterDesign {
     ///
     /// Returns (frequencies, s21_db, s11_db).
     #[pyo3(signature = (start, stop, points=201, q=1000.0))]
-    fn response_lossy(&self, start: f64, stop: f64, points: usize, q: f64) -> PyResult<(Vec<f64>, Vec<f64>, Vec<f64>)> {
+    fn response_lossy(
+        &self,
+        start: f64,
+        stop: f64,
+        points: usize,
+        q: f64,
+    ) -> PyResult<(Vec<f64>, Vec<f64>, Vec<f64>)> {
         let resp = if self.inner.center_hz().is_some() {
             self.inner.response_lossy(start, stop, points, q)
         } else {
@@ -323,39 +402,50 @@ impl PyFilterDesign {
         target_s11_im: Vec<f64>,
         max_iter: usize,
     ) -> PyResult<PyObject> {
-        use pyo3::types::PyDict;
-        use crate::response::{ResponseSample, SParameterResponse};
         use crate::freq::FrequencyGrid;
-        use crate::optimize::{OptimizeConfig, optimize_matrix};
+        use crate::optimize::{optimize_matrix, OptimizeConfig};
+        use crate::response::{ResponseSample, SParameterResponse};
+        use pyo3::types::PyDict;
 
         if freqs.len() != target_s21_re.len() {
-            return Err(PyValueError::new_err("all arrays must have the same length"));
+            return Err(PyValueError::new_err(
+                "all arrays must have the same length",
+            ));
         }
 
         let target = SParameterResponse {
-            samples: freqs.iter().enumerate().map(|(i, &f)| ResponseSample {
-                frequency_hz: f,
-                normalized_omega: f,
-                group_delay: None,
-                s11_re: target_s11_re[i],
-                s11_im: target_s11_im[i],
-                s21_re: target_s21_re[i],
-                s21_im: target_s21_im[i],
-            }).collect(),
+            samples: freqs
+                .iter()
+                .enumerate()
+                .map(|(i, &f)| ResponseSample {
+                    frequency_hz: f,
+                    normalized_omega: f,
+                    group_delay: None,
+                    s11_re: target_s11_re[i],
+                    s11_im: target_s11_im[i],
+                    s21_re: target_s21_re[i],
+                    s21_im: target_s21_im[i],
+                })
+                .collect(),
         };
 
         let grid = FrequencyGrid::linspace(
             *freqs.first().unwrap_or(&-2.0),
             *freqs.last().unwrap_or(&2.0),
             freqs.len(),
-        ).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        )
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
-        let config = OptimizeConfig { max_iterations: max_iter, ..Default::default() };
+        let config = OptimizeConfig {
+            max_iterations: max_iter,
+            ..Default::default()
+        };
         let result = optimize_matrix(self.inner.matrix(), &target, &grid, &config)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
         let dict = PyDict::new(py);
-        dict.set_item("matrix", matrix_to_pylist(py, &result.matrix)).unwrap();
+        dict.set_item("matrix", matrix_to_pylist(py, &result.matrix))
+            .unwrap();
         dict.set_item("cost", result.cost).unwrap();
         dict.set_item("iterations", result.iterations).unwrap();
         dict.set_item("converged", result.converged).unwrap();
@@ -396,7 +486,9 @@ fn bandpass(
     if let Some(q_val) = q {
         builder = builder.unloaded_q(q_val);
     }
-    let inner = builder.synthesize().map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let inner = builder
+        .synthesize()
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(PyFilterDesign { inner })
 }
 
@@ -432,7 +524,9 @@ fn bandpass_edges(
     if let Some(q_val) = q {
         builder = builder.unloaded_q(q_val);
     }
-    let inner = builder.synthesize().map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let inner = builder
+        .synthesize()
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(PyFilterDesign { inner })
 }
 
@@ -461,13 +555,14 @@ fn prototype(
     if let Some(q_val) = q {
         builder = builder.unloaded_q(q_val);
     }
-    let inner = builder.synthesize().map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let inner = builder
+        .synthesize()
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(PyFilterDesign { inner })
 }
 
 /// Python module definition.
 // ── Duplexer bindings ───────────────────────────────────────────────
-
 use crate::duplexer::Duplexer;
 
 /// Python wrapper for Duplexer.
@@ -484,7 +579,9 @@ impl PyDuplexer {
     /// tx_s11_db, rx_s11_db, antenna_s11_db, isolation_db.
     #[pyo3(signature = (start, stop, points=401))]
     fn response(&self, start: f64, stop: f64, points: usize) -> PyResult<PyObject> {
-        let resp = self.inner.response(start, stop, points)
+        let resp = self
+            .inner
+            .response(start, stop, points)
             .map_err(|e| PyValueError::new_err(format!("{e}")))?;
         Python::with_gil(|py| {
             use pyo3::types::PyDict;
@@ -546,16 +643,19 @@ fn duplexer(
     if let Some(z) = tx_zeros {
         tx_builder = tx_builder.zeros_hz(z);
     }
-    let tx = tx_builder.synthesize().map_err(|e| PyValueError::new_err(format!("Tx: {e}")))?;
+    let tx = tx_builder
+        .synthesize()
+        .map_err(|e| PyValueError::new_err(format!("Tx: {e}")))?;
 
     let mut rx_builder = FilterDesign::bandpass(rx_order, rx_rl, rx_center, rx_bw);
     if let Some(z) = rx_zeros {
         rx_builder = rx_builder.zeros_hz(z);
     }
-    let rx = rx_builder.synthesize().map_err(|e| PyValueError::new_err(format!("Rx: {e}")))?;
+    let rx = rx_builder
+        .synthesize()
+        .map_err(|e| PyValueError::new_err(format!("Rx: {e}")))?;
 
-    let dpx = Duplexer::new(tx, rx)
-        .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+    let dpx = Duplexer::new(tx, rx).map_err(|e| PyValueError::new_err(format!("{e}")))?;
     Ok(PyDuplexer { inner: dpx })
 }
 
@@ -625,11 +725,7 @@ impl PyMultiplexer {
 ///     Multiplexer object
 #[pyfunction]
 #[pyo3(signature = (channels, max_iterations=40, tol=1e-8))]
-fn multiplexer(
-    channels: Vec<String>,
-    max_iterations: usize,
-    tol: f64,
-) -> PyResult<PyMultiplexer> {
+fn multiplexer(channels: Vec<String>, max_iterations: usize, tol: f64) -> PyResult<PyMultiplexer> {
     let mut specs = Vec::with_capacity(channels.len());
     for raw in &channels {
         let parts: Vec<&str> = raw.split(':').collect();
@@ -638,22 +734,21 @@ fn multiplexer(
                 "channel spec '{raw}' must be formatted as order:return_loss_db:center_hz:bandwidth_hz"
             )));
         }
-        let order = parts[0]
-            .trim()
-            .parse::<usize>()
-            .map_err(|_| PyValueError::new_err(format!("invalid order '{}' in '{raw}'", parts[0])))?;
-        let return_loss_db = parts[1]
-            .trim()
-            .parse::<f64>()
-            .map_err(|_| PyValueError::new_err(format!("invalid return loss '{}' in '{raw}'", parts[1])))?;
-        let center_hz = parts[2]
-            .trim()
-            .parse::<f64>()
-            .map_err(|_| PyValueError::new_err(format!("invalid center frequency '{}' in '{raw}'", parts[2])))?;
-        let bandwidth_hz = parts[3]
-            .trim()
-            .parse::<f64>()
-            .map_err(|_| PyValueError::new_err(format!("invalid bandwidth '{}' in '{raw}'", parts[3])))?;
+        let order = parts[0].trim().parse::<usize>().map_err(|_| {
+            PyValueError::new_err(format!("invalid order '{}' in '{raw}'", parts[0]))
+        })?;
+        let return_loss_db = parts[1].trim().parse::<f64>().map_err(|_| {
+            PyValueError::new_err(format!("invalid return loss '{}' in '{raw}'", parts[1]))
+        })?;
+        let center_hz = parts[2].trim().parse::<f64>().map_err(|_| {
+            PyValueError::new_err(format!(
+                "invalid center frequency '{}' in '{raw}'",
+                parts[2]
+            ))
+        })?;
+        let bandwidth_hz = parts[3].trim().parse::<f64>().map_err(|_| {
+            PyValueError::new_err(format!("invalid bandwidth '{}' in '{raw}'", parts[3]))
+        })?;
         specs.push(crate::duplexer::ChannelSpec {
             order,
             return_loss_db,
@@ -670,8 +765,8 @@ fn multiplexer(
         .synthesize()
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
-    let inner = Multiplexer::new(result.channels)
-        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let inner =
+        Multiplexer::new(result.channels).map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(PyMultiplexer { inner })
 }
 

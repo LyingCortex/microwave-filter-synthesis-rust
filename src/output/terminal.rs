@@ -49,7 +49,12 @@ fn format_border(left: char, middle: char, right: char, widths: &[usize]) -> Str
 fn format_row(values: &[String], widths: &[usize]) -> String {
     let split_values = values
         .iter()
-        .map(|value| value.lines().map(|line| line.to_string()).collect::<Vec<_>>())
+        .map(|value| {
+            value
+                .lines()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>()
+        })
         .collect::<Vec<_>>();
     let row_height = split_values
         .iter()

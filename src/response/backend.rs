@@ -57,8 +57,7 @@ pub(super) fn evaluate_response(
             let response = shifted_matrix(&base_matrix, omega, side);
             let (col_first, row_last) = solve_s_parameter_columns(&response, side)?;
 
-            let s11 = Complex64::new(1.0, 0.0)
-                + Complex64::new(0.0, 2.0 * source) * col_first[0];
+            let s11 = Complex64::new(1.0, 0.0) + Complex64::new(0.0, 2.0 * source) * col_first[0];
             let s21 = Complex64::new(0.0, -transmission_scale) * col_first[side - 1];
 
             // Group delay: Im(sum_k y[k] * x[k] / x[side-1])
@@ -108,10 +107,7 @@ fn validate_settings(settings: ResponseSettings) -> Result<()> {
 
 /// Builds the frequency-independent base matrix (coupling matrix + port terminations + loss).
 /// The resonator diagonal shift (omega) is applied separately per frequency point.
-fn build_base_matrix(
-    matrix: &CouplingMatrix,
-    settings: ResponseSettings,
-) -> DMatrix<Complex64> {
+fn build_base_matrix(matrix: &CouplingMatrix, settings: ResponseSettings) -> DMatrix<Complex64> {
     let side = matrix.side();
     let mut response = matrix.to_complex_dense();
 
@@ -137,11 +133,7 @@ fn build_base_matrix(
 /// This avoids cloning the full matrix — we modify in place and could restore,
 /// but since DMatrix is cheap to clone for small sizes (N+2 ≤ 32), we clone.
 #[inline]
-fn shifted_matrix(
-    base: &DMatrix<Complex64>,
-    omega: f64,
-    side: usize,
-) -> DMatrix<Complex64> {
+fn shifted_matrix(base: &DMatrix<Complex64>, omega: f64, side: usize) -> DMatrix<Complex64> {
     let mut response = base.clone();
     let omega_c = Complex64::new(omega, 0.0);
     for index in 1..(side - 1) {
@@ -183,7 +175,9 @@ fn solve_s_parameter_columns(
     let mut rhs_last = DVector::zeros(side);
     rhs_last[side - 1] = Complex64::new(1.0, 0.0);
     let row_last = lu.solve(&rhs_last).ok_or_else(|| {
-        MfsError::NumericalFailure("response matrix became singular during solve (last column)".to_string())
+        MfsError::NumericalFailure(
+            "response matrix became singular during solve (last column)".to_string(),
+        )
     })?;
 
     Ok((col_first, row_last))

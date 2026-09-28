@@ -80,7 +80,9 @@ pub fn format_matrix_table_data(matrix: &CouplingMatrix) -> Table {
             let mut values = Vec::with_capacity(side + 1);
             values.push(header_label(row, side));
             for col in 0..side {
-                values.push(format_signed_number(matrix.at(row, col).unwrap_or_default()));
+                values.push(format_signed_number(
+                    matrix.at(row, col).unwrap_or_default(),
+                ));
             }
             values
         })
@@ -412,7 +414,11 @@ fn sort_complex_pairs(values: &[(f64, f64)]) -> Vec<(f64, f64)> {
 
 fn round_to_4(value: f64) -> f64 {
     let rounded = (value * 10_000.0).round() / 10_000.0;
-    if rounded.abs() < 1e-12 { 0.0 } else { rounded }
+    if rounded.abs() < 1e-12 {
+        0.0
+    } else {
+        rounded
+    }
 }
 
 fn format_signed_number(value: f64) -> String {

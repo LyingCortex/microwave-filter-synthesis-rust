@@ -3,9 +3,8 @@
 #![allow(deprecated)]
 
 use mfs::fixtures::{
-    cameron_generalized_order4_info, cameron_generalized_order4_spec,
-    cameron_style_section_info, cameron_style_section_polynomials,
-    cameron_style_trisection_request, literature_reference_grid,
+    cameron_generalized_order4_info, cameron_generalized_order4_spec, cameron_style_section_info,
+    cameron_style_section_polynomials, cameron_style_trisection_request, literature_reference_grid,
 };
 use mfs::prelude::*;
 
@@ -34,7 +33,10 @@ fn main() -> Result<()> {
 
     println!("fixture: {}", section_info.key);
     println!("reference: {}", section_info.source);
-    println!("section verification passed: {}", verified.verification.passes());
+    println!(
+        "section verification passed: {}",
+        verified.verification.passes()
+    );
     println!("response check passed: {}", verified.response.passes());
     println!("overall section workflow passed: {}", verified.passes());
 

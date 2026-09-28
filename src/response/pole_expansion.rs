@@ -225,8 +225,7 @@ impl PoleExpansionData {
         let inv_10 = -s10 / det;
 
         // S-parameters from inverse matrix elements
-        let s_11 = Complex64::new(1.0, 0.0)
-            + Complex64::new(0.0, 2.0 * self.source_r) * inv_00;
+        let s_11 = Complex64::new(1.0, 0.0) + Complex64::new(0.0, 2.0 * self.source_r) * inv_00;
         let scale = 2.0 * (self.source_r * self.load_r).sqrt();
         let s_21 = Complex64::new(0.0, -scale) * inv_10;
 
@@ -234,10 +233,7 @@ impl PoleExpansionData {
     }
 
     /// Evaluates S-parameters on a normalized frequency grid.
-    pub fn evaluate_normalized(
-        &self,
-        grid: &FrequencyGrid,
-    ) -> Result<SParameterResponse> {
+    pub fn evaluate_normalized(&self, grid: &FrequencyGrid) -> Result<SParameterResponse> {
         let samples = grid
             .as_slice()
             .iter()

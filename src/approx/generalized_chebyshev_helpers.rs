@@ -8,13 +8,13 @@ use std::mem;
 
 use crate::error::{MfsError, Result};
 
+use super::complex_poly::multiply_by_monic_root;
 use super::generalized_ops::{
     complex_from_real, descending_w_to_ascending_s, reciprocal_or_zero,
     reflect_to_upper_half_plane, rotate_w_root_to_s, s_to_w_coefficients, safe_sqrt_term,
     w_to_s_coefficients,
 };
-use super::{ComplexCoefficient, ComplexPolynomial, AdaptiveRootSolver};
-use super::complex_poly::multiply_by_monic_root;
+use super::{AdaptiveRootSolver, ComplexCoefficient, ComplexPolynomial};
 
 const COMPLEX_ZERO: ComplexCoefficient = ComplexCoefficient::new(0.0, 0.0);
 const COMPLEX_ONE: ComplexCoefficient = ComplexCoefficient::new(1.0, 0.0);
@@ -225,7 +225,7 @@ pub fn find_p_polynomial(
         .filter(|zero| zero.is_finite())
         .collect::<Vec<_>>();
 
-        let mut coefficients = vec![COMPLEX_ONE];
+    let mut coefficients = vec![COMPLEX_ONE];
     if order > 1 {
         for zero in finite_zeros {
             let root = ComplexCoefficient::new(0.0, zero);
@@ -451,13 +451,7 @@ pub fn synthesize_generalized_chebyshev_data(
     let recurrence = cameron_recursive(&padded.padded)?;
     let f_s = normalize_to_monic(&recurrence.f_s)?;
     let p_s = find_p_polynomial(order, &padded.padded, padded.finite_count)?;
-    let (eps, eps_r) = find_eps(
-        padded.finite_count,
-        &p_s,
-        &f_s,
-        return_loss_db,
-        order,
-    )?;
+    let (eps, eps_r) = find_eps(padded.finite_count, &p_s, &f_s, return_loss_db, order)?;
     let a_stage = build_a_polynomial_stage(&padded.padded, order, &p_s)?;
     let e_stage = build_e_polynomial_stage(&f_s, &p_s, eps, eps_r)?;
 
@@ -570,13 +564,7 @@ mod tests {
         let padded = pad_transmission_zeros(3, &[2.0])?;
         let recurrence = cameron_recursive(&padded.padded)?;
         let p_s = find_p_polynomial(3, &padded.padded, padded.finite_count)?;
-        let (eps, eps_r) = find_eps(
-            padded.finite_count,
-            &p_s,
-            &recurrence.f_s,
-            20.0,
-            3,
-        )?;
+        let (eps, eps_r) = find_eps(padded.finite_count, &p_s, &recurrence.f_s, 20.0, 3)?;
 
         let a_stage = build_a_polynomial_stage(&padded.padded, 3, &p_s)?
             .expect("finite-zero case should build an A stage");

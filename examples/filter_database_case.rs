@@ -7,11 +7,10 @@ use std::path::PathBuf;
 
 use mfs::approx::{ComplexCoefficient, ComplexPolynomial};
 use mfs::fixtures::{
-    ComplexValue, load_filter_database_case_from_repo,
-    load_filter_database_end_to_end_fixture,
+    load_filter_database_case_from_repo, load_filter_database_end_to_end_fixture, ComplexValue,
 };
-use mfs::prelude::render_terminal_filter_database_report;
 use mfs::generalized_chebyshev_with_response;
+use mfs::prelude::render_terminal_filter_database_report;
 
 fn main() -> mfs::Result<()> {
     let reference_case = load_filter_database_case_from_repo("Cameron_passband_symmetry_4_2")?;
@@ -24,11 +23,12 @@ fn main() -> mfs::Result<()> {
         .polynomials
         .generalized
         .as_ref()
-        .ok_or_else(|| mfs::MfsError::PreconditionViolation("expected generalized helper data".to_string()))?;
-    let reference_model = reference_case
-        .mathematical_model
-        .as_ref()
-        .ok_or_else(|| mfs::MfsError::PreconditionViolation("fixture is missing mathematical_model".to_string()))?;
+        .ok_or_else(|| {
+            mfs::MfsError::PreconditionViolation("expected generalized helper data".to_string())
+        })?;
+    let reference_model = reference_case.mathematical_model.as_ref().ok_or_else(|| {
+        mfs::MfsError::PreconditionViolation("fixture is missing mathematical_model".to_string())
+    })?;
 
     let center_index = outcome.response.samples.len() / 2;
     let center_sample = &outcome.response.samples[center_index];
@@ -142,7 +142,9 @@ fn main() -> mfs::Result<()> {
                 values.clone(),
             )
         })
-        .unwrap_or_else(|| "### E(s) from reflection_poles vs reference E(s)\nreflection_poles: None".to_string());
+        .unwrap_or_else(|| {
+            "### E(s) from reflection_poles vs reference E(s)\nreflection_poles: None".to_string()
+        });
     let reconstructed_f_comparison = reconstructed_f_from_zeros
         .as_ref()
         .map(|values| {
@@ -152,7 +154,9 @@ fn main() -> mfs::Result<()> {
                 values.clone(),
             )
         })
-        .unwrap_or_else(|| "### F(s) from reflection_zeros vs reference F(s)\nreflection_zeros: None".to_string());
+        .unwrap_or_else(|| {
+            "### F(s) from reflection_zeros vs reference F(s)\nreflection_zeros: None".to_string()
+        });
     let f_comparison = format_comparison_table(
         "F",
         &reference_model.polynomial_coefficients.f,
@@ -170,8 +174,16 @@ fn main() -> mfs::Result<()> {
     );
     let e_from_poles_summary = reconstructed_e_from_poles
         .as_ref()
-        .map(|values| summarize_alignment("E(s) reconstructed from reflection_poles", &reference_model.polynomial_coefficients.e, values))
-        .unwrap_or_else(|| "E(s) reconstructed from reflection_poles: no reflection_poles in reference".to_string());
+        .map(|values| {
+            summarize_alignment(
+                "E(s) reconstructed from reflection_poles",
+                &reference_model.polynomial_coefficients.e,
+                values,
+            )
+        })
+        .unwrap_or_else(|| {
+            "E(s) reconstructed from reflection_poles: no reflection_poles in reference".to_string()
+        });
     let f_summary = summarize_alignment(
         "F(s)",
         &reference_model.polynomial_coefficients.f,
@@ -179,8 +191,16 @@ fn main() -> mfs::Result<()> {
     );
     let f_from_zeros_summary = reconstructed_f_from_zeros
         .as_ref()
-        .map(|values| summarize_alignment("F(s) reconstructed from reflection_zeros", &reference_model.polynomial_coefficients.f, values))
-        .unwrap_or_else(|| "F(s) reconstructed from reflection_zeros: no reflection_zeros in reference".to_string());
+        .map(|values| {
+            summarize_alignment(
+                "F(s) reconstructed from reflection_zeros",
+                &reference_model.polynomial_coefficients.f,
+                values,
+            )
+        })
+        .unwrap_or_else(|| {
+            "F(s) reconstructed from reflection_zeros: no reflection_zeros in reference".to_string()
+        });
     let p_summary = summarize_alignment(
         "P(s)",
         &reference_model.polynomial_coefficients.p,
@@ -382,8 +402,16 @@ fn format_complex_values(values: &[ComplexValue]) -> String {
 
 fn format_complex_scalar(value: ComplexValue) -> String {
     let tolerance = 1e-12;
-    let real = round_to_4(if value.re.abs() < tolerance { 0.0 } else { value.re });
-    let imag = round_to_4(if value.im.abs() < tolerance { 0.0 } else { value.im });
+    let real = round_to_4(if value.re.abs() < tolerance {
+        0.0
+    } else {
+        value.re
+    });
+    let imag = round_to_4(if value.im.abs() < tolerance {
+        0.0
+    } else {
+        value.im
+    });
 
     if imag == 0.0 {
         return format_signed_number(real);
@@ -406,7 +434,11 @@ fn format_complex_scalar(value: ComplexValue) -> String {
 
 fn round_to_4(value: f64) -> f64 {
     let rounded = (value * 10_000.0).round() / 10_000.0;
-    if rounded.abs() < 1e-12 { 0.0 } else { rounded }
+    if rounded.abs() < 1e-12 {
+        0.0
+    } else {
+        rounded
+    }
 }
 
 fn format_signed_number(value: f64) -> String {
@@ -466,7 +498,10 @@ fn format_comparison_table(
     rows.join("\n")
 }
 
-fn difference(reference: Option<ComplexValue>, actual: Option<ComplexValue>) -> Option<ComplexValue> {
+fn difference(
+    reference: Option<ComplexValue>,
+    actual: Option<ComplexValue>,
+) -> Option<ComplexValue> {
     match (reference, actual) {
         (Some(reference), Some(actual)) => Some(ComplexValue {
             re: actual.re - reference.re,

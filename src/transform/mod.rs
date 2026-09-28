@@ -7,19 +7,18 @@ use crate::error::Result;
 use crate::freq::FrequencyGrid;
 use crate::matrix::{CouplingMatrix, MatrixTopology};
 use crate::response::ResponseSolver;
-use crate::verify::{matches_topology_pattern, MatrixPatternTolerance};
 use crate::verify::{compare_responses, ResponseCheckReport, ResponseTolerance};
+use crate::verify::{matches_topology_pattern, MatrixPatternTolerance};
 
+use arrow::to_arrow;
+use folded::to_folded;
 pub use sections::{
     extract_quadruplet_section, extract_quadruplet_section_matrix,
     extract_quadruplet_section_with_response_check, extract_triplet_section,
     extract_triplet_section_matrix, extract_triplet_section_with_response_check,
     extract_trisection_section, extract_trisection_section_matrix,
-    extract_trisection_section_with_response_check, QuadrupletExtraction,
-    SectionTransformOutcome,
+    extract_trisection_section_with_response_check, QuadrupletExtraction, SectionTransformOutcome,
 };
-use arrow::to_arrow;
-use folded::to_folded;
 use wheel::to_wheel;
 
 /// Public topology name used by the transform facade.
@@ -62,7 +61,10 @@ impl TransformReport {
     }
 }
 
-fn transform_matrix_impl(matrix: &CouplingMatrix, topology: TopologyKind) -> Result<TransformOutcome> {
+fn transform_matrix_impl(
+    matrix: &CouplingMatrix,
+    topology: TopologyKind,
+) -> Result<TransformOutcome> {
     #[allow(deprecated)]
     match topology {
         TopologyKind::Transversal => Ok(build_transform_outcome(

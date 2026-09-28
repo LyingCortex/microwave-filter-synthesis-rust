@@ -64,10 +64,7 @@ impl FilterSpecBuilder {
     }
 
     /// Loads an out-of-band attenuation specification from a three-column file.
-    pub fn out_of_band_attenuation_file(
-        mut self,
-        path: impl AsRef<Path>,
-    ) -> Result<Self> {
+    pub fn out_of_band_attenuation_file(mut self, path: impl AsRef<Path>) -> Result<Self> {
         self.out_of_band_attenuation = Some(OutOfBandAttenuationSpec::from_file(path)?);
         Ok(self)
     }
@@ -76,8 +73,8 @@ impl FilterSpecBuilder {
     pub fn build(self) -> Result<FilterSpec> {
         let order = self.order.unwrap_or(0);
         let return_loss_db = self.return_loss_db.unwrap_or(0.0);
-        let mut spec =
-            FilterSpec::new(order, return_loss_db)?.with_transmission_zeros(self.transmission_zeros);
+        let mut spec = FilterSpec::new(order, return_loss_db)?
+            .with_transmission_zeros(self.transmission_zeros);
         if let Some(unloaded_q) = self.unloaded_q {
             spec = spec.with_unloaded_q(unloaded_q);
         }

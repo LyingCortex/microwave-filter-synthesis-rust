@@ -5,7 +5,8 @@ pub fn format_markdown_table(table: &Table) -> String {
     lines.push(format!("| {} |", table.headers.join(" | ")));
     lines.push(format!(
         "| {} |",
-        table.headers
+        table
+            .headers
             .iter()
             .map(|_| "---")
             .collect::<Vec<_>>()

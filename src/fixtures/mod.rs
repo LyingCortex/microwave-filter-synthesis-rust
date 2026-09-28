@@ -20,11 +20,10 @@ use crate::freq::{FrequencyGrid, LowPassMapping};
 use crate::spec::FilterSpec;
 
 pub use database::{
-    CaseSpecification, ComplexValue, EndToEndFixture, FilterDatabaseCase, FilterDatabaseDocument,
-    MathematicalModel, NormalizedTransmissionZero, PolynomialCoefficients, ScalarWithUnit,
-    Singularities,
     load_filter_database_case, load_filter_database_case_from_repo, load_filter_database_document,
-    load_filter_database_end_to_end_fixture,
+    load_filter_database_end_to_end_fixture, CaseSpecification, ComplexValue, EndToEndFixture,
+    FilterDatabaseCase, FilterDatabaseDocument, MathematicalModel, NormalizedTransmissionZero,
+    PolynomialCoefficients, ScalarWithUnit, Singularities,
 };
 
 /// Reference tag for Cameron's 2003 coupling-matrix paper.

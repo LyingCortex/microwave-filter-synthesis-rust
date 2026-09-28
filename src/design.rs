@@ -192,7 +192,8 @@ impl FilterDesign {
         f_stop_hz: f64,
     ) -> FilterDesignBuilder {
         // Geometric mean ensures Ω(f_start)=-1 and Ω(f_stop)=+1 exactly.
-        let (center_hz, bandwidth_hz) = crate::freq::edges_to_center_bandwidth(f_start_hz, f_stop_hz);
+        let (center_hz, bandwidth_hz) =
+            crate::freq::edges_to_center_bandwidth(f_start_hz, f_stop_hz);
         FilterDesignBuilder {
             order,
             return_loss_db,
@@ -273,26 +274,43 @@ impl FilterDesign {
     // ─── Basic info ──────────────────────────────────────────────────────
 
     /// Filter order (number of resonators).
-    pub fn order(&self) -> usize { self.spec.order }
+    pub fn order(&self) -> usize {
+        self.spec.order
+    }
 
     /// The transversal coupling matrix.
-    pub fn matrix(&self) -> &CouplingMatrix { &self.matrix }
+    pub fn matrix(&self) -> &CouplingMatrix {
+        &self.matrix
+    }
 
     /// Returns normalized transmission zeros (Omega values).
     pub fn transmission_zeros_normalized(&self) -> Vec<f64> {
-        self.spec.transmission_zeros.iter().filter(|tz| tz.value.is_finite()).map(|tz| tz.value).collect()
+        self.spec
+            .transmission_zeros
+            .iter()
+            .filter(|tz| tz.value.is_finite())
+            .map(|tz| tz.value)
+            .collect()
     }
     /// The prototype polynomials (E, F, P).
-    pub fn polynomials(&self) -> &PolynomialSet { &self.polynomials }
+    pub fn polynomials(&self) -> &PolynomialSet {
+        &self.polynomials
+    }
 
     /// The filter specification.
-    pub fn spec(&self) -> &FilterSpec { &self.spec }
+    pub fn spec(&self) -> &FilterSpec {
+        &self.spec
+    }
 
     /// Center frequency in Hz (if band-pass design).
-    pub fn center_hz(&self) -> Option<f64> { self.center_hz }
+    pub fn center_hz(&self) -> Option<f64> {
+        self.center_hz
+    }
 
     /// Bandwidth in Hz (if band-pass design).
-    pub fn bandwidth_hz(&self) -> Option<f64> { self.bandwidth_hz }
+    pub fn bandwidth_hz(&self) -> Option<f64> {
+        self.bandwidth_hz
+    }
 
     /// Lower passband edge in Hz (if band-pass design).
     pub fn f_start_hz(&self) -> Option<f64> {
@@ -586,11 +604,7 @@ impl FilterDesign {
     }
 
     /// Scales the transversal matrix with explicit band-pass parameters.
-    pub fn scale_to(
-        &self,
-        center_hz: f64,
-        bandwidth_hz: f64,
-    ) -> Result<CouplingMatrix> {
+    pub fn scale_to(&self, center_hz: f64, bandwidth_hz: f64) -> Result<CouplingMatrix> {
         let mapping = BandPassMapping::new(center_hz, bandwidth_hz)?;
         self.matrix.denormalize_bandpass(&mapping)
     }
@@ -705,11 +719,22 @@ impl FilterDesign {
     /// Generates auto-comment lines for Touchstone export.
     pub fn auto_comments(&self) -> Vec<String> {
         let mut comments = vec![
-            format!("MFS v{} - Generalized Chebyshev filter", env!("CARGO_PKG_VERSION")),
-            format!("Order: {}, Return Loss: {:.1} dB", self.order(), self.spec.return_loss_db),
+            format!(
+                "MFS v{} - Generalized Chebyshev filter",
+                env!("CARGO_PKG_VERSION")
+            ),
+            format!(
+                "Order: {}, Return Loss: {:.1} dB",
+                self.order(),
+                self.spec.return_loss_db
+            ),
         ];
         if let (Some(c), Some(bw)) = (self.center_hz, self.bandwidth_hz) {
-            comments.push(format!("Center: {:.6} GHz, BW: {:.3} MHz", c / 1e9, bw / 1e6));
+            comments.push(format!(
+                "Center: {:.6} GHz, BW: {:.3} MHz",
+                c / 1e9,
+                bw / 1e6
+            ));
         }
         comments
     }
@@ -850,7 +875,10 @@ mod tests {
             for j in 0..m2.side() {
                 let v1 = m1.at(i, j).unwrap_or(0.0);
                 let v2 = m2.at(i, j).unwrap_or(0.0);
-                assert!((v1 - v2).abs() < 1e-12, "mismatch at ({i},{j}): {v1} vs {v2}");
+                assert!(
+                    (v1 - v2).abs() < 1e-12,
+                    "mismatch at ({i},{j}): {v1} vs {v2}"
+                );
             }
         }
         Ok(())
@@ -926,8 +954,7 @@ mod tests {
 
     #[test]
     fn from_spec() -> Result<()> {
-        let spec = FilterSpec::new(3, 20.0)?
-            .with_normalized_transmission_zeros(vec![2.0]);
+        let spec = FilterSpec::new(3, 20.0)?.with_normalized_transmission_zeros(vec![2.0]);
         let d = FilterDesign::from_spec(&spec)?;
         assert_eq!(d.order(), 3);
         Ok(())
@@ -1037,7 +1064,10 @@ mod tests {
         // Power should NOT be conserved for lossy (|S11|² + |S21|² < 1)
         let s = &lossy.samples[center_idx];
         let power = s.s11_mag().powi(2) + s.s21_mag().powi(2);
-        assert!(power < 0.99, "lossy power sum should be < 1, got {power:.4}");
+        assert!(
+            power < 0.99,
+            "lossy power sum should be < 1, got {power:.4}"
+        );
 
         Ok(())
     }
@@ -1051,9 +1081,12 @@ mod tests {
 
         // Center point: lossy should have more insertion loss
         let center = 20;
-        assert!(lossy.samples[center].s21_db() < lossless.samples[center].s21_db() - 0.1,
+        assert!(
+            lossy.samples[center].s21_db() < lossless.samples[center].s21_db() - 0.1,
             "lossy={:.2} dB, lossless={:.2} dB",
-            lossy.samples[center].s21_db(), lossless.samples[center].s21_db());
+            lossy.samples[center].s21_db(),
+            lossless.samples[center].s21_db()
+        );
         Ok(())
     }
 

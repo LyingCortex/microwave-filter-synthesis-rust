@@ -22,29 +22,35 @@
 pub mod design;
 /// Duplexer synthesis and analysis.
 pub mod duplexer;
-/// Multiplexer (N-channel) synthesis and analysis.
-pub mod multiplexer;
 /// Error types.
 pub mod error;
 /// Coupling matrix types and operations.
 pub mod matrix;
+/// Multiplexer (N-channel) synthesis and analysis.
+pub mod multiplexer;
 /// Coupling matrix optimization and extraction.
 pub mod optimize;
 /// Prelude for convenient imports.
 pub mod prelude;
 /// S-parameter response evaluation.
 pub mod response;
-/// Touchstone (.s2p) file export and import.
-pub mod touchstone;
 /// Spectral factorization methods (cepstrum + balanced companion matrix).
 pub mod spectral;
+/// Touchstone (.s2p) file export and import.
+pub mod touchstone;
 
 // ─── Advanced modules (for power users) ──────────────────────────────────────
 
 /// Polynomial approximation internals.
 pub mod approx;
+/// Literature fixtures for testing.
+pub mod fixtures;
 /// Frequency mapping and grid helpers.
 pub mod freq;
+/// Output formatting.
+pub mod output;
+/// Pipeline orchestration (JSON/CLI).
+pub mod pipeline;
 /// Filter specification types.
 pub mod spec;
 /// Matrix synthesis engine.
@@ -53,12 +59,6 @@ pub mod synthesis;
 pub mod transform;
 /// Response verification helpers.
 pub mod verify;
-/// Output formatting.
-pub mod output;
-/// Pipeline orchestration (JSON/CLI).
-pub mod pipeline;
-/// Literature fixtures for testing.
-pub mod fixtures;
 
 /// Python bindings (requires `python` feature).
 #[cfg(feature = "python")]
@@ -67,13 +67,13 @@ pub mod python;
 // ─── Convenience re-exports at crate root ────────────────────────────────────
 
 pub use design::FilterDesign;
+pub use duplexer::{ChannelSpec, JunctionType};
 pub use error::{MfsError, Result};
 pub use matrix::{CouplingMatrix, MatrixTopology};
-pub use response::{ResponseSample, SParameterResponse};
-pub use duplexer::{ChannelSpec, JunctionType};
 pub use multiplexer::{
     Multiplexer, MultiplexerResponse, MultiplexerSynthesis, MultiplexerSynthesisResult,
 };
+pub use response::{ResponseSample, SParameterResponse};
 
 // ─── Legacy free functions (kept for backward compatibility) ─────────────────
 
@@ -82,6 +82,7 @@ use crate::synthesis::{
     MatrixSynthesisOutcome, SynthesisOutcome,
 };
 
+pub use approx::PolynomialSet;
 pub use freq::{BandPassMapping, FrequencyGrid, FrequencyMapping, LowPassMapping};
 pub use matrix::CouplingMatrixBuilder;
 pub use response::ResponseSolver;
@@ -89,7 +90,6 @@ pub use spec::{FilterSpec, FilterSpecBuilder, TransmissionZero};
 pub use synthesis::MatrixSynthesisMethod;
 pub use transform::TopologyKind;
 pub use verify::ResponseTolerance;
-pub use approx::PolynomialSet;
 
 /// Default unloaded Q used by `filter_spec` when none is specified.
 pub const DEFAULT_UNLOADED_Q: f64 = 2000.0;
@@ -116,7 +116,9 @@ pub fn lowpass(cutoff: f64) -> Result<LowPassMapping> {
     LowPassMapping::new(cutoff)
 }
 
-#[deprecated(note = "use the FrequencyMapping trait's map_hz_to_normalized, or FilterDesign::zeros_hz")]
+#[deprecated(
+    note = "use the FrequencyMapping trait's map_hz_to_normalized, or FilterDesign::zeros_hz"
+)]
 pub fn normalize_transmission_zeros_hz(
     zeros_hz: impl IntoIterator<Item = f64>,
     mapping: &impl FrequencyMapping,
@@ -246,8 +248,14 @@ mod tests {
     fn legacy_fixture_flow() -> Result<()> {
         let fixture = load_filter_database_end_to_end_fixture("Cameron_passband_symmetry_4_2")?;
         let outcome = generalized_chebyshev(&fixture.spec)?;
-        assert_eq!(outcome.approximation, crate::synthesis::ApproximationKind::GeneralizedChebyshev);
-        assert_eq!(outcome.matrix_method, MatrixSynthesisMethod::ResidueExpansion);
+        assert_eq!(
+            outcome.approximation,
+            crate::synthesis::ApproximationKind::GeneralizedChebyshev
+        );
+        assert_eq!(
+            outcome.matrix_method,
+            MatrixSynthesisMethod::ResidueExpansion
+        );
         Ok(())
     }
 }

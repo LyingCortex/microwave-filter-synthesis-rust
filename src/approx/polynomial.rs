@@ -211,9 +211,14 @@ fn normalize_and_project_complex_polynomial(
         return None;
     }
 
-    let already_real = coefficients.iter().all(|coefficient| coefficient.im.abs() <= 1e-12);
+    let already_real = coefficients
+        .iter()
+        .all(|coefficient| coefficient.im.abs() <= 1e-12);
     if already_real {
-        let mut projected = coefficients.iter().map(|coefficient| coefficient.re).collect::<Vec<_>>();
+        let mut projected = coefficients
+            .iter()
+            .map(|coefficient| coefficient.re)
+            .collect::<Vec<_>>();
         if projected.len() < expected_len {
             projected.resize(expected_len, 0.0);
         } else if projected.len() > expected_len {
@@ -237,8 +242,14 @@ fn normalize_and_project_complex_polynomial(
             .iter()
             .map(|coefficient| *coefficient * phase)
             .collect::<Vec<_>>();
-        let real_weight = rotated.iter().map(|coefficient| coefficient.re.abs()).sum::<f64>();
-        let imag_weight = rotated.iter().map(|coefficient| coefficient.im.abs()).sum::<f64>();
+        let real_weight = rotated
+            .iter()
+            .map(|coefficient| coefficient.re.abs())
+            .sum::<f64>();
+        let imag_weight = rotated
+            .iter()
+            .map(|coefficient| coefficient.im.abs())
+            .sum::<f64>();
         if real_weight <= 1e-18 {
             continue;
         }
@@ -455,6 +466,9 @@ mod tests {
         })
         .expect("infinite transmission zeros should be accepted");
 
-        assert!(polynomials.transmission_zeros_normalized.iter().all(|value| value.is_infinite()));
+        assert!(polynomials
+            .transmission_zeros_normalized
+            .iter()
+            .all(|value| value.is_infinite()));
     }
 }

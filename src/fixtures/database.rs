@@ -181,7 +181,9 @@ pub fn load_filter_database_case(
         .into_iter()
         .find(|case| case.case_id == case_id)
         .ok_or_else(|| {
-            MfsError::PreconditionViolation(format!("fixture case not found in filter_database.json: {case_id}"))
+            MfsError::PreconditionViolation(format!(
+                "fixture case not found in filter_database.json: {case_id}"
+            ))
         })
 }
 

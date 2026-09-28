@@ -283,8 +283,9 @@ mod tests {
         let mapped = mapping.map_normalized_to_hz(sample)?;
 
         let expected = (sample.omega * mapping.bandwidth_hz()
-            + ((sample.omega * mapping.bandwidth_hz()).powi(2) + 4.0 * mapping.center_hz().powi(2))
-                .sqrt())
+            + ((sample.omega * mapping.bandwidth_hz()).powi(2)
+                + 4.0 * mapping.center_hz().powi(2))
+            .sqrt())
             / 2.0;
         approx_eq(mapped, expected, 1e-3);
         Ok(())
@@ -304,7 +305,8 @@ mod tests {
 
     #[test]
     fn validated_transmission_zero_returns_stored_value() -> Result<()> {
-        let normalized = validated_transmission_zero(TransmissionZero::normalized(0.9891304347826066))?;
+        let normalized =
+            validated_transmission_zero(TransmissionZero::normalized(0.9891304347826066))?;
         approx_eq(normalized, 0.9891304347826066, 1e-12);
         Ok(())
     }

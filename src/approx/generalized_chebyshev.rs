@@ -3,7 +3,7 @@ use crate::freq::validated_transmission_zeros;
 use crate::spec::FilterSpec;
 
 use super::generalized_chebyshev_helpers::synthesize_generalized_chebyshev_data;
-use super::polynomial::{PolynomialSet, chebyshev_ripple_factor};
+use super::polynomial::{chebyshev_ripple_factor, PolynomialSet};
 
 /// Builds the generalized-Chebyshev polynomial bundle implied by one filter spec.
 pub fn generalized_chebyshev_polynomials(spec: &FilterSpec) -> Result<PolynomialSet> {
@@ -16,7 +16,9 @@ pub fn generalized_chebyshev_polynomials(spec: &FilterSpec) -> Result<Polynomial
     let generalized =
         synthesize_generalized_chebyshev_data(spec.order, &finite_zeros, spec.return_loss_db())?;
     let e = generalized.e_s.clone().ok_or_else(|| {
-        MfsError::PreconditionViolation("generalized Chebyshev helper data is missing E(s)".to_string())
+        MfsError::PreconditionViolation(
+            "generalized Chebyshev helper data is missing E(s)".to_string(),
+        )
     })?;
     let set = PolynomialSet {
         order: spec.order,

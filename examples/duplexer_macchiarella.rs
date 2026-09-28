@@ -44,35 +44,50 @@ fn main() -> Result<()> {
     // ─── Individual filter responses ─────────────────────────────────────
     println!("\n─── RX Filter Response (14.9-15.1 GHz passband) ───\n");
     let rx_resp = result.rx.response(14.8e9, 15.2e9, 21)?;
-    println!("  {:>10}  {:>10}  {:>10}", "Freq(GHz)", "S21(dB)", "S11(dB)");
+    println!(
+        "  {:>10}  {:>10}  {:>10}",
+        "Freq(GHz)", "S21(dB)", "S11(dB)"
+    );
     for i in (0..21).step_by(2) {
-        println!("  {:>10.4}  {:>10.3}  {:>10.3}",
+        println!(
+            "  {:>10.4}  {:>10.3}  {:>10.3}",
             rx_resp.samples[i].frequency_hz / 1e9,
             rx_resp.samples[i].s21_db(),
-            rx_resp.samples[i].s11_db());
+            rx_resp.samples[i].s11_db()
+        );
     }
 
     println!("\n─── TX Filter Response (15.15-15.35 GHz passband) ───\n");
     let tx_resp = result.tx.response(15.05e9, 15.45e9, 21)?;
-    println!("  {:>10}  {:>10}  {:>10}", "Freq(GHz)", "S21(dB)", "S11(dB)");
+    println!(
+        "  {:>10}  {:>10}  {:>10}",
+        "Freq(GHz)", "S21(dB)", "S11(dB)"
+    );
     for i in (0..21).step_by(2) {
-        println!("  {:>10.4}  {:>10.3}  {:>10.3}",
+        println!(
+            "  {:>10.4}  {:>10.3}  {:>10.3}",
             tx_resp.samples[i].frequency_hz / 1e9,
             tx_resp.samples[i].s21_db(),
-            tx_resp.samples[i].s11_db());
+            tx_resp.samples[i].s11_db()
+        );
     }
 
     // ─── Combined duplexer using Duplexer struct ─────────────────────────
     println!("\n─── Combined Duplexer (using simple T-junction model) ───\n");
     let duplexer = Duplexer::new(result.tx.clone(), result.rx.clone())?;
     let combined = duplexer.response(14.7e9, 15.5e9, 21)?;
-    println!("  {:>10}  {:>10}  {:>10}  {:>10}", "Freq(GHz)", "TX(dB)", "RX(dB)", "Iso(dB)");
+    println!(
+        "  {:>10}  {:>10}  {:>10}  {:>10}",
+        "Freq(GHz)", "TX(dB)", "RX(dB)", "Iso(dB)"
+    );
     for i in 0..21 {
-        println!("  {:>10.4}  {:>10.2}  {:>10.2}  {:>10.2}",
+        println!(
+            "  {:>10.4}  {:>10.2}  {:>10.2}  {:>10.2}",
             combined.frequencies[i] / 1e9,
             combined.tx_s21_db[i],
             combined.rx_s21_db[i],
-            combined.isolation_db[i]);
+            combined.isolation_db[i]
+        );
     }
 
     // ─── Example with transmission zeros ─────────────────────────────────
@@ -103,29 +118,51 @@ fn print_synthesis_result(result: &DuplexerSynthesisResult, name: &str) {
     println!("  {} synthesis result:", name);
     println!("    Iterations: {}", result.iterations);
     println!("    Convergence error: {:.2e}", result.convergence_error);
-    println!("    TX order: {}, RX order: {}", result.tx.order(), result.rx.order());
+    println!(
+        "    TX order: {}, RX order: {}",
+        result.tx.order(),
+        result.rx.order()
+    );
     println!("    Junction: {:?}", result.junction);
 
     // Print coupling matrix diagonal (resonant frequencies)
     let m = result.tx.matrix();
     println!("\n    TX coupling matrix (transversal):");
-    println!("      Input coupling M_S1 = {:.6}", m.at(0, 1).unwrap_or(0.0));
+    println!(
+        "      Input coupling M_S1 = {:.6}",
+        m.at(0, 1).unwrap_or(0.0)
+    );
     print!("      Diagonal: [");
     for i in 1..=result.tx.order() {
         print!("{:.4}", m.at(i, i).unwrap_or(0.0));
-        if i < result.tx.order() { print!(", "); }
+        if i < result.tx.order() {
+            print!(", ");
+        }
     }
     println!("]");
-    println!("      Output coupling M_NL = {:.6}", m.at(result.tx.order(), result.tx.order() + 1).unwrap_or(0.0));
+    println!(
+        "      Output coupling M_NL = {:.6}",
+        m.at(result.tx.order(), result.tx.order() + 1)
+            .unwrap_or(0.0)
+    );
 
     let m = result.rx.matrix();
     println!("\n    RX coupling matrix (transversal):");
-    println!("      Input coupling M_S1 = {:.6}", m.at(0, 1).unwrap_or(0.0));
+    println!(
+        "      Input coupling M_S1 = {:.6}",
+        m.at(0, 1).unwrap_or(0.0)
+    );
     print!("      Diagonal: [");
     for i in 1..=result.rx.order() {
         print!("{:.4}", m.at(i, i).unwrap_or(0.0));
-        if i < result.rx.order() { print!(", "); }
+        if i < result.rx.order() {
+            print!(", ");
+        }
     }
     println!("]");
-    println!("      Output coupling M_NL = {:.6}", m.at(result.rx.order(), result.rx.order() + 1).unwrap_or(0.0));
+    println!(
+        "      Output coupling M_NL = {:.6}",
+        m.at(result.rx.order(), result.rx.order() + 1)
+            .unwrap_or(0.0)
+    );
 }

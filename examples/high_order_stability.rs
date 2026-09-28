@@ -8,10 +8,10 @@
 //! deprecated but must keep working for backward compatibility.
 #![allow(deprecated)]
 
-use mfs::prelude::*;
-use mfs::CouplingMatrix;
 use mfs::matrix::MatrixTopology;
+use mfs::prelude::*;
 use mfs::synthesis::MatrixSynthesisEngine;
+use mfs::CouplingMatrix;
 
 fn check_matrix_sanity(matrix: &CouplingMatrix, label: &str) -> bool {
     let side = matrix.side();
@@ -33,7 +33,11 @@ fn check_matrix_sanity(matrix: &CouplingMatrix, label: &str) -> bool {
     }
 
     // Check that coupling values are bounded (no blow-up)
-    let max_entry = matrix.as_slice().iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
+    let max_entry = matrix
+        .as_slice()
+        .iter()
+        .map(|v| v.abs())
+        .fold(0.0_f64, f64::max);
     if max_entry > 100.0 {
         eprintln!("  [{label}] WARN: max entry magnitude = {max_entry:.4} (unusually large)");
     }
@@ -94,13 +98,17 @@ fn test_order(order: usize, return_loss_db: f64, zeros: &[f64]) {
 
             // Folded topology
             match engine.synthesize_with_topology(&polynomials, MatrixTopology::Folded) {
-                Ok(folded) => { check_matrix_sanity(&folded, "Folded"); }
+                Ok(folded) => {
+                    check_matrix_sanity(&folded, "Folded");
+                }
                 Err(e) => eprintln!("  Folded transform failed: {e}"),
             }
 
             // Arrow topology
             match engine.synthesize_with_topology(&polynomials, MatrixTopology::Arrow) {
-                Ok(arrow) => { check_matrix_sanity(&arrow, "Arrow"); }
+                Ok(arrow) => {
+                    check_matrix_sanity(&arrow, "Arrow");
+                }
                 Err(e) => eprintln!("  Arrow transform failed: {e}"),
             }
         }
@@ -120,7 +128,11 @@ fn main() {
     test_order(10, 20.0, &[1.5, -1.5, 2.0, -2.0]);
     test_order(12, 20.0, &[1.3, -1.3, 1.8, -1.8, 2.5, -2.5]);
     test_order(16, 20.0, &[1.2, -1.2, 1.5, -1.5, 2.0, -2.0, 3.0, -3.0]);
-    test_order(20, 20.0, &[1.2, -1.2, 1.5, -1.5, 2.0, -2.0, 3.0, -3.0, 5.0, -5.0]);
+    test_order(
+        20,
+        20.0,
+        &[1.2, -1.2, 1.5, -1.5, 2.0, -2.0, 3.0, -3.0, 5.0, -5.0],
+    );
     test_order(24, 22.0, &[1.3, -1.3, 1.6, -1.6, 2.0, -2.0]);
 
     // Extreme: order 30 with zeros

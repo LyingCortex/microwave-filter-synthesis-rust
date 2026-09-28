@@ -3,9 +3,9 @@
 //! Implements the Cameron method (2011) for synthesizing coupling matrices
 //! as cascades of trisections and quadruplets from the arrow canonical form.
 
-use crate::error::{MfsError, Result};
 use super::core::CouplingMatrix;
-use super::rotations::{safe_angle, diagonal_rotation_angle};
+use super::rotations::{diagonal_rotation_angle, safe_angle};
+use crate::error::{MfsError, Result};
 
 impl CouplingMatrix {
     /// Synthesizes a Cascaded Trisection (CT) configuration from an arrow matrix.
@@ -28,7 +28,9 @@ impl CouplingMatrix {
         if zeros.len() > order - 2 {
             return Err(MfsError::PreconditionViolation(format!(
                 "too many zeros ({}) for order {} (max {})",
-                zeros.len(), order, order - 2
+                zeros.len(),
+                order,
+                order - 2
             )));
         }
 
@@ -91,7 +93,8 @@ impl CouplingMatrix {
         }
 
         // First create all trisections
-        let all_zeros: Vec<f64> = zero_pairs.iter()
+        let all_zeros: Vec<f64> = zero_pairs
+            .iter()
             .flat_map(|&(z1, z2)| vec![z1, z2])
             .collect();
 
@@ -136,7 +139,9 @@ mod tests {
             .zeros([-2.0, -1.2, 1.5])
             .synthesize()?;
 
-        let ct = design.matrix().to_cascaded_trisections(&[-2.0, -1.2, 1.5])?;
+        let ct = design
+            .matrix()
+            .to_cascaded_trisections(&[-2.0, -1.2, 1.5])?;
         assert_eq!(ct.order(), 6);
 
         // Verify response is preserved (similarity transform)
@@ -146,8 +151,11 @@ mod tests {
 
         for (o, c) in orig_resp.samples.iter().zip(ct_resp.samples.iter()) {
             let diff = (o.s21_mag() - c.s21_mag()).abs();
-            assert!(diff < 1e-6, "CT response mismatch at ω={:.2}: diff={diff:.2e}",
-                o.normalized_omega);
+            assert!(
+                diff < 1e-6,
+                "CT response mismatch at ω={:.2}: diff={diff:.2e}",
+                o.normalized_omega
+            );
         }
         Ok(())
     }
@@ -158,7 +166,9 @@ mod tests {
             .zeros([-1.5, 1.5, -2.0, 2.0])
             .synthesize()?;
 
-        let cq = design.matrix().to_cascaded_quadruplets(&[(-1.5, 1.5), (-2.0, 2.0)])?;
+        let cq = design
+            .matrix()
+            .to_cascaded_quadruplets(&[(-1.5, 1.5), (-2.0, 2.0)])?;
         assert_eq!(cq.order(), 6);
 
         // Verify response preservation
@@ -168,8 +178,11 @@ mod tests {
 
         for (o, c) in orig_resp.samples.iter().zip(cq_resp.samples.iter()) {
             let diff = (o.s21_mag() - c.s21_mag()).abs();
-            assert!(diff < 1e-4, "CQ response mismatch at ω={:.2}: diff={diff:.2e}",
-                o.normalized_omega);
+            assert!(
+                diff < 1e-4,
+                "CQ response mismatch at ω={:.2}: diff={diff:.2e}",
+                o.normalized_omega
+            );
         }
         Ok(())
     }

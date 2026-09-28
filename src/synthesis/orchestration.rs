@@ -1,4 +1,4 @@
-use crate::approx::{PolynomialSet, generalized_chebyshev_polynomials};
+use crate::approx::{generalized_chebyshev_polynomials, PolynomialSet};
 use crate::error::Result;
 use crate::freq::{FrequencyGrid, FrequencyMapping};
 use crate::matrix::CouplingMatrix;
@@ -55,7 +55,8 @@ pub fn build_filter_spec(
 ) -> Result<FilterSpec> {
     let mut spec = FilterSpec::new(order, return_loss_db)?;
     if !normalized_transmission_zeros.is_empty() {
-        spec = spec.with_normalized_transmission_zeros(normalized_transmission_zeros.iter().copied());
+        spec =
+            spec.with_normalized_transmission_zeros(normalized_transmission_zeros.iter().copied());
     }
     if let Some(q) = unloaded_q {
         spec = spec.with_unloaded_q(q);
@@ -107,7 +108,10 @@ mod tests {
         assert_eq!(outcome.synthesis.polynomials.order, 4);
         assert_eq!(outcome.synthesis.matrix.order(), 4);
         assert_eq!(outcome.response.samples.len(), 9);
-        assert_eq!(outcome.synthesis.approximation, ApproximationKind::GeneralizedChebyshev);
+        assert_eq!(
+            outcome.synthesis.approximation,
+            ApproximationKind::GeneralizedChebyshev
+        );
         Ok(())
     }
 
@@ -126,8 +130,14 @@ mod tests {
         let fixture = load_filter_database_end_to_end_fixture("Cameron_passband_symmetry_4_2")?;
 
         let outcome = synthesize_generalized_chebyshev(&fixture.spec)?;
-        assert_eq!(outcome.approximation, ApproximationKind::GeneralizedChebyshev);
-        assert_eq!(outcome.matrix_method, MatrixSynthesisMethod::ResidueExpansion);
+        assert_eq!(
+            outcome.approximation,
+            ApproximationKind::GeneralizedChebyshev
+        );
+        assert_eq!(
+            outcome.matrix_method,
+            MatrixSynthesisMethod::ResidueExpansion
+        );
         Ok(())
     }
 
@@ -136,7 +146,10 @@ mod tests {
         let spec = FilterSpec::new(3, 20.0)?;
 
         let outcome = synthesize_generalized_chebyshev(&spec)?;
-        assert_eq!(outcome.approximation, ApproximationKind::GeneralizedChebyshev);
+        assert_eq!(
+            outcome.approximation,
+            ApproximationKind::GeneralizedChebyshev
+        );
         assert!(outcome.polynomials.generalized.is_some());
         Ok(())
     }

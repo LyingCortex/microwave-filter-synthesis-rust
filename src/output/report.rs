@@ -1,13 +1,11 @@
-
 use crate::error::Result;
 use crate::fixtures::{ComplexValue, EndToEndFixture, MathematicalModel};
 use crate::output::{
     format_aligned_summary_with_width, format_box_table, format_complex_scalar_parts,
-    format_decimal_scalar, format_markdown_table,
-    format_matrix_table_data, format_out_of_band_attenuation_table_data,
-    format_polynomial_table_data, format_response_samples_table_data,
-    format_reference_actual_polynomial_table_data, format_root_comparison_table_data,
-    format_singularity_table_data,
+    format_decimal_scalar, format_markdown_table, format_matrix_table_data,
+    format_out_of_band_attenuation_table_data, format_polynomial_table_data,
+    format_reference_actual_polynomial_table_data, format_response_samples_table_data,
+    format_root_comparison_table_data, format_singularity_table_data,
 };
 use crate::response::SParameterResponse;
 use crate::spec::FilterSpec;
@@ -124,48 +122,69 @@ pub fn render_terminal_synthesis_report(
 {response_table}\n",
         spec_title = format_numbered_heading(1, "Spec"),
         spec_summary = format_aligned_summary_with_width(&spec_summary_rows, shared_summary_width),
-        out_of_band_block = format_optional_out_of_band_terminal_block(
-            out_of_band_attenuation_table.as_ref()
-        ),
+        out_of_band_block =
+            format_optional_out_of_band_terminal_block(out_of_band_attenuation_table.as_ref()),
         prototype_title = format_numbered_heading(2, "Prototype"),
-        prototype_summary = format_aligned_summary_with_width(&[
-            ("order", polynomials.order.to_string()),
-            ("ripple_factor", format_decimal_scalar(polynomials.ripple_factor)),
-            ("eps", format_decimal_scalar(polynomials.eps)),
-            ("eps_r", format_decimal_scalar(polynomials.eps_r)),
-        ], shared_summary_width),
+        prototype_summary = format_aligned_summary_with_width(
+            &[
+                ("order", polynomials.order.to_string()),
+                (
+                    "ripple_factor",
+                    format_decimal_scalar(polynomials.ripple_factor)
+                ),
+                ("eps", format_decimal_scalar(polynomials.eps)),
+                ("eps_r", format_decimal_scalar(polynomials.eps_r)),
+            ],
+            shared_summary_width
+        ),
         polynomial_block = polynomial_block,
         singularity_title = indent_line("Corresponding Singularities", 3),
         singularity_view = indent_block(&format_box_table(&singularity_table), 3),
         synthesis_title = format_numbered_heading(3, "Canonical Synthesis"),
-        synthesis_summary = format_aligned_summary_with_width(&[
-            ("approximation_kind", synthesis.approximation.to_string()),
-            ("matrix_method", format!("{:?}", synthesis.matrix_method)),
-            ("topology", format!("{:?}", matrix.topology())),
-            ("shape", format!("{:?}", matrix.shape())),
-        ], shared_summary_width),
+        synthesis_summary = format_aligned_summary_with_width(
+            &[
+                ("approximation_kind", synthesis.approximation.to_string()),
+                ("matrix_method", format!("{:?}", synthesis.matrix_method)),
+                ("topology", format!("{:?}", matrix.topology())),
+                ("shape", format!("{:?}", matrix.shape())),
+            ],
+            shared_summary_width
+        ),
         matrix_title = indent_line("Canonical Coupling Matrix", 3),
         matrix_view = indent_block(&format_box_table(&format_matrix_table_data(matrix)), 3),
         transform_title = format_numbered_heading(4, "Transform"),
-        transform_summary = format_aligned_summary_with_width(&[
-            ("requested_topology", format!("{:?}", transform.topology)),
-            ("source_topology", format!("{:?}", transform.report.source_topology)),
-            ("result_topology", format!("{:?}", transform.report.result_topology)),
-            ("pattern_verified", transform.report.pattern_verified.to_string()),
-            (
-                "response_check_passed",
-                transform.report.response.passes().to_string(),
-            ),
-            ("overall_passed", transform.report.passes().to_string()),
-        ], shared_summary_width),
+        transform_summary = format_aligned_summary_with_width(
+            &[
+                ("requested_topology", format!("{:?}", transform.topology)),
+                (
+                    "source_topology",
+                    format!("{:?}", transform.report.source_topology)
+                ),
+                (
+                    "result_topology",
+                    format!("{:?}", transform.report.result_topology)
+                ),
+                (
+                    "pattern_verified",
+                    transform.report.pattern_verified.to_string()
+                ),
+                (
+                    "response_check_passed",
+                    transform.report.response.passes().to_string(),
+                ),
+                ("overall_passed", transform.report.passes().to_string()),
+            ],
+            shared_summary_width
+        ),
         notes_block = format_notes_block(&transform.report.notes),
         transformed_title = indent_line("Transformed Coupling Matrix", 3),
-        transformed_view = indent_block(&format_box_table(&format_matrix_table_data(transformed)), 3),
+        transformed_view =
+            indent_block(&format_box_table(&format_matrix_table_data(transformed)), 3),
         response_title = format_numbered_heading(5, "Response Summary"),
-        response_summary = format_aligned_summary_with_width(&[(
-            "sample_count",
-            response.samples.len().to_string(),
-        )], shared_summary_width),
+        response_summary = format_aligned_summary_with_width(
+            &[("sample_count", response.samples.len().to_string(),)],
+            shared_summary_width
+        ),
         response_samples_title = indent_line("Response Samples", 3),
         response_table = indent_block(&format_box_table(&response_table), 3),
     ))

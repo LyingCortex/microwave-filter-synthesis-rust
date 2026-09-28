@@ -24,25 +24,27 @@ use mfs::transform::{transform_matrix, TopologyKind};
 /// - return loss in [15.0, 25.0] dB
 /// - 0 to (order - 1) transmission zeros with magnitudes in [1.1, 3.0]
 fn filter_spec_strategy() -> impl Strategy<Value = FilterSpec> {
-    (2usize..=8usize, 15.0f64..=25.0f64).prop_flat_map(|(order, return_loss)| {
-        let max_tzs = order - 1;
-        (
-            Just(order),
-            Just(return_loss),
-            proptest::collection::vec(1.1f64..=3.0f64, 0..=max_tzs),
-        )
-    }).prop_map(|(order, return_loss, tz_magnitudes)| {
-        // Create symmetric pairs and single zeros from magnitudes
-        let tzs: Vec<f64> = tz_magnitudes
-            .iter()
-            .enumerate()
-            .map(|(i, &mag)| if i % 2 == 0 { mag } else { -mag })
-            .collect();
+    (2usize..=8usize, 15.0f64..=25.0f64)
+        .prop_flat_map(|(order, return_loss)| {
+            let max_tzs = order - 1;
+            (
+                Just(order),
+                Just(return_loss),
+                proptest::collection::vec(1.1f64..=3.0f64, 0..=max_tzs),
+            )
+        })
+        .prop_map(|(order, return_loss, tz_magnitudes)| {
+            // Create symmetric pairs and single zeros from magnitudes
+            let tzs: Vec<f64> = tz_magnitudes
+                .iter()
+                .enumerate()
+                .map(|(i, &mag)| if i % 2 == 0 { mag } else { -mag })
+                .collect();
 
-        FilterSpec::new(order, return_loss)
-            .expect("valid order and return loss")
-            .with_normalized_transmission_zeros(tzs)
-    })
+            FilterSpec::new(order, return_loss)
+                .expect("valid order and return loss")
+                .with_normalized_transmission_zeros(tzs)
+        })
 }
 
 /// Strategy to generate a valid FilterSpec with:
@@ -50,25 +52,27 @@ fn filter_spec_strategy() -> impl Strategy<Value = FilterSpec> {
 /// - return loss in [15.0, 25.0] dB
 /// - at least 1 transmission zero (1 to order-1 TZs) with magnitudes in [1.1, 3.0]
 fn filter_spec_with_tzs_strategy() -> impl Strategy<Value = FilterSpec> {
-    (3usize..=8usize, 15.0f64..=25.0f64).prop_flat_map(|(order, return_loss)| {
-        let max_tzs = order - 1;
-        (
-            Just(order),
-            Just(return_loss),
-            proptest::collection::vec(1.1f64..=3.0f64, 1..=max_tzs),
-        )
-    }).prop_map(|(order, return_loss, tz_magnitudes)| {
-        // Create symmetric pairs and single zeros from magnitudes
-        let tzs: Vec<f64> = tz_magnitudes
-            .iter()
-            .enumerate()
-            .map(|(i, &mag)| if i % 2 == 0 { mag } else { -mag })
-            .collect();
+    (3usize..=8usize, 15.0f64..=25.0f64)
+        .prop_flat_map(|(order, return_loss)| {
+            let max_tzs = order - 1;
+            (
+                Just(order),
+                Just(return_loss),
+                proptest::collection::vec(1.1f64..=3.0f64, 1..=max_tzs),
+            )
+        })
+        .prop_map(|(order, return_loss, tz_magnitudes)| {
+            // Create symmetric pairs and single zeros from magnitudes
+            let tzs: Vec<f64> = tz_magnitudes
+                .iter()
+                .enumerate()
+                .map(|(i, &mag)| if i % 2 == 0 { mag } else { -mag })
+                .collect();
 
-        FilterSpec::new(order, return_loss)
-            .expect("valid order and return loss")
-            .with_normalized_transmission_zeros(tzs)
-    })
+            FilterSpec::new(order, return_loss)
+                .expect("valid order and return loss")
+                .with_normalized_transmission_zeros(tzs)
+        })
 }
 
 proptest! {
@@ -427,7 +431,6 @@ proptest! {
     }
 }
 
-
 // Feature: synthesis-numerical-fix, Property 8: Backward compatibility for real-residue configurations
 // **Validates: Requirements 7.1, 7.2, 7.3**
 
@@ -440,26 +443,27 @@ proptest! {
 /// is less than order-1, leaving enough "room" for the poles to remain on the
 /// imaginary axis with real-valued residues.
 fn real_residue_spec_strategy() -> impl Strategy<Value = FilterSpec> {
-    (4usize..=8usize, 15.0f64..=25.0f64).prop_flat_map(|(order, return_loss)| {
-        let max_tzs = order - 2;
-        (
-            Just(order),
-            Just(return_loss),
-            proptest::collection::vec(1.1f64..=3.0f64, 1..=max_tzs),
-        )
-    })
-    .prop_map(|(order, return_loss, tz_magnitudes)| {
-        // Create symmetric pairs and single zeros from magnitudes
-        let tzs: Vec<f64> = tz_magnitudes
-            .iter()
-            .enumerate()
-            .map(|(i, &mag)| if i % 2 == 0 { mag } else { -mag })
-            .collect();
+    (4usize..=8usize, 15.0f64..=25.0f64)
+        .prop_flat_map(|(order, return_loss)| {
+            let max_tzs = order - 2;
+            (
+                Just(order),
+                Just(return_loss),
+                proptest::collection::vec(1.1f64..=3.0f64, 1..=max_tzs),
+            )
+        })
+        .prop_map(|(order, return_loss, tz_magnitudes)| {
+            // Create symmetric pairs and single zeros from magnitudes
+            let tzs: Vec<f64> = tz_magnitudes
+                .iter()
+                .enumerate()
+                .map(|(i, &mag)| if i % 2 == 0 { mag } else { -mag })
+                .collect();
 
-        FilterSpec::new(order, return_loss)
-            .expect("valid order and return loss")
-            .with_normalized_transmission_zeros(tzs)
-    })
+            FilterSpec::new(order, return_loss)
+                .expect("valid order and return loss")
+                .with_normalized_transmission_zeros(tzs)
+        })
 }
 
 proptest! {

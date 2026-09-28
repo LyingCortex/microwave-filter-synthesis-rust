@@ -1,7 +1,7 @@
 //! Verifies MFS synthesis results against Cameron literature reference data.
 
-use mfs::prelude::*;
 use mfs::approx::generalized_chebyshev_polynomials;
+use mfs::prelude::*;
 use mfs::spec::FilterSpec;
 
 fn approx_eq(a: f64, b: f64, tol: f64, label: &str) {
@@ -16,8 +16,7 @@ fn main() -> mfs::Result<()> {
 
     // ─── Cameron 1999/2011: 4-2 asymmetric, 22 dB RL, TZs at +j1.3217, +j1.8082 ───
     println!("--- Case: 4-2 Asymmetric (Cameron 1999 Table I / 2011 Table 1) ---");
-    let spec = FilterSpec::new(4, 22.0)?
-        .with_normalized_transmission_zeros(vec![1.3217, 1.8082]);
+    let spec = FilterSpec::new(4, 22.0)?.with_normalized_transmission_zeros(vec![1.3217, 1.8082]);
     let polys = generalized_chebyshev_polynomials(&spec)?;
 
     println!("  Order: {}", polys.order);
@@ -40,9 +39,15 @@ fn main() -> mfs::Result<()> {
             let (ref_re, ref_im) = e_ref[i];
             let re_err = (coeff.re - ref_re).abs();
             let im_err = (coeff.im - ref_im).abs();
-            let status = if re_err < 0.01 && im_err < 0.01 { "OK" } else { "DIFF" };
-            println!("    s^{i}: ({:.4}, {:.4}) ref=({ref_re:.4}, {ref_im:.4}) [{status}]",
-                coeff.re, coeff.im);
+            let status = if re_err < 0.01 && im_err < 0.01 {
+                "OK"
+            } else {
+                "DIFF"
+            };
+            println!(
+                "    s^{i}: ({:.4}, {:.4}) ref=({ref_re:.4}, {ref_im:.4}) [{status}]",
+                coeff.re, coeff.im
+            );
         }
     }
 
@@ -60,44 +65,68 @@ fn main() -> mfs::Result<()> {
             let (ref_re, ref_im) = f_ref[i];
             let re_err = (coeff.re - ref_re).abs();
             let im_err = (coeff.im - ref_im).abs();
-            let status = if re_err < 0.01 && im_err < 0.01 { "OK" } else { "DIFF" };
-            println!("    s^{i}: ({:.4}, {:.4}) ref=({ref_re:.4}, {ref_im:.4}) [{status}]",
-                coeff.re, coeff.im);
+            let status = if re_err < 0.01 && im_err < 0.01 {
+                "OK"
+            } else {
+                "DIFF"
+            };
+            println!(
+                "    s^{i}: ({:.4}, {:.4}) ref=({ref_re:.4}, {ref_im:.4}) [{status}]",
+                coeff.re, coeff.im
+            );
         }
     }
 
     // Synthesize matrix and check folded topology
     let design = FilterDesign::from_spec(&spec)?;
     let folded = design.to_folded()?;
-    println!("\n  Folded matrix source coupling: {:.4}", folded.source_coupling());
-    println!("  Folded matrix load coupling: {:.4}", folded.load_coupling());
+    println!(
+        "\n  Folded matrix source coupling: {:.4}",
+        folded.source_coupling()
+    );
+    println!(
+        "  Folded matrix load coupling: {:.4}",
+        folded.load_coupling()
+    );
     println!("  Chain couplings: {:?}", folded.chain_couplings());
 
     // Check S-parameter response at key points
     let resp = design.response_normalized(-3.0, 3.0, 61)?;
     // At omega=0 (center), S21 should be near 0 dB (passband)
     let center = &resp.samples[30];
-    println!("\n  Response at center (omega=0): S21={:.2} dB, S11={:.2} dB",
-        center.s21_db(), center.s11_db());
+    println!(
+        "\n  Response at center (omega=0): S21={:.2} dB, S11={:.2} dB",
+        center.s21_db(),
+        center.s11_db()
+    );
     // S11 at center should be < -22 dB (return loss)
     if center.s11_db() > -20.0 {
-        eprintln!("  WARNING: S11 at center = {:.2} dB, expected < -22 dB", center.s11_db());
+        eprintln!(
+            "  WARNING: S11 at center = {:.2} dB, expected < -22 dB",
+            center.s11_db()
+        );
     }
 
     // At omega=1.3217 (first TZ), S21 should be very low
     // Find closest point to omega=1.3217
-    let tz1_idx = resp.samples.iter()
+    let tz1_idx = resp
+        .samples
+        .iter()
         .enumerate()
         .min_by(|(_, a), (_, b)| {
-            (a.normalized_omega - 1.3217).abs()
+            (a.normalized_omega - 1.3217)
+                .abs()
                 .partial_cmp(&(b.normalized_omega - 1.3217).abs())
                 .unwrap()
         })
         .map(|(i, _)| i)
         .unwrap_or(0);
     let tz1 = &resp.samples[tz1_idx];
-    println!("  Response near TZ1 (omega={:.3}): S21={:.1} dB",
-        tz1.normalized_omega, tz1.s21_db());
+    println!(
+        "  Response near TZ1 (omega={:.3}): S21={:.1} dB",
+        tz1.normalized_omega,
+        tz1.s21_db()
+    );
 
     // ─── All-pole 4th order, 20 dB (basic sanity check) ───
     println!("\n--- Case: 4th order all-pole, 20 dB RL ---");
@@ -107,7 +136,10 @@ fn main() -> mfs::Result<()> {
     println!("  S21 at center: {:.4} dB (should be ~0)", c2.s21_db());
     println!("  S11 at center: {:.2} dB (should be < -20)", c2.s11_db());
     let power = c2.s11_mag().powi(2) + c2.s21_mag().powi(2);
-    println!("  Power conservation: |S11|²+|S21|² = {:.10} (should be 1.0)", power);
+    println!(
+        "  Power conservation: |S11|²+|S21|² = {:.10} (should be 1.0)",
+        power
+    );
 
     // ─── 6th order with 3 TZs (higher order test) ───
     println!("\n--- Case: 6th order, 23 dB RL, 3 TZs at -2.0, -1.2, 1.5 ---");
@@ -133,18 +165,24 @@ fn main() -> mfs::Result<()> {
 
     // Check TZ locations - S21 should be very low near zeros
     for &tz in &[-2.0, -1.2, 1.5] {
-        let idx = resp3.samples.iter()
+        let idx = resp3
+            .samples
+            .iter()
             .enumerate()
             .min_by(|(_, a), (_, b)| {
-                (a.normalized_omega - tz).abs()
+                (a.normalized_omega - tz)
+                    .abs()
                     .partial_cmp(&(b.normalized_omega - tz).abs())
                     .unwrap()
             })
             .map(|(i, _)| i)
             .unwrap_or(0);
         let s = &resp3.samples[idx];
-        println!("  S21 near TZ={tz:.1}: {:.1} dB (omega={:.3})",
-            s.s21_db(), s.normalized_omega);
+        println!(
+            "  S21 near TZ={tz:.1}: {:.1} dB (omega={:.3})",
+            s.s21_db(),
+            s.normalized_omega
+        );
     }
 
     // ─── 8th order all-pole, 20 dB (high order stability) ───
@@ -164,7 +202,10 @@ fn main() -> mfs::Result<()> {
         let diff = (f.s21_mag() - a.s21_mag()).abs();
         max_diff = max_diff.max(diff);
     }
-    println!("  Folded vs Arrow max |S21| diff: {:.2e} (should be < 1e-10)", max_diff);
+    println!(
+        "  Folded vs Arrow max |S21| diff: {:.2e} (should be < 1e-10)",
+        max_diff
+    );
 
     // ─── 12th order with 6 TZs (stress test) ───
     println!("\n--- Case: 12th order, 20 dB RL, 6 TZs ---");
@@ -182,8 +223,8 @@ fn main() -> mfs::Result<()> {
         let side = f5.side();
         let mut max_asym = 0.0_f64;
         for r in 0..side {
-            for c in (r+1)..side {
-                let diff = (f5.at(r,c).unwrap() - f5.at(c,r).unwrap()).abs();
+            for c in (r + 1)..side {
+                let diff = (f5.at(r, c).unwrap() - f5.at(c, r).unwrap()).abs();
                 max_asym = max_asym.max(diff);
             }
         }

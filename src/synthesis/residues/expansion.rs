@@ -1,6 +1,4 @@
-use crate::approx::{
-    AdaptiveRootSolver, ComplexCoefficient, ComplexPolynomial, PolynomialSet,
-};
+use crate::approx::{AdaptiveRootSolver, ComplexCoefficient, ComplexPolynomial, PolynomialSet};
 use crate::error::{MfsError, Result};
 
 use super::admittance::synthesize_admittance_polynomials;
@@ -80,10 +78,7 @@ pub fn classify_residues(
     if y12.residues.len() != num_residues || y22.residues.len() != num_residues {
         return Err(MfsError::DimensionMismatch {
             expected: num_residues,
-            actual: y12
-                .residues
-                .len()
-                .min(y22.residues.len()),
+            actual: y12.residues.len().min(y22.residues.len()),
         });
     }
 
@@ -252,7 +247,8 @@ fn poly_long_division(
     }
 
     // Work with coefficients in descending order for easier division
-    let mut remainder: Vec<ComplexCoefficient> = numerator.coefficients.iter().copied().rev().collect();
+    let mut remainder: Vec<ComplexCoefficient> =
+        numerator.coefficients.iter().copied().rev().collect();
     let divisor: Vec<ComplexCoefficient> = denominator.coefficients.iter().copied().rev().collect();
     let leading_divisor = divisor[0];
 
@@ -268,7 +264,8 @@ fn poly_long_division(
     }
 
     // Convert remainder back to ascending order (skip the leading zeros we consumed)
-    let remainder_coeffs: Vec<ComplexCoefficient> = remainder[quotient_len..].iter().copied().rev().collect();
+    let remainder_coeffs: Vec<ComplexCoefficient> =
+        remainder[quotient_len..].iter().copied().rev().collect();
     let remainder_poly = if remainder_coeffs.is_empty() {
         ComplexPolynomial::new(vec![ComplexCoefficient::new(0.0, 0.0)])?
     } else {
@@ -276,7 +273,8 @@ fn poly_long_division(
     };
 
     // Convert quotient to ascending order
-    let quotient_ascending: Vec<ComplexCoefficient> = quotient_descending.into_iter().rev().collect();
+    let quotient_ascending: Vec<ComplexCoefficient> =
+        quotient_descending.into_iter().rev().collect();
 
     Ok((quotient_ascending, remainder_poly))
 }
@@ -405,12 +403,14 @@ mod tests {
             constant_term: None,
         };
 
-        let real_classifications = classify_residues(&real_residues, &real_residues_2, &real_residues_3, 1e-6)?;
+        let real_classifications =
+            classify_residues(&real_residues, &real_residues_2, &real_residues_3, 1e-6)?;
         assert_eq!(real_classifications.len(), 2);
         for c in &real_classifications {
             assert!(
                 matches!(c, ResidueClassification::Real { .. }),
-                "purely real residues should be classified as Real, got {:?}", c
+                "purely real residues should be classified as Real, got {:?}",
+                c
             );
         }
 

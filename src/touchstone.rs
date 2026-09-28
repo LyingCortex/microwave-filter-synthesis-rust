@@ -12,30 +12,56 @@ use crate::response::{ResponseSample, SParameterResponse};
 
 /// Frequency unit for Touchstone export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FreqUnit { Hz, KHz, MHz, GHz }
+pub enum FreqUnit {
+    Hz,
+    KHz,
+    MHz,
+    GHz,
+}
 
 impl FreqUnit {
     fn label(&self) -> &'static str {
-        match self { Self::Hz => "HZ", Self::KHz => "KHZ", Self::MHz => "MHZ", Self::GHz => "GHZ" }
+        match self {
+            Self::Hz => "HZ",
+            Self::KHz => "KHZ",
+            Self::MHz => "MHZ",
+            Self::GHz => "GHZ",
+        }
     }
     fn divisor(&self) -> f64 {
-        match self { Self::Hz => 1.0, Self::KHz => 1e3, Self::MHz => 1e6, Self::GHz => 1e9 }
+        match self {
+            Self::Hz => 1.0,
+            Self::KHz => 1e3,
+            Self::MHz => 1e6,
+            Self::GHz => 1e9,
+        }
     }
 }
 
 /// Data format for S-parameter values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DataFormat { RI, MA, DB }
+pub enum DataFormat {
+    RI,
+    MA,
+    DB,
+}
 
 impl DataFormat {
     fn label(&self) -> &'static str {
-        match self { Self::RI => "RI", Self::MA => "MA", Self::DB => "DB" }
+        match self {
+            Self::RI => "RI",
+            Self::MA => "MA",
+            Self::DB => "DB",
+        }
     }
 }
 
 /// Touchstone file version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TouchstoneVersion { V1, V2 }
+pub enum TouchstoneVersion {
+    V1,
+    V2,
+}
 
 /// Configuration for Touchstone export.
 #[derive(Debug, Clone)]
@@ -62,14 +88,20 @@ impl Default for TouchstoneConfig {
 /// Formats an `SParameterResponse` as a Touchstone string (v1.0 or v2.0).
 ///
 /// Assumes symmetric reciprocal 2-port (S12=S21, S22=S11).
-pub fn to_touchstone_string(response: &SParameterResponse, config: &TouchstoneConfig) -> Result<String> {
+pub fn to_touchstone_string(
+    response: &SParameterResponse,
+    config: &TouchstoneConfig,
+) -> Result<String> {
     if response.samples.is_empty() {
-        return Err(MfsError::PreconditionViolation("cannot export empty response".into()));
+        return Err(MfsError::PreconditionViolation(
+            "cannot export empty response".into(),
+        ));
     }
     if config.impedance <= 0.0 {
-        return Err(MfsError::PreconditionViolation(
-            format!("impedance must be > 0, got {}", config.impedance),
-        ));
+        return Err(MfsError::PreconditionViolation(format!(
+            "impedance must be > 0, got {}",
+            config.impedance
+        )));
     }
 
     let mut out = String::new();
@@ -91,7 +123,14 @@ pub fn to_touchstone_string(response: &SParameterResponse, config: &TouchstoneCo
     }
 
     // Option line
-    writeln!(out, "# {} S {} R {}", config.freq_unit.label(), config.format.label(), config.impedance).unwrap();
+    writeln!(
+        out,
+        "# {} S {} R {}",
+        config.freq_unit.label(),
+        config.format.label(),
+        config.impedance
+    )
+    .unwrap();
 
     // V2.0 network data marker
     if config.version == TouchstoneVersion::V2 {
@@ -121,9 +160,9 @@ pub fn write_touchstone(
     path: impl AsRef<Path>,
 ) -> Result<()> {
     let content = to_touchstone_string(response, config)?;
-    fs::write(path, content).map_err(|e| MfsError::PreconditionViolation(
-        format!("failed to write Touchstone file: {e}"),
-    ))
+    fs::write(path, content).map_err(|e| {
+        MfsError::PreconditionViolation(format!("failed to write Touchstone file: {e}"))
+    })
 }
 
 /// Reads a Touchstone file using the `touchstone` crate and returns S-parameter data.
@@ -133,15 +172,18 @@ pub fn read_touchstone(path: impl AsRef<Path>) -> Result<SParameterResponse> {
     })?;
 
     if network.rank != 2 {
-        return Err(MfsError::PreconditionViolation(
-            format!("expected 2-port network, got {}-port", network.rank),
-        ));
+        return Err(MfsError::PreconditionViolation(format!(
+            "expected 2-port network, got {}-port",
+            network.rank
+        )));
     }
 
     let s11_data = network.s_ri(1, 1);
     let s21_data = network.s_ri(2, 1);
 
-    let samples = s11_data.iter().zip(s21_data.iter())
+    let samples = s11_data
+        .iter()
+        .zip(s21_data.iter())
         .map(|(s11, s21)| ResponseSample {
             frequency_hz: s11.frequency,
             normalized_omega: 0.0,
@@ -173,8 +215,14 @@ pub fn build_network(response: &SParameterResponse, z0: f64) -> Result<touchston
     // The ".s2p" extension encodes the 2-port rank (the builder validates it).
     let mut builder = touchstone::NetworkBuilder::new("generated.s2p", 2).z0(z0);
     for s in &response.samples {
-        let s11 = touchstone::Complex { re: s.s11_re, im: s.s11_im };
-        let s21 = touchstone::Complex { re: s.s21_re, im: s.s21_im };
+        let s11 = touchstone::Complex {
+            re: s.s11_re,
+            im: s.s11_im,
+        };
+        let s21 = touchstone::Complex {
+            re: s.s21_re,
+            im: s.s21_im,
+        };
         // Rows are destination ports, columns source ports:
         // [S11 S12; S21 S22] = [s11 s21; s21 s11] for a symmetric 2-port.
         let matrix = touchstone::SMatrix {
@@ -210,7 +258,10 @@ pub fn cascade(a: &touchstone::Network, b: &touchstone::Network) -> Result<touch
                 rank = net.rank
             )));
         }
-        if matches!(net.reference_impedance(), touchstone::ReferenceImpedance::PerPort(_)) {
+        if matches!(
+            net.reference_impedance(),
+            touchstone::ReferenceImpedance::PerPort(_)
+        ) {
             return Err(MfsError::PreconditionViolation(format!(
                 "cascade requires a common reference impedance; network `{label}` has per-port impedances"
             )));
@@ -246,12 +297,17 @@ fn format_data_line(freq: f64, s: &ResponseSample, fmt: DataFormat) -> String {
     match fmt {
         DataFormat::RI => {
             // S11_re S11_im S21_re S21_im S12_re S12_im S22_re S22_im
-            format!("{:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e}",
+            format!(
+                "{:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e}",
                 freq,
-                s.s11_re, s.s11_im,
-                s.s21_re, s.s21_im,
-                s.s21_re, s.s21_im,  // S12 = S21 (reciprocal)
-                s.s11_re, s.s11_im,  // S22 = S11 (symmetric)
+                s.s11_re,
+                s.s11_im,
+                s.s21_re,
+                s.s21_im,
+                s.s21_re,
+                s.s21_im, // S12 = S21 (reciprocal)
+                s.s11_re,
+                s.s11_im, // S22 = S11 (symmetric)
             )
         }
         DataFormat::MA => {
@@ -259,12 +315,9 @@ fn format_data_line(freq: f64, s: &ResponseSample, fmt: DataFormat) -> String {
             let s11_ang = s.s11_im.atan2(s.s11_re).to_degrees();
             let s21_mag = s.s21_mag();
             let s21_ang = s.s21_im.atan2(s.s21_re).to_degrees();
-            format!("{:.9e} {:.9e} {:.4} {:.9e} {:.4} {:.9e} {:.4} {:.9e} {:.4}",
-                freq,
-                s11_mag, s11_ang,
-                s21_mag, s21_ang,
-                s21_mag, s21_ang,
-                s11_mag, s11_ang,
+            format!(
+                "{:.9e} {:.9e} {:.4} {:.9e} {:.4} {:.9e} {:.4} {:.9e} {:.4}",
+                freq, s11_mag, s11_ang, s21_mag, s21_ang, s21_mag, s21_ang, s11_mag, s11_ang,
             )
         }
         DataFormat::DB => {
@@ -272,12 +325,9 @@ fn format_data_line(freq: f64, s: &ResponseSample, fmt: DataFormat) -> String {
             let s11_ang = s.s11_im.atan2(s.s11_re).to_degrees();
             let s21_db = s.s21_db();
             let s21_ang = s.s21_im.atan2(s.s21_re).to_degrees();
-            format!("{:.9e} {:.6} {:.4} {:.6} {:.4} {:.6} {:.4} {:.6} {:.4}",
-                freq,
-                s11_db, s11_ang,
-                s21_db, s21_ang,
-                s21_db, s21_ang,
-                s11_db, s11_ang,
+            format!(
+                "{:.9e} {:.6} {:.4} {:.6} {:.4} {:.6} {:.4} {:.6} {:.4}",
+                freq, s11_db, s11_ang, s21_db, s21_ang, s21_db, s21_ang, s11_db, s11_ang,
             )
         }
     }

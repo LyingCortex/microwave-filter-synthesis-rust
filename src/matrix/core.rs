@@ -15,7 +15,9 @@ pub enum MatrixTopology {
     Arrow,
     /// Wheel topology: currently implemented as Arrow with a relabeled topology tag.
     /// A true Wheel reduction (with distinct sparsity pattern) is not yet available.
-    #[deprecated(note = "Use Arrow topology instead. Real Wheel implementation is not yet available.")]
+    #[deprecated(
+        note = "Use Arrow topology instead. Real Wheel implementation is not yet available."
+    )]
     Wheel,
 }
 
@@ -274,7 +276,13 @@ impl CouplingMatrix {
     /// Applies a Givens similarity rotation in-place: M' = R * M * R^T
     /// where R differs from identity only at entries (p,p), (p,q), (q,p), (q,q).
     /// This is O(n) per rotation instead of O(n³) for full matrix multiply.
-    pub(crate) fn apply_givens_similarity_inplace(&mut self, pivot_a: usize, pivot_b: usize, cosine: f64, sine: f64) {
+    pub(crate) fn apply_givens_similarity_inplace(
+        &mut self,
+        pivot_a: usize,
+        pivot_b: usize,
+        cosine: f64,
+        sine: f64,
+    ) {
         let side = self.side();
 
         // Step 1: M' = R * M (affects rows pivot_a and pivot_b)
@@ -343,18 +351,19 @@ impl CouplingMatrix {
 
         for row_oper_num in 0..end_oper {
             for col_in_row_oper in ((row_oper_num + 2)..=(filter_order - row_oper_num)).rev() {
-                if matrix
-                    .get(row_oper_num, col_in_row_oper)
-                    .abs()
-                    > 1e-7
-                {
+                if matrix.get(row_oper_num, col_in_row_oper).abs() > 1e-7 {
                     // Column operation: zero out (row_oper_num, col_in_row_oper)
                     let pivot_a = col_in_row_oper - 1;
                     let pivot_b = col_in_row_oper;
                     let numerator = -matrix.get(row_oper_num, col_in_row_oper);
                     let denominator = matrix.get(row_oper_num, col_in_row_oper - 1);
                     let theta = safe_angle(numerator, denominator);
-                    matrix.apply_givens_similarity_inplace(pivot_a, pivot_b, theta.cos(), theta.sin());
+                    matrix.apply_givens_similarity_inplace(
+                        pivot_a,
+                        pivot_b,
+                        theta.cos(),
+                        theta.sin(),
+                    );
                 } else {
                     matrix.set_entry(row_oper_num, col_in_row_oper, 0.0);
                     matrix.set_entry(col_in_row_oper, row_oper_num, 0.0);
@@ -363,18 +372,19 @@ impl CouplingMatrix {
 
             let col_oper_num = side - 1 - row_oper_num;
             for row_in_col_oper in (row_oper_num + 2)..=(col_oper_num.saturating_sub(2)) {
-                if matrix
-                    .get(row_in_col_oper, col_oper_num)
-                    .abs()
-                    > 1e-7
-                {
+                if matrix.get(row_in_col_oper, col_oper_num).abs() > 1e-7 {
                     // Row operation: zero out (row_in_col_oper, col_oper_num)
                     let pivot_a = row_in_col_oper;
                     let pivot_b = row_in_col_oper + 1;
                     let numerator = matrix.get(row_in_col_oper, col_oper_num);
                     let denominator = matrix.get(row_in_col_oper + 1, col_oper_num);
                     let theta = safe_angle(numerator, denominator);
-                    matrix.apply_givens_similarity_inplace(pivot_a, pivot_b, theta.cos(), theta.sin());
+                    matrix.apply_givens_similarity_inplace(
+                        pivot_a,
+                        pivot_b,
+                        theta.cos(),
+                        theta.sin(),
+                    );
                 } else {
                     matrix.set_entry(row_in_col_oper, col_oper_num, 0.0);
                     matrix.set_entry(col_oper_num, row_in_col_oper, 0.0);

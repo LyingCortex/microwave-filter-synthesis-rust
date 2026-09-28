@@ -9,7 +9,7 @@ mod admittance;
 mod expansion;
 mod transversal;
 
-pub use admittance::{AdmittancePolynomials, synthesize_admittance_polynomials};
+pub use admittance::{synthesize_admittance_polynomials, AdmittancePolynomials};
 pub use expansion::{
     classify_residues, residue_real_component, synthesize_residue_expansions, ClassifiedResidues,
     ResidueClassification, ResidueExpansion, ResiduePole,

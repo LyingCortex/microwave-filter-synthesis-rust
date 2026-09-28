@@ -48,7 +48,8 @@ pub(crate) fn build_transversal_from_residues(
                     return Err(MfsError::NumericalFailure(format!(
                         "transversal synthesis expects poles close to the imaginary axis \
                          (pole real part {:.2e} exceeds tolerance {:.2e} for order {order})",
-                        pole.re.abs(), pole_axis_tolerance
+                        pole.re.abs(),
+                        pole_axis_tolerance
                     )));
                 }
 
@@ -266,13 +267,17 @@ mod tests {
 
         // Verify |source_coupling_1| ≈ |load_coupling_1|
         assert_approx_eq(
-            source_1, load_1, 1e-6,
+            source_1,
+            load_1,
+            1e-6,
             "source coupling 1 should equal load coupling 1 for symmetric all-pole",
         );
 
         // Verify |source_coupling_2| ≈ |load_coupling_2|
         assert_approx_eq(
-            source_2, load_2, 1e-6,
+            source_2,
+            load_2,
+            1e-6,
             "source coupling 2 should equal load coupling 2 for symmetric all-pole",
         );
 
@@ -305,14 +310,14 @@ mod tests {
         // The sum of all diagonal entries should be zero (symmetric pole distribution)
         let diag_sum = diag_1 + diag_2 + diag_3;
         assert_approx_eq(
-            diag_sum, 0.0, 1e-6,
+            diag_sum,
+            0.0,
+            1e-6,
             "sum of diagonal entries should be zero for symmetric all-pole filter",
         );
 
         // At least one diagonal should be zero (the pole at the origin for odd order)
-        let has_zero_diagonal = [diag_1, diag_2, diag_3]
-            .iter()
-            .any(|d| d.abs() < 1e-6);
+        let has_zero_diagonal = [diag_1, diag_2, diag_3].iter().any(|d| d.abs() < 1e-6);
         assert!(
             has_zero_diagonal,
             "odd-order all-pole should have at least one zero diagonal (pole at origin)"
@@ -372,7 +377,9 @@ mod tests {
                 let val_ij = matrix.at(row, col).unwrap();
                 let val_ji = matrix.at(col, row).unwrap();
                 assert_approx_eq(
-                    val_ij, val_ji, 1e-10,
+                    val_ij,
+                    val_ji,
+                    1e-10,
                     &format!("matrix should be symmetric: M[{row},{col}] vs M[{col},{row}]"),
                 );
             }
@@ -389,30 +396,78 @@ mod tests {
 
         // Reference values cross-validated against the fuqtgui Python engine
         // (CouplingMatrix.find_Ps / find_Es / coupling_matrix pipeline).
-        assert_approx_eq(matrix.at(0, 1).unwrap(), 3.2436689194764357e-1, 1e-10,
-            "reference value M[0,1]");
-        assert_approx_eq(matrix.at(0, 2).unwrap(), 6.399_549_402_261_45e-1, 1e-10,
-            "reference value M[0,2]");
-        assert_approx_eq(matrix.at(0, 3).unwrap(), 6.399_549_402_261_471e-1, 1e-10,
-            "reference value M[0,3]");
-        assert_approx_eq(matrix.at(0, 4).unwrap(), 3.2436689194763746e-1, 1e-10,
-            "reference value M[0,4]");
-        assert_approx_eq(matrix.at(1, 1).unwrap(), 1.2452660363370787e0, 1e-10,
-            "reference value M[1,1]");
-        assert_approx_eq(matrix.at(1, 5).unwrap(), -3.243_668_919_476_355e-1, 1e-10,
-            "reference value M[1,5]");
-        assert_approx_eq(matrix.at(2, 2).unwrap(), 7.629_923_476_301_826e-1, 1e-10,
-            "reference value M[2,2]");
-        assert_approx_eq(matrix.at(2, 5).unwrap(), 6.399_549_402_261_467e-1, 1e-10,
-            "reference value M[2,5]");
-        assert_approx_eq(matrix.at(3, 3).unwrap(), -7.629_923_476_301_85e-1, 1e-10,
-            "reference value M[3,3]");
-        assert_approx_eq(matrix.at(3, 5).unwrap(), -6.399_549_402_261_474e-1, 1e-10,
-            "reference value M[3,5]");
-        assert_approx_eq(matrix.at(4, 4).unwrap(), -1.2452660363370769e0, 1e-10,
-            "reference value M[4,4]");
-        assert_approx_eq(matrix.at(4, 5).unwrap(), 3.243_668_919_476_47e-1, 1e-10,
-            "reference value M[4,5]");
+        assert_approx_eq(
+            matrix.at(0, 1).unwrap(),
+            3.2436689194764357e-1,
+            1e-10,
+            "reference value M[0,1]",
+        );
+        assert_approx_eq(
+            matrix.at(0, 2).unwrap(),
+            6.399_549_402_261_45e-1,
+            1e-10,
+            "reference value M[0,2]",
+        );
+        assert_approx_eq(
+            matrix.at(0, 3).unwrap(),
+            6.399_549_402_261_471e-1,
+            1e-10,
+            "reference value M[0,3]",
+        );
+        assert_approx_eq(
+            matrix.at(0, 4).unwrap(),
+            3.2436689194763746e-1,
+            1e-10,
+            "reference value M[0,4]",
+        );
+        assert_approx_eq(
+            matrix.at(1, 1).unwrap(),
+            1.2452660363370787e0,
+            1e-10,
+            "reference value M[1,1]",
+        );
+        assert_approx_eq(
+            matrix.at(1, 5).unwrap(),
+            -3.243_668_919_476_355e-1,
+            1e-10,
+            "reference value M[1,5]",
+        );
+        assert_approx_eq(
+            matrix.at(2, 2).unwrap(),
+            7.629_923_476_301_826e-1,
+            1e-10,
+            "reference value M[2,2]",
+        );
+        assert_approx_eq(
+            matrix.at(2, 5).unwrap(),
+            6.399_549_402_261_467e-1,
+            1e-10,
+            "reference value M[2,5]",
+        );
+        assert_approx_eq(
+            matrix.at(3, 3).unwrap(),
+            -7.629_923_476_301_85e-1,
+            1e-10,
+            "reference value M[3,3]",
+        );
+        assert_approx_eq(
+            matrix.at(3, 5).unwrap(),
+            -6.399_549_402_261_474e-1,
+            1e-10,
+            "reference value M[3,5]",
+        );
+        assert_approx_eq(
+            matrix.at(4, 4).unwrap(),
+            -1.2452660363370769e0,
+            1e-10,
+            "reference value M[4,4]",
+        );
+        assert_approx_eq(
+            matrix.at(4, 5).unwrap(),
+            3.243_668_919_476_47e-1,
+            1e-10,
+            "reference value M[4,5]",
+        );
 
         Ok(())
     }
@@ -432,9 +487,8 @@ mod tests {
         let side = matrix.side(); // 6
 
         // Collect source couplings (row 0, columns 1..=4)
-        let source_couplings: Vec<f64> = (1..=order)
-            .map(|col| matrix.at(0, col).unwrap())
-            .collect();
+        let source_couplings: Vec<f64> =
+            (1..=order).map(|col| matrix.at(0, col).unwrap()).collect();
 
         // Collect load couplings (rows 1..=4, column 5)
         let load_couplings: Vec<f64> = (1..=order)
@@ -454,7 +508,11 @@ mod tests {
         // Verify that load couplings have signs determined by the residue_12 ratio.
         // The key invariant is: for each resonator k, source_k * load_k has the same
         // sign as the combined real part of the y12 residue (2*Re(r12) for complex pairs).
-        for (i, (&sc, &lc)) in source_couplings.iter().zip(load_couplings.iter()).enumerate() {
+        for (i, (&sc, &lc)) in source_couplings
+            .iter()
+            .zip(load_couplings.iter())
+            .enumerate()
+        {
             let product = sc * lc;
             // For complex pairs, the effective residue is 2*Re(r12)
             let effective_r12 = 2.0 * y12.residues[i].residue.re;
@@ -471,7 +529,9 @@ mod tests {
             let m_0_col = matrix.at(0, col).unwrap();
             let m_col_0 = matrix.at(col, 0).unwrap();
             assert_approx_eq(
-                m_0_col, m_col_0, 1e-10,
+                m_0_col,
+                m_col_0,
+                1e-10,
                 &format!("source coupling symmetry at column {col}"),
             );
         }
@@ -479,7 +539,9 @@ mod tests {
             let m_row_last = matrix.at(row, side - 1).unwrap();
             let m_last_row = matrix.at(side - 1, row).unwrap();
             assert_approx_eq(
-                m_row_last, m_last_row, 1e-10,
+                m_row_last,
+                m_last_row,
+                1e-10,
                 &format!("load coupling symmetry at row {row}"),
             );
         }

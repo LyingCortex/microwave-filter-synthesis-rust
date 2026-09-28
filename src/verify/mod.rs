@@ -166,19 +166,18 @@ pub fn compare_responses(
         comparison.max_normalized_omega_deviation = comparison
             .max_normalized_omega_deviation
             .max((left.normalized_omega - right.normalized_omega).abs());
-        comparison.max_s11_magnitude_deviation = comparison
-            .max_s11_magnitude_deviation
-            .max((magnitude(left.s11_re, left.s11_im) - magnitude(right.s11_re, right.s11_im)).abs());
-        comparison.max_s21_magnitude_deviation = comparison
-            .max_s21_magnitude_deviation
-            .max((magnitude(left.s21_re, left.s21_im) - magnitude(right.s21_re, right.s21_im)).abs());
+        comparison.max_s11_magnitude_deviation = comparison.max_s11_magnitude_deviation.max(
+            (magnitude(left.s11_re, left.s11_im) - magnitude(right.s11_re, right.s11_im)).abs(),
+        );
+        comparison.max_s21_magnitude_deviation = comparison.max_s21_magnitude_deviation.max(
+            (magnitude(left.s21_re, left.s21_im) - magnitude(right.s21_re, right.s21_im)).abs(),
+        );
         // Group delay is only compared where both samples have it (the
         // pole-expansion fast path leaves it None); mixed/missing values are
         // skipped rather than treated as a zero deviation.
         if let (Some(l), Some(r)) = (left.group_delay, right.group_delay) {
-            comparison.max_group_delay_deviation = comparison
-                .max_group_delay_deviation
-                .max((l - r).abs());
+            comparison.max_group_delay_deviation =
+                comparison.max_group_delay_deviation.max((l - r).abs());
         }
     }
 
@@ -186,10 +185,7 @@ pub fn compare_responses(
 }
 
 /// Returns whether a matrix matches the expected folded source-side sparsity pattern.
-pub fn matches_folded_pattern(
-    matrix: &CouplingMatrix,
-    tolerance: MatrixPatternTolerance,
-) -> bool {
+pub fn matches_folded_pattern(matrix: &CouplingMatrix, tolerance: MatrixPatternTolerance) -> bool {
     for col in 2..=matrix.order() {
         if !is_structural_zero(matrix.at(0, col).unwrap_or_default(), tolerance) {
             return false;
@@ -210,10 +206,7 @@ pub fn matches_folded_pattern(
 }
 
 /// Returns whether a matrix matches the current arrow-reduction sparsity pattern.
-pub fn matches_arrow_pattern(
-    matrix: &CouplingMatrix,
-    tolerance: MatrixPatternTolerance,
-) -> bool {
+pub fn matches_arrow_pattern(matrix: &CouplingMatrix, tolerance: MatrixPatternTolerance) -> bool {
     for row in 0..matrix.order().saturating_sub(1) {
         for col in (row + 2)..=matrix.order() {
             if !is_structural_zero(matrix.at(row, col).unwrap_or_default(), tolerance) {
@@ -360,7 +353,12 @@ mod tests {
     use crate::matrix::CouplingMatrixBuilder;
     use crate::response::{ResponseSample, SParameterResponse};
 
-    fn sample(frequency_hz: f64, normalized_omega: f64, s11_re: f64, s21_re: f64) -> ResponseSample {
+    fn sample(
+        frequency_hz: f64,
+        normalized_omega: f64,
+        s11_re: f64,
+        s21_re: f64,
+    ) -> ResponseSample {
         ResponseSample {
             frequency_hz,
             normalized_omega,
@@ -396,7 +394,8 @@ mod tests {
         };
         let rhs = lhs.clone();
         let comparison = compare_responses(&lhs, &rhs)?;
-        let checked = ResponseCheckReport::from_comparison(comparison, ResponseTolerance::default());
+        let checked =
+            ResponseCheckReport::from_comparison(comparison, ResponseTolerance::default());
         assert_eq!(checked.invariant, Some(true));
         assert!(checked.passes());
         Ok(())
@@ -427,7 +426,10 @@ mod tests {
             .set_symmetric(4, 5, 1.0)?
             .build()?;
 
-        assert!(matches_folded_pattern(&matrix, MatrixPatternTolerance::default()));
+        assert!(matches_folded_pattern(
+            &matrix,
+            MatrixPatternTolerance::default()
+        ));
         Ok(())
     }
 
@@ -442,7 +444,10 @@ mod tests {
             .set_symmetric(4, 5, 1.0)?
             .build()?;
 
-        assert!(!matches_arrow_pattern(&matrix, MatrixPatternTolerance::default()));
+        assert!(!matches_arrow_pattern(
+            &matrix,
+            MatrixPatternTolerance::default()
+        ));
         Ok(())
     }
 

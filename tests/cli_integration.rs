@@ -24,7 +24,11 @@ fn cli_bin() -> std::path::PathBuf {
     // binary is in target/debug (or target/release). We use the CARGO_BIN_EXE
     // env var if available (set by cargo for integration tests with [[bin]]),
     // otherwise construct the path manually.
-    let bin_name = if cfg!(windows) { "mfs_cli.exe" } else { "mfs_cli" };
+    let bin_name = if cfg!(windows) {
+        "mfs_cli.exe"
+    } else {
+        "mfs_cli"
+    };
 
     // Try the env var first (available since Rust 1.43 for integration tests)
     if let Ok(path) = std::env::var("CARGO_BIN_EXE_mfs_cli") {
@@ -101,8 +105,7 @@ fn test_json_file_input_produces_json_stdout() {
 
     // Verify stdout is valid JSON
     let stdout = String::from_utf8(output.stdout).expect("stdout is not valid UTF-8");
-    let value: serde_json::Value =
-        serde_json::from_str(&stdout).expect("stdout is not valid JSON");
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("stdout is not valid JSON");
 
     // Verify expected top-level fields are present
     assert!(
@@ -161,8 +164,7 @@ fn test_stdin_input_produces_json_stdout() {
 
     // Verify stdout is valid JSON
     let stdout = String::from_utf8(output.stdout).expect("stdout is not valid UTF-8");
-    let value: serde_json::Value =
-        serde_json::from_str(&stdout).expect("stdout is not valid JSON");
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("stdout is not valid JSON");
 
     // Verify expected fields
     assert!(
@@ -218,8 +220,7 @@ fn test_stage_flag_produces_partial_output() {
 
     // Verify stdout is valid JSON
     let stdout = String::from_utf8(output.stdout).expect("stdout is not valid UTF-8");
-    let value: serde_json::Value =
-        serde_json::from_str(&stdout).expect("stdout is not valid JSON");
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("stdout is not valid JSON");
 
     // Verify it contains approximation-specific fields
     assert_eq!(
@@ -299,8 +300,5 @@ fn test_invalid_input_produces_structured_error_on_stderr() {
 
     // Verify the error_type is meaningful
     let error_type = error_value["error_type"].as_str().unwrap_or("");
-    assert!(
-        !error_type.is_empty(),
-        "error_type should not be empty"
-    );
+    assert!(!error_type.is_empty(), "error_type should not be empty");
 }

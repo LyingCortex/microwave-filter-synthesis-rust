@@ -112,7 +112,10 @@ mod tests {
 
     fn approx_eq(lhs: f64, rhs: f64, tol: f64) {
         let diff = (lhs - rhs).abs();
-        assert!(diff <= tol, "expected {lhs} ~= {rhs} within {tol}, diff={diff}");
+        assert!(
+            diff <= tol,
+            "expected {lhs} ~= {rhs} within {tol}, diff={diff}"
+        );
     }
 
     #[test]

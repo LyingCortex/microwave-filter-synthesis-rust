@@ -87,7 +87,9 @@ mod tests {
         assert!(scaled.source_external_q() > 0.0);
         assert!(scaled.load_external_q() > 0.0);
 
-        let restored = scaled.matrix_hz().normalize_bandpass_with_external_q(&mapping)?;
+        let restored = scaled
+            .matrix_hz()
+            .normalize_bandpass_with_external_q(&mapping)?;
         approx_eq(restored.at(0, 1).unwrap_or_default(), 0.9, 1e-9);
         approx_eq(restored.at(2, 3).unwrap_or_default(), 1.1, 1e-9);
         Ok(())
@@ -169,15 +171,15 @@ mod tests {
         let error = matrix
             .extract_trisection(-1.25, (2, 4))
             .expect_err("non-arrow matrix should be rejected");
-        assert!(matches!(error, crate::error::MfsError::PreconditionViolation(_)));
+        assert!(matches!(
+            error,
+            crate::error::MfsError::PreconditionViolation(_)
+        ));
         Ok(())
     }
 
     /// Reference triple-loop multiply for equivalence testing against nalgebra.
-    fn reference_multiply(
-        lhs: &super::CouplingMatrix,
-        rhs: &super::CouplingMatrix,
-    ) -> Vec<f64> {
+    fn reference_multiply(lhs: &super::CouplingMatrix, rhs: &super::CouplingMatrix) -> Vec<f64> {
         let side = lhs.side();
         let mut data = vec![0.0; side * side];
         for row in 0..side {
@@ -220,7 +222,11 @@ mod tests {
 
         let nalgebra_result = identity.multiply(&matrix_a);
         let reference_result = reference_multiply(&identity, &matrix_a);
-        for (na_val, ref_val) in nalgebra_result.as_slice().iter().zip(reference_result.iter()) {
+        for (na_val, ref_val) in nalgebra_result
+            .as_slice()
+            .iter()
+            .zip(reference_result.iter())
+        {
             let diff = (na_val - ref_val).abs();
             assert!(diff < 1e-12, "multiply deviation {diff} exceeds 1e-12");
         }
@@ -248,7 +254,11 @@ mod tests {
 
         let nalgebra_result = matrix_b.multiply(&matrix_c);
         let reference_result = reference_multiply(&matrix_b, &matrix_c);
-        for (na_val, ref_val) in nalgebra_result.as_slice().iter().zip(reference_result.iter()) {
+        for (na_val, ref_val) in nalgebra_result
+            .as_slice()
+            .iter()
+            .zip(reference_result.iter())
+        {
             let diff = (na_val - ref_val).abs();
             assert!(diff < 1e-12, "multiply deviation {diff} exceeds 1e-12");
         }
@@ -264,7 +274,11 @@ mod tests {
 
         let nalgebra_result = matrix_d.multiply(&matrix_d);
         let reference_result = reference_multiply(&matrix_d, &matrix_d);
-        for (na_val, ref_val) in nalgebra_result.as_slice().iter().zip(reference_result.iter()) {
+        for (na_val, ref_val) in nalgebra_result
+            .as_slice()
+            .iter()
+            .zip(reference_result.iter())
+        {
             let diff = (na_val - ref_val).abs();
             assert!(diff < 1e-12, "multiply deviation {diff} exceeds 1e-12");
         }
@@ -287,37 +301,43 @@ mod tests {
 
         let nalgebra_result = matrix_a.transpose();
         let reference_result = reference_transpose(&matrix_a);
-        for (na_val, ref_val) in nalgebra_result.as_slice().iter().zip(reference_result.iter()) {
+        for (na_val, ref_val) in nalgebra_result
+            .as_slice()
+            .iter()
+            .zip(reference_result.iter())
+        {
             let diff = (na_val - ref_val).abs();
             assert!(diff < 1e-12, "transpose deviation {diff} exceeds 1e-12");
         }
 
         // Test case 2: Non-symmetric matrix (order 4)
         let data: Vec<f64> = (0..36).map(|i| (i as f64) * 0.1 - 1.5).collect();
-        let matrix_b = super::CouplingMatrix::new_with_topology(
-            4,
-            MatrixTopology::Transversal,
-            data,
-        )?;
+        let matrix_b =
+            super::CouplingMatrix::new_with_topology(4, MatrixTopology::Transversal, data)?;
 
         let nalgebra_result = matrix_b.transpose();
         let reference_result = reference_transpose(&matrix_b);
-        for (na_val, ref_val) in nalgebra_result.as_slice().iter().zip(reference_result.iter()) {
+        for (na_val, ref_val) in nalgebra_result
+            .as_slice()
+            .iter()
+            .zip(reference_result.iter())
+        {
             let diff = (na_val - ref_val).abs();
             assert!(diff < 1e-12, "transpose deviation {diff} exceeds 1e-12");
         }
 
         // Test case 3: Larger matrix (order 6, side 8)
         let data: Vec<f64> = (0..64).map(|i| ((i as f64) * 0.37).sin()).collect();
-        let matrix_c = super::CouplingMatrix::new_with_topology(
-            6,
-            MatrixTopology::Transversal,
-            data,
-        )?;
+        let matrix_c =
+            super::CouplingMatrix::new_with_topology(6, MatrixTopology::Transversal, data)?;
 
         let nalgebra_result = matrix_c.transpose();
         let reference_result = reference_transpose(&matrix_c);
-        for (na_val, ref_val) in nalgebra_result.as_slice().iter().zip(reference_result.iter()) {
+        for (na_val, ref_val) in nalgebra_result
+            .as_slice()
+            .iter()
+            .zip(reference_result.iter())
+        {
             let diff = (na_val - ref_val).abs();
             assert!(diff < 1e-12, "transpose deviation {diff} exceeds 1e-12");
         }

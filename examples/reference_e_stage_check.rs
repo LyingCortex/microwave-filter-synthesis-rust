@@ -5,20 +5,28 @@ use num_complex::Complex64;
 
 fn main() -> mfs::Result<()> {
     let case = load_filter_database_case_from_repo("Cameron_passband_symmetry_4_2")?;
-    let model = case
-        .mathematical_model
-        .as_ref()
-        .ok_or_else(|| mfs::MfsError::PreconditionViolation("fixture missing mathematical_model".to_string()))?;
-    let singularities = model
-        .singularities
-        .as_ref()
-        .ok_or_else(|| mfs::MfsError::PreconditionViolation("fixture missing singularities".to_string()))?;
+    let model = case.mathematical_model.as_ref().ok_or_else(|| {
+        mfs::MfsError::PreconditionViolation("fixture missing mathematical_model".to_string())
+    })?;
+    let singularities = model.singularities.as_ref().ok_or_else(|| {
+        mfs::MfsError::PreconditionViolation("fixture missing singularities".to_string())
+    })?;
 
     let f_s = ComplexPolynomial::new(
-        model.polynomial_coefficients.f.iter().map(to_complex).collect(),
+        model
+            .polynomial_coefficients
+            .f
+            .iter()
+            .map(to_complex)
+            .collect(),
     )?;
     let p_s = ComplexPolynomial::new(
-        model.polynomial_coefficients.p.iter().map(to_complex).collect(),
+        model
+            .polynomial_coefficients
+            .p
+            .iter()
+            .map(to_complex)
+            .collect(),
     )?;
     let stage = build_e_polynomial_stage(
         &f_s,

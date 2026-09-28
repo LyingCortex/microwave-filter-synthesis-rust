@@ -26,8 +26,8 @@ fn fixed_complex_roots(degree: usize) -> Vec<ComplexCoefficient> {
 
 fn bench_root_solvers(c: &mut Criterion) {
     for &degree in DEGREES {
-        let polynomial = ComplexPolynomial::from_complex_roots(&fixed_complex_roots(degree))
-            .unwrap();
+        let polynomial =
+            ComplexPolynomial::from_complex_roots(&fixed_complex_roots(degree)).unwrap();
 
         c.bench_function(&format!("root_solvers/durand_kerner/d{degree}"), |b| {
             b.iter(|| {

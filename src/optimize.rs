@@ -9,7 +9,7 @@
 use crate::error::{MfsError, Result};
 use crate::freq::FrequencyGrid;
 use crate::matrix::{CouplingMatrix, CouplingMatrixBuilder};
-use crate::response::{ResponseSolver, ResponseSettings, SParameterResponse};
+use crate::response::{ResponseSettings, ResponseSolver, SParameterResponse};
 
 /// Configuration for the optimization engine.
 #[derive(Debug, Clone)]
@@ -228,12 +228,7 @@ fn compute_jacobian(
 /// Levenberg-Marquardt optimization step.
 ///
 /// Solves: (J^T J + λ diag(J^T J)) Δp = -J^T r
-fn lm_step(
-    jacobian: &[Vec<f64>],
-    residuals: &[f64],
-    lambda: f64,
-    n_params: usize,
-) -> Vec<f64> {
+fn lm_step(jacobian: &[Vec<f64>], residuals: &[f64], lambda: f64, n_params: usize) -> Vec<f64> {
     // Compute J^T J and J^T r
     let mut jtj = vec![vec![0.0; n_params]; n_params];
     let mut jtr = vec![0.0; n_params];
@@ -259,7 +254,9 @@ fn lm_step(
 /// Simple Gaussian elimination for small dense systems.
 fn solve_linear_system(a: &[Vec<f64>], b: &[f64]) -> Vec<f64> {
     let n = b.len();
-    let mut aug: Vec<Vec<f64>> = a.iter().enumerate()
+    let mut aug: Vec<Vec<f64>> = a
+        .iter()
+        .enumerate()
         .map(|(i, row)| {
             let mut r = row.clone();
             r.push(b[i]);
@@ -351,7 +348,15 @@ pub fn optimize_matrix(
             });
         }
 
-        let jacobian = compute_jacobian(initial, &params, config, target, grid, settings, n_residuals)?;
+        let jacobian = compute_jacobian(
+            initial,
+            &params,
+            config,
+            target,
+            grid,
+            settings,
+            n_residuals,
+        )?;
         let step = lm_step(&jacobian, &residuals, lambda, n_params);
 
         // Trial step
@@ -413,7 +418,8 @@ pub fn extract_matrix(
     }
     // Load couplings
     for k in 1..=order {
-        builder = builder.set_symmetric(k, order + 1, coupling / ((order + 1 - k) as f64).sqrt())?;
+        builder =
+            builder.set_symmetric(k, order + 1, coupling / ((order + 1 - k) as f64).sqrt())?;
     }
 
     let initial = builder.build()?;
@@ -445,7 +451,11 @@ mod tests {
         // Verify parameters can be extracted and rebuilt
         let config = OptimizeConfig::default();
         let params = extract_parameters(design.matrix(), &config);
-        eprintln!("params count: {}, values: {:?}", params.len(), &params[..params.len().min(5)]);
+        eprintln!(
+            "params count: {}, values: {:?}",
+            params.len(),
+            &params[..params.len().min(5)]
+        );
 
         let rebuilt = rebuild_matrix(design.matrix(), &params, &config)?;
         let rebuilt_resp = ResponseSolver.evaluate_normalized(&rebuilt, &grid)?;
@@ -460,8 +470,12 @@ mod tests {
         let perturbed = rebuild_matrix(design.matrix(), &perturbed_params, &config)?;
 
         let result = tune_matrix(&perturbed, &target, &grid)?;
-        assert!(result.cost < 1e-3,
-            "cost={:.2e}, iterations={}", result.cost, result.iterations);
+        assert!(
+            result.cost < 1e-3,
+            "cost={:.2e}, iterations={}",
+            result.cost,
+            result.iterations
+        );
         Ok(())
     }
 
@@ -490,8 +504,12 @@ mod tests {
         let result = optimize_matrix(&initial, &target, &grid, &config)?;
 
         // Should converge close to the original
-        assert!(result.cost < 0.01,
-            "cost={:.2e}, iterations={}", result.cost, result.iterations);
+        assert!(
+            result.cost < 0.01,
+            "cost={:.2e}, iterations={}",
+            result.cost,
+            result.iterations
+        );
         Ok(())
     }
 
@@ -508,7 +526,11 @@ mod tests {
         // Verify folded matrix has inter-resonator couplings
         let config = OptimizeConfig::default();
         let params = extract_parameters(&folded, &config);
-        assert!(params.len() > 4, "folded should have inter-resonator params, got {}", params.len());
+        assert!(
+            params.len() > 4,
+            "folded should have inter-resonator params, got {}",
+            params.len()
+        );
 
         // Perturb and tune
         let mut perturbed_params = params.clone();
@@ -516,8 +538,12 @@ mod tests {
         let perturbed = rebuild_matrix(&folded, &perturbed_params, &config)?;
 
         let result = optimize_matrix(&perturbed, &target, &grid, &config)?;
-        assert!(result.cost < 1e-3,
-            "folded tune cost={:.2e}, iterations={}", result.cost, result.iterations);
+        assert!(
+            result.cost < 1e-3,
+            "folded tune cost={:.2e}, iterations={}",
+            result.cost,
+            result.iterations
+        );
         Ok(())
     }
 }

@@ -16,12 +16,14 @@ mod generalized_ops;
 mod polynomial;
 
 pub use complex_poly::{
-    AberthRootSolver, AdaptiveRootSolver, CompanionMatrixRootSolver, ComplexCoefficient,
-    ComplexPolynomial, ComplexRootSolver, DurandKernerRootSolver, FaerRootSolver,
-    compute_root_displacement, multiply_by_s, pad_polynomial,
+    compute_root_displacement, multiply_by_s, pad_polynomial, AberthRootSolver, AdaptiveRootSolver,
+    CompanionMatrixRootSolver, ComplexCoefficient, ComplexPolynomial, ComplexRootSolver,
+    DurandKernerRootSolver, FaerRootSolver,
 };
 pub use generalized_chebyshev::generalized_chebyshev_polynomials;
-pub use polynomial::{PolynomialSet, PolynomialSetParams, chebyshev_ripple_factor, monic_polynomial_from_real_roots};
+pub use polynomial::{
+    chebyshev_ripple_factor, monic_polynomial_from_real_roots, PolynomialSet, PolynomialSetParams,
+};
 
 /// Advanced Cameron/generalized helper primitives.
 ///
@@ -30,10 +32,10 @@ pub use polynomial::{PolynomialSet, PolynomialSetParams, chebyshev_ripple_factor
 /// flattening them into the main `approx` surface.
 pub mod helpers {
     pub use super::generalized_chebyshev_helpers::{
-        APolynomialStage, CameronRecurrence, EPolynomialStage, GeneralizedChebyshevData,
-        PaddedTransmissionZeros, build_a_polynomial_stage, build_e_polynomial_stage,
-        cameron_recursive, find_a_polynomial, find_e_polynomial, find_eps, find_p_polynomial,
-        pad_transmission_zeros, synthesize_generalized_chebyshev_data,
+        build_a_polynomial_stage, build_e_polynomial_stage, cameron_recursive, find_a_polynomial,
+        find_e_polynomial, find_eps, find_p_polynomial, pad_transmission_zeros,
+        synthesize_generalized_chebyshev_data, APolynomialStage, CameronRecurrence,
+        EPolynomialStage, GeneralizedChebyshevData, PaddedTransmissionZeros,
     };
 }
 

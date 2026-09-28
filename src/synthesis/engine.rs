@@ -5,8 +5,7 @@ use crate::matrix::{BandPassScaledCouplingMatrix, CouplingMatrix, MatrixTopology
 
 use super::{
     build_transversal_from_residues, synthesize_admittance_polynomials,
-    synthesize_residue_expansions, AdmittancePolynomials,
-    ResidueExpansion, SectionSynthesis,
+    synthesize_residue_expansions, AdmittancePolynomials, ResidueExpansion, SectionSynthesis,
 };
 
 /// Indicates which matrix-construction path produced the final matrix.
@@ -51,10 +50,11 @@ impl MatrixSynthesisEngine {
         &self,
         polynomials: &PolynomialSet,
     ) -> Result<MatrixSynthesisOutcome> {
-        let _generalized = polynomials.generalized.as_ref()
-            .ok_or_else(|| MfsError::PreconditionViolation(
-                "residue expansion requires generalized Chebyshev data".to_string()
-            ))?;
+        let _generalized = polynomials.generalized.as_ref().ok_or_else(|| {
+            MfsError::PreconditionViolation(
+                "residue expansion requires generalized Chebyshev data".to_string(),
+            )
+        })?;
 
         let (y11, y12, y22) = synthesize_residue_expansions(polynomials)?;
         let matrix = build_transversal_from_residues(polynomials, &y11, &y12, &y22)?;
@@ -108,8 +108,11 @@ impl MatrixSynthesisEngine {
         transmission_zero: f64,
         center_resonator: usize,
     ) -> Result<CouplingMatrix> {
-        SectionSynthesis {}
-            .synthesize_triplet_matrix(polynomials, transmission_zero, center_resonator)
+        SectionSynthesis {}.synthesize_triplet_matrix(
+            polynomials,
+            transmission_zero,
+            center_resonator,
+        )
     }
 
     /// Synthesizes a matrix and extracts a quadruplet section from two adjacent triplets.
@@ -139,15 +142,18 @@ impl MatrixSynthesisEngine {
         transmission_zero: f64,
         zero_positions: (usize, usize),
     ) -> Result<CouplingMatrix> {
-        SectionSynthesis {}
-            .synthesize_trisection_matrix(polynomials, transmission_zero, zero_positions)
+        SectionSynthesis {}.synthesize_trisection_matrix(
+            polynomials,
+            transmission_zero,
+            zero_positions,
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::approx::{PolynomialSet, PolynomialSetParams, generalized_chebyshev_polynomials};
+    use crate::approx::{generalized_chebyshev_polynomials, PolynomialSet, PolynomialSetParams};
     use crate::fixtures::load_filter_database_end_to_end_fixture;
     use crate::freq::BandPassMapping;
     use crate::spec::FilterSpec;
@@ -197,7 +203,7 @@ mod tests {
             for j in 0..n {
                 let d = (base_matrix.at(i, j).unwrap_or(0.0)
                     - perturbed_matrix.at(i, j).unwrap_or(0.0))
-                    .abs();
+                .abs();
                 max_delta = max_delta.max(d);
             }
         }
@@ -231,7 +237,8 @@ mod tests {
         let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros(vec![-1.5, 1.5]);
         let polynomials = generalized_chebyshev_polynomials(&spec)?;
 
-        let arrow = MatrixSynthesisEngine.synthesize_with_topology(&polynomials, MatrixTopology::Arrow)?;
+        let arrow =
+            MatrixSynthesisEngine.synthesize_with_topology(&polynomials, MatrixTopology::Arrow)?;
         assert!(arrow.at(0, 2).unwrap_or_default().abs() <= 1e-6);
         assert!(arrow.at(1, 3).unwrap_or_default().abs() <= 1e-6);
         Ok(())
@@ -243,8 +250,11 @@ mod tests {
         let polynomials = generalized_chebyshev_polynomials(&spec)?;
         let mapping = BandPassMapping::new(6.75e9, 300.0e6)?;
 
-        let scaled =
-            MatrixSynthesisEngine.synthesize_bandpass(&polynomials, MatrixTopology::Folded, &mapping)?;
+        let scaled = MatrixSynthesisEngine.synthesize_bandpass(
+            &polynomials,
+            MatrixTopology::Folded,
+            &mapping,
+        )?;
         assert_eq!(scaled.order(), 3);
         assert!(scaled.at(1, 1).unwrap_or_default().abs() > 1.0e9);
         Ok(())
@@ -256,8 +266,11 @@ mod tests {
         let polynomials = generalized_chebyshev_polynomials(&spec)?;
         let mapping = BandPassMapping::new(6.75e9, 300.0e6)?;
 
-        let scaled = MatrixSynthesisEngine
-            .synthesize_bandpass_with_external_q(&polynomials, MatrixTopology::Transversal, &mapping)?;
+        let scaled = MatrixSynthesisEngine.synthesize_bandpass_with_external_q(
+            &polynomials,
+            MatrixTopology::Transversal,
+            &mapping,
+        )?;
         assert!(scaled.source_external_q() > 0.0);
         assert!(scaled.load_external_q() > 0.0);
         Ok(())

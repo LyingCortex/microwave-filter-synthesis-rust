@@ -17,7 +17,10 @@ fn folded_transform_matches_reusable_folded_pattern_check() -> Result<()> {
         .build()?;
 
     let folded = transform_matrix(&matrix, TopologyKind::Folded)?.matrix;
-    assert!(matches_folded_pattern(&folded, MatrixPatternTolerance::default()));
+    assert!(matches_folded_pattern(
+        &folded,
+        MatrixPatternTolerance::default()
+    ));
     Ok(())
 }
 
@@ -35,6 +38,9 @@ fn arrow_transform_matches_reusable_arrow_pattern_check() -> Result<()> {
         .build()?;
 
     let arrow = transform_matrix(&matrix, TopologyKind::Arrow)?.matrix;
-    assert!(matches_arrow_pattern(&arrow, MatrixPatternTolerance::default()));
+    assert!(matches_arrow_pattern(
+        &arrow,
+        MatrixPatternTolerance::default()
+    ));
     Ok(())
 }

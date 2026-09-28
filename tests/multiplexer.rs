@@ -169,7 +169,11 @@ fn multiplexer_diplexer_parity_with_duplexer() -> mfs::error::Result<()> {
         .rx_bandpass(5, 20.0, 10.2e9, 120.0e6)
         .synthesize()?;
 
-    assert_eq!(mux.channels.len(), 2, "N=2 multiplexer should have 2 channels");
+    assert_eq!(
+        mux.channels.len(),
+        2,
+        "N=2 multiplexer should have 2 channels"
+    );
     assert!(mux.iterations >= 1, "should perform at least one iteration");
     assert!(
         mux.convergence_error.is_finite(),
@@ -182,10 +186,18 @@ fn multiplexer_diplexer_parity_with_duplexer() -> mfs::error::Result<()> {
 
     // The two channels align with the requested bands.
     let tol = 1.0e6; // 1 MHz tolerance on center recovery
-    let c0 = mux.channels[0].center_hz().expect("channel 0 center present");
-    let c1 = mux.channels[1].center_hz().expect("channel 1 center present");
-    let b0 = mux.channels[0].bandwidth_hz().expect("channel 0 bandwidth present");
-    let b1 = mux.channels[1].bandwidth_hz().expect("channel 1 bandwidth present");
+    let c0 = mux.channels[0]
+        .center_hz()
+        .expect("channel 0 center present");
+    let c1 = mux.channels[1]
+        .center_hz()
+        .expect("channel 1 center present");
+    let b0 = mux.channels[0]
+        .bandwidth_hz()
+        .expect("channel 0 bandwidth present");
+    let b1 = mux.channels[1]
+        .bandwidth_hz()
+        .expect("channel 1 bandwidth present");
 
     assert!((c0 - 10.0e9).abs() < tol, "tx center recovered: {c0}");
     assert!((c1 - 10.2e9).abs() < tol, "rx center recovered: {c1}");
@@ -196,8 +208,14 @@ fn multiplexer_diplexer_parity_with_duplexer() -> mfs::error::Result<()> {
     // Parity with the duplexer: both recover the same two band placements.
     let d_tx_c = dup.tx.center_hz().expect("duplexer tx center present");
     let d_rx_c = dup.rx.center_hz().expect("duplexer rx center present");
-    assert!((c0 - d_tx_c).abs() < tol, "multiplexer tx center == duplexer tx center");
-    assert!((c1 - d_rx_c).abs() < tol, "multiplexer rx center == duplexer rx center");
+    assert!(
+        (c0 - d_tx_c).abs() < tol,
+        "multiplexer tx center == duplexer tx center"
+    );
+    assert!(
+        (c1 - d_rx_c).abs() < tol,
+        "multiplexer rx center == duplexer rx center"
+    );
 
     // Response validity: the loaded multiplexer common port must still be
     // defined (representable) and not a gain across the window. (Tight
@@ -307,18 +325,30 @@ fn multiplexer_response_is_n_port() -> mfs::error::Result<()> {
                 assert_eq!(resp.isolation_db[i][j].len(), points);
             }
         }
-        for db in resp.channel_s21_db[i].iter().chain(resp.channel_s11_db[i].iter()) {
-            assert!(representable_db(*db), "channel response must be finite or -inf, got {db}");
+        for db in resp.channel_s21_db[i]
+            .iter()
+            .chain(resp.channel_s11_db[i].iter())
+        {
+            assert!(
+                representable_db(*db),
+                "channel response must be finite or -inf, got {db}"
+            );
         }
     }
     for db in &resp.antenna_s11_db {
-        assert!(representable_db(*db), "antenna response must be finite or -inf, got {db}");
+        assert!(
+            representable_db(*db),
+            "antenna response must be finite or -inf, got {db}"
+        );
     }
     for i in 0..3 {
         for j in 0..3 {
             if i != j {
                 for db in &resp.isolation_db[i][j] {
-                    assert!(representable_db(*db), "isolation must be finite or -inf, got {db}");
+                    assert!(
+                        representable_db(*db),
+                        "isolation must be finite or -inf, got {db}"
+                    );
                 }
             }
         }
