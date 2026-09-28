@@ -1,5 +1,74 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Benchmarks are now driven by the cross-language benchmark standard.**
+  `benches/synthesis.rs` no longer hardcodes its case matrix: cases come from
+  `filter-bench/data/cases/twoport.json`, timing policy from `harness.json`, and
+  stage names from `gates.json`, all through the vendored copy in `bench-data/`
+  (`tests/bench_support/`). A program-generated order sweep is kept, and
+  documented as deliberately outside the standard (no provenance, no invariants).
+- **`benches/multiplexer.rs`** benchmarks the standard's `multiplexer` cases that
+  mfs can actually run (tag `type1`/`synthetic`, non-resonant junction), reporting
+  the `poly` (per-channel iterative synthesis) and `response` stages. The
+  contract's `cm`/`star` stages have no mfs counterpart and are omitted rather
+  than fabricated; every gate requiring them is `SKIP`.
+- **`tests/benchmark_standard.rs`** enforces the standard from mfs's side:
+  contract self-check, vendored-data drift guard (byte-for-byte against the
+  sibling repo when present, `MANIFEST.sha256` otherwise), the `folded_mask` gate
+  on every `twoport` case, and publication-anchored response checks that replay
+  the book's printed Cameron matrices through mfs's response engine.
+- **`tests/folded_response_invariance.rs` consumes the standard** instead of
+  hand-copied constants: the six Cameron cases are now looked up by global id
+  (`twoport_*`), so a change to the standard cannot silently desynchronize them.
+- `MultiplexerSynthesisResult::max_iterations` — the iteration budget in force,
+  so a caller holding only the result can distinguish convergence from an
+  exhausted budget.
+
+### Fixed
+
+- **The vendored standard exposed a folded-convention mismatch in the contract,
+  not in mfs.** mfs's even-order `to_folded` leaves the reduction pivot at index
+  sum `N+2`, like the book's own printed folded matrices, and outside the
+  contract's original canonical-only `folded_mask`. The standard now accepts both
+  legal folded conventions (canonical ∪ mirrored), which is what the anchor data
+  demanded; mfs's folding is unchanged.
+
+- **Faer root solver now validates its eigenvalues instead of silently
+  shipping garbage.** `FaerRootSolver` (the default top-of-chain solver in
+  `AdaptiveRootSolver`) can return companion-matrix eigenvalues that are not
+  roots of the polynomial (nor of any nearby one) when the eigenvalue
+  problem is ill-conditioned — e.g. roots spanning many decades of
+  magnitude — without the faer call reporting an error. It now gates its
+  output on a backward-residual check
+  (`max_backward_residual ≤ 1e-3`, a threshold calibrated against production
+  F_s/E_s/P_s polynomials up to order 30, worst case ~6e-6, i.e. ~170×
+  margin) and a non-finiteness check, and returns
+  `MfsError::NumericalFailure` when it fires, so the adaptive chain falls
+  through to Durand-Kerner / Aberth-Ehrlich.
+- **Durand-Kerner and Aberth-Ehrlich no longer return NaN root sets as
+  "converged".** Their in-loop convergence check compared `max_delta`
+  (accumulated with `f64::max`, which swallows NaN) against the tolerance,
+  so an iteration that overflowed to NaN read as converged with
+  `max_delta = 0.0`. Both solvers now also require all roots to be finite
+  before the early return.
+
+### Changed (refactor)
+
+- **Duplicated channel-recovery path consolidated.** The duplexer and
+  multiplexer each carried a byte-identical copy of the post-iteration
+  E/F reconstruction (`recover_filter_design`); both now call the single
+  `mfs::synthesis::recover_channel_design` (`src/synthesis/recovery.rs`).
+  Behavior unchanged.
+- **CLI context construction moved into `pipeline`.** The CLI's local
+  `build_context_from_request` (a duplicate of the `run_full_pipeline`
+  prologue) is replaced by the exported
+  `mfs::pipeline::context_from_request`, now the single canonical
+  request→context prologue for both the full pipeline and the CLI's
+  incremental `--stage` execution.
+
 ## [0.5.0] — 2026-09-25
 
 ### Changed (architecture remediation)
