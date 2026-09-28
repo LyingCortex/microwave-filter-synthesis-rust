@@ -51,11 +51,10 @@ section should be released as the next version tag when the maintainer cuts it.
 ### Medium priority (engineering quality)
 
 - **Multi-band synthesis (scope-1, decided 2026-09-29)** — true
-  multi-passband synthesis, not per-band composition. Design doc first
+  multi-passband synthesis, not per-band composition. Mapping layer done
+  (`MultiBandMapping` in `freq`, 2026-09-29); design doc next
   (`docs/internal/multi-band-synthesis-design.md`); sequencing and
   acceptance in `docs/continuation-plan.md` section C.
-- **HighPass / BandStop frequency mappings** — `freq` currently supports
-  LowPass and BandPass only.
 - **Fold the duplexer synthesis into the multiplexer (N=2)** — the
   duplicated `recover_filter_design` path is now a single
   `synthesis::recover_channel_design` (closed), but `DuplexerSynthesis`
@@ -93,4 +92,4 @@ section should be released as the next version tag when the maintainer cuts it.
 | `unwrap_or_default` in matrix access | 0.5.0 | `CouplingMatrix::get` has `debug_assert` bounds checks; remaining usages are in tests / report formatting |
 | Root-residual validation in `FaerRootSolver` | 0.5.0+ | backward-residual gate (`≤ 1e-3`) + non-finite check; fall-through to iterative methods; DK/Aberth in-loop NaN guards |
 | Duplicate `recover_filter_design` path | 0.5.0+ | single `mfs::synthesis::recover_channel_design` used by both duplexer and multiplexer |
-| CLI context builder duplication | 0.5.0+ | `mfs_cli.rs::build_context_from_request` replaced by `mfs::pipeline::context_from_request`, shared with `run_full_pipeline` |
+| `HighPassMapping` / `BandStopMapping` | 0.5.0+ | `freq` now covers all four prototype families; singular points (`f = 0` for HP, `f = f0` for BS) clamp to `-SINGULAR_CLAMP`, edges map to ±1 exactly under the geometric-mean convention (E3, continuation plan) |

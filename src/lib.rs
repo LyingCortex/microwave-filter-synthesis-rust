@@ -83,7 +83,10 @@ use crate::synthesis::{
 };
 
 pub use approx::PolynomialSet;
-pub use freq::{BandPassMapping, FrequencyGrid, FrequencyMapping, LowPassMapping};
+pub use freq::{
+    BandPassMapping, BandStopMapping, FrequencyGrid, FrequencyMapping, HighPassMapping,
+    LowPassMapping, MultiBandMapping,
+};
 pub use matrix::CouplingMatrixBuilder;
 pub use response::ResponseSolver;
 pub use spec::{FilterSpec, FilterSpecBuilder, TransmissionZero};

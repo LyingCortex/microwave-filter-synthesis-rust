@@ -36,7 +36,7 @@ src/
 ├── design.rs           High-level FilterDesign API (primary entry point)
 ├── prelude.rs          Re-exports for common workflows
 ├── error.rs            Structured error enum (MfsError) and Result alias
-├── freq.rs             Frequency mappings (LowPass, BandPass) and grid generation
+├── freq.rs             Frequency mappings (LowPass, HighPass, BandPass, BandStop, MultiBand) and grid generation
 ├── duplexer.rs         2-channel (Tx/Rx) duplexer synthesis + N-port analysis
 ├── multiplexer.rs      Generalized N-channel multiplexer synthesis + analysis
 ├── optimize.rs         Coupling-matrix tuning/extraction (Levenberg-Marquardt)
@@ -186,7 +186,11 @@ Separates physical frequency handling from normalized prototype math.
 **Key types:**
 - `FrequencyMapping` trait — `map_hz_to_normalized`, `map_normalized_to_hz`
 - `LowPassMapping` — single cutoff frequency
+- `HighPassMapping` — single cutoff frequency (`ω = -fc/f`); `f = 0` clamps to `-SINGULAR_CLAMP`
 - `BandPassMapping` — center frequency + bandwidth
+- `BandStopMapping` — stopband center + width (`ω = -1/Ω_BPF(f)`); `f = f0` clamps to `-SINGULAR_CLAMP`
+- `MultiBandMapping` — disjoint, center-sorted passbands; piecewise forward
+  map (nearest band by prototype-transform distance), band-local inverse
 - `FrequencyGrid` — uniform or custom frequency point sets
 
 ### `approx` — Polynomial Approximation
@@ -534,9 +538,8 @@ let context = run_full_pipeline(request)?;
    computation restricts zeros to the stopband.
 2. **Repeated poles** in the residue expansion are not handled — Laurent expansion
    is not implemented.
-3. **Wheel topology** is deprecated and currently an alias for Arrow.
-4. **HighPass and BandStop** frequency mappings are not implemented.
-5. **N-channel mutual loading fidelity** — the perturbation now propagates
+3. **Wheel topology** is deprecated and currently an alias of Arrow.
+4. **N-channel mutual loading fidelity** — the perturbation now propagates
    into the output coupling matrices (P1 fixed, 0.5.0), but the simplified
    frequency-offset perturbation has limited passband fidelity for adjacent
    channels (it does not converge to machine tolerance for well-separated
@@ -559,7 +562,6 @@ Worked plan with sequencing and acceptance criteria:
 | Next | Passband transmission zeros | High |
 | Next | Repeated-pole residue expansion | High |
 | Next | Converge the full Macchiarella spectral path (order ≥ 4) for high-fidelity N-channel loading | High |
-| Later | HighPass/BandStop frequency mappings | Medium |
 | Later | Butterworth/Elliptic approximation families | Low |
 | Later | Multi-band synthesis (true multi-passband, scope-1) — design doc first | Medium |
 

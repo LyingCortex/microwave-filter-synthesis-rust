@@ -26,6 +26,19 @@
 - `MultiplexerSynthesisResult::max_iterations` — the iteration budget in force,
   so a caller holding only the result can distinguish convergence from an
   exhausted budget.
+- **`MultiBandMapping`** — a piecewise multi-passband frequency mapping in
+  `freq` (one band-pass prototype per passband, geometric-mean center
+  convention, bands validated disjoint and center-sorted). The forward map
+  assigns each physical frequency to the nearest band by prototype-transform
+  distance; the inverse is band-local. It does not implement
+  `FrequencyMapping` because the trait's inverse has no band-index argument.
+- **`HighPassMapping` and `BandStopMapping`** — `freq` now covers all four
+  prototype families. Both follow the cross-language benchmark standard's
+  sign conventions (`ω = -fc/f`, `ω = -1/Ω_BPF(f)`), clamp to
+  `±SINGULAR_CLAMP` at their singular points (`f = 0` for high-pass,
+  `f = f0` for band-stop), and implement exact forward/inverse round trips —
+  band-stop edges hit ±1 exactly under the geometric-mean convention and the
+  inverse is defined for both signs of `ω`.
 
 ### Fixed
 

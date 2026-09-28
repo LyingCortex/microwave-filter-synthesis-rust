@@ -22,7 +22,7 @@ carries *what to do next and how to know it is done*.
 | Two-port synthesis | Full generalized-Chebyshev pipeline, orders 2–8 fixture-anchored, 10–30 numerically stable | High (publication-anchored) |
 | Duplexer | Macchiarella–Tamiazzo **simplified** frequency-offset perturbation; full spectral path exists behind `DuplexerSynthesis::full_iteration(true)` but is **untested and non-convergent at order ≥ 4** | Medium (model is approximate; antenna-RL quasi-equiripple not asserted) |
 | Multiplexer (N-channel) | Independent per-channel synthesis + under-relaxed perturbation; shared `synthesis::recover_channel_design`; response is a **geometric-mean magnitude model**, not an (N+1)-port solve | Medium (channels are valid passband filters; isolation/antenna values are model approximations) |
-| Multi-band | **Nothing** — `freq` supports LowPass + BandPass only; no design doc, no mapping, no synthesis path | — |
+| Multi-band | **Mapping layer in place** — `freq` supports all four prototype families plus `MultiBandMapping` (E3/C1, 2026-09-29); no design doc, no multi-band approximation, no synthesis path | — |
 | Optimization | LM `tune_matrix` / `extract_matrix` (hand-rolled Gaussian elimination, fixed 1e-7 FD Jacobian, topology frozen to template); 3 lib unit tests at order 3–4 | Low (works on small well-posed cases; no integration coverage, no CLI/Python surface) |
 
 Known limitations that gate the areas below (full list in
@@ -31,7 +31,7 @@ Known limitations that gate the areas below (full list in
 1. **Passband transmission zeros** (`|zero| < 1`) — `generalized_ops.rs`
    rejects with `NotImplemented`.
 2. **Repeated poles** — `residues/expansion.rs` returns `NotImplemented`.
-3. **HighPass / BandStop mappings** — not implemented in `freq`.
+3. ~~**HighPass / BandStop mappings**~~ — implemented in `freq` (E3, 2026-09-29: `HighPassMapping`, `BandStopMapping` with full forward + inverse and singular-point clamps).
 4. **N-channel mutual-loading fidelity** — simplified perturbation does not
    converge to independent synthesis for well-separated channels; the full
    spectral path is not converged at order ≥ 4.
@@ -166,9 +166,10 @@ roadmap line — and the one that most needs new mathematics.
 
 ### Status
 
-- `src/freq.rs` implements `LowPassMapping` and `BandPassMapping` only
-  (`BandPassMapping`'s inverse takes the positive branch).
-- No multi-band mapping, no multi-band approximation, no tests.
+- `src/freq.rs` implements all four prototype families
+  (`LowPassMapping`, `HighPassMapping`, `BandPassMapping`,
+  `BandStopMapping`) plus `MultiBandMapping` (E3/C1, 2026-09-29).
+- No multi-band approximation, no multi-band synthesis path.
 - The vendored benchmark standard has **no** multi-band case family —
   there is no external gate; literature fixtures will have to define the
   acceptance bar (the fixture tool is `tests/extract_from_pdf.py`).
@@ -212,13 +213,12 @@ C0 must decide between them before any code):
    per-band passband-zero analysis that E1 must cover), the target matrix
    topology, and a 2-band reference design from the literature as the
    first acceptance fixture.
-2. **C1 — `MultiBandMapping` in `freq`.** A list of `(center_hz,
-   bandwidth_hz)` bands; forward map piecewise (each band's physical
-   edges map to ±1 in its own normalized domain), inverse band-local.
-   Tests: per-band round-trip; band-edge consistency with
-   `edges_to_center_bandwidth`'s geometric-mean convention (S4
-   invariant). Independent of the C0 route decision — safe to start in
-   parallel.
+2. **C1 — `MultiBandMapping` in `freq` — closed (2026-09-29).** Disjoint,
+   center-sorted passbands; piecewise forward map (nearest band by
+   prototype-transform distance `|Ω_b(f)|`), band-local inverse (the type
+   does not implement `FrequencyMapping` because the trait's inverse has
+   no band-index argument). Per-band round-trip and S4 edge-consistency
+   tests green.
 3. **C2 — Approximation + synthesis (route-dependent).** Per C0:
    route-α → new family in `approx` (candidate `approx/multi_band.rs`)
    producing a `PolynomialSet`-shaped output so `MatrixSynthesisEngine`
@@ -311,9 +311,10 @@ Ordered by how much they block the areas above:
    perturbed root set degenerates — a realistic risk once the full
    spectral path actually moves roots (A/B). Work in
    `residues/expansion.rs`.
-3. **HighPass / BandStop mappings.** Independent of A/B but cheap;
-   `freq` only. Needed before multi-band (C1) if stop-band-anchored specs
-   are wanted.
+3. **HighPass / BandStop mappings — closed (2026-09-29).** `HighPassMapping`
+   and `BandStopMapping` are implemented in `freq` with the shared
+   `SINGULAR_CLAMP` convention at their singular points. Unblocks
+   stop-band-anchored multi-band specs (C1).
 4. **High-order integration tests (N=8 fixture band).** The documented
    fixture band is order 2–8 but `tests/` has no N=8 regression entry;
    add one (root-solver unit tests already cover 10/20/30).
@@ -323,7 +324,7 @@ Ordered by how much they block the areas above:
 ## Suggested execution order
 
 ```
-Wave 1 (parallel):  E3 (HP/BS maps) · E4 (N=8 regression) · D1-opt (RED) · C1 (MultiBandMapping)
+Wave 1 (parallel):  E4 (N=8 regression) · D1-opt (RED)   [E3 + C1 closed 2026-09-29]
 Wave 2 (serial):    D1–D4 (duplexer full path)  ← critical path for B
 Wave 3 (parallel):  D2–D4-opt (optimizer) · C0 (multi-band design doc + route choice)
 Wave 4 (serial):    B1 → B2 → B3 → B4 (multiplexer; needs Wave 2)

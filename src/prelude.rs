@@ -25,7 +25,10 @@ pub use crate::multiplexer::{
 };
 
 // Supporting types (commonly needed)
-pub use crate::freq::{BandPassMapping, FrequencyGrid, FrequencyMapping, LowPassMapping};
+pub use crate::freq::{
+    BandPassMapping, BandStopMapping, FrequencyGrid, FrequencyMapping, HighPassMapping,
+    LowPassMapping, MultiBandMapping,
+};
 pub use crate::matrix::MatrixTopology as TopologyKind;
 pub use crate::response::ResponseSolver;
 pub use crate::spec::{FilterSpec, FilterSpecBuilder, TransmissionZero};
