@@ -51,6 +51,9 @@ these design notes (as of 0.5.0):
 - the authoritative module map and data-flow diagrams live in
   [architecture.md](../architecture.md) (current)
 - open work items are tracked in [todo.md](./todo.md) (current)
+- the continuation plan for the active development areas (duplexer,
+  multiplexer, multi-band, optimization) is
+  [continuation-plan.md](../continuation-plan.md) (current)
 
 The most recent assessment of the architecture is
 [architecture-review-2026-09-25.md](./architecture-review-2026-09-25.md)
@@ -122,7 +125,10 @@ This path is best if your first question is:
   [architecture.md](../architecture.md) + the 2026-09-25 review.
 - [Refactor Roadmap](./refactor-roadmap.md) — *(historical, input to the 0.5.0 remediation)*
 - [Current Code Architecture Review 2026-09-25](./architecture-review-2026-09-25.md) — *(current)*
-  Whole-crate assessment with file:line evidence; P1–P4 remediated in 0.5.0.
+- [Continuation Plan](../continuation-plan.md) — *(current, 2026-09-28)*
+  Next steps for duplexer (full Macchiarella path), multiplexer (N+1-port
+  response, N-channel fidelity), multi-band (mapping + composition), and
+  optimization (LM tune/extract), with acceptance criteria and sequencing.
 - [Development Guide](./development-guide.md) — *(mostly current)*
   Build/test/doc workflow for contributors.
 - [Open-Source Release Checklist](./open-source-release-checklist.md) — *(current)*
@@ -144,11 +150,12 @@ If you are about to implement or refactor code:
 1. [architecture.md](../architecture.md)
 2. [architecture-review-2026-09-25.md](./architecture-review-2026-09-25.md)
 3. [todo.md](./todo.md)
-4. [Contributor Guide](./contributor-guide-for-filter-synthesis-library.md)
-5. [Development Guide](./development-guide.md)
-6. [Testing Strategy](./testing-strategy-for-filter-synthesis-library.md)
-7. [Filter Synthesis Open-Source Library Architecture](./filter-synthesis-open-source-library-architecture.md)
-8. [Cameron 2003 Coupling-Matrix Algorithm Notes](../cameron-coupling-matrix-algorithms.md)
+4. [continuation-plan.md](../continuation-plan.md) *(current — next steps for duplexer / multiplexer / multi-band / optimization)*
+5. [Contributor Guide](./contributor-guide-for-filter-synthesis-library.md)
+6. [Development Guide](./development-guide.md)
+7. [Testing Strategy](./testing-strategy-for-filter-synthesis-library.md)
+8. [Filter Synthesis Open-Source Library Architecture](./filter-synthesis-open-source-library-architecture.md)
+9. [Cameron 2003 Coupling-Matrix Algorithm Notes](../cameron-coupling-matrix-algorithms.md)
 
 ## Suggested Order for Research-Oriented Readers
 

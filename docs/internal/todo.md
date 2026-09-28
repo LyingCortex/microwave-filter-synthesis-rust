@@ -9,7 +9,7 @@ traceable. Authoritative architecture/limitation references:
 
 ## Current state (2026-09-28)
 
-Working tree clean, `master` == `gitlab/master` (head `75c6dba`), all
+Working tree clean, `master` == `gitlab/master` (head `2d735c0`), all
 CI-parity checks green on that head:
 
 - `cargo test --all-targets` — green (lib 202 passed + 15 integration
@@ -28,9 +28,11 @@ changelog syncs, committed as `df8ee83` (style), `a59e055`
 ([Unreleased] changelog), `75c6dba` (docs sync) and pushed to
 `gitlab/master`.
 
-Next steps: nothing blocking; see the Open sections below. The
-`[Unreleased]` changelog section should be released as the next version tag
-when the maintainer cuts it.
+Next steps: the continuation plan for the four active areas (duplexer,
+multiplexer, multi-band, optimization) is
+[`docs/continuation-plan.md`](../continuation-plan.md) (2026-09-28). The Open
+sections below remain the flat open-item list. The `[Unreleased]` changelog
+section should be released as the next version tag when the maintainer cuts it.
 
 ## Open
 

@@ -174,7 +174,10 @@ Captures engineering intent with validation at construction time.
 **Invariants enforced:**
 - Order ≥ 1
 - Return loss > 0 dB
-- Transmission zero magnitudes ≥ 1.0 (or infinite)
+- Transmission zeros are finite or infinite; passband zeros (`|zero| < 1`)
+  are accepted by `spec` but rejected with a typed error at the
+  approximation layer (`generalized_ops::safe_sqrt_term`), which currently
+  supports stopband-only zeros
 
 ### `freq` — Frequency Mapping
 

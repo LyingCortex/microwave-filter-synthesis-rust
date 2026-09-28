@@ -198,21 +198,29 @@ let tx_response = result.tx.response(14.8e9, 15.2e9, 201).unwrap();
 let rx_response = result.rx.response(15.1e9, 15.4e9, 201).unwrap();
 ```
 
-### Full Algorithm Infrastructure
+### Full Spectral Path (as built)
 
-The complete Macchiarella algorithm with spectral factorization is also implemented
-in the codebase (retained for future enhancement). The infrastructure includes:
+The complete Macchiarella algorithm with spectral factorization is implemented
+behind `DuplexerSynthesis::full_iteration(true)` (default `false`). The
+infrastructure includes:
 
-- `compute_n_polynomial`: Diplexer reflection numerator N(s)
-- `solve_scaling_constants`: |p₀t|² and |p₀r|² from return loss conditions
-- `wilson_spectral_factor`: Iterative spectral factorization (Wilson's method)
+- `compute_n_polynomial`: diplexer reflection numerator N(s)
+- `solve_scaling_constants`: |p₀t|² and |p₀r|² from return-loss conditions
+- `spectral_factor` (`src/spectral.rs`): cepstrum (rustfft) with a
+  balanced-companion-matrix fallback — this replaced the earlier Wilson
+  iteration, whose `wilson_spectral_factor` / `fit_polynomial_ls` helpers
+  were removed in the 0.5.0 dead-code cleanup
 - `compute_s_product`: S_TX × S_RX product from N(s) and D(s)
-- `assign_roots`: Root assignment via minimum-distance matching
-- `fit_polynomial_ls`: Polynomial fitting via least-squares for Wilson iteration
+- `assign_roots`: root assignment via minimum-distance matching
+
+**Status (2026-09-28):** the full path is reachable but **not numerically
+converged for order ≥ 4** (typed error; order 2 runs but exhausts its
+iterations), and no test or example invokes it. The continuation plan for
+converging it is section A of `docs/continuation-plan.md`.
 
 ### Future Work
 
-- Robust spectral factorization using matrix-fraction decomposition
+- Convergence of the full spectral path at order ≥ 4 (continuation plan A)
+- Robust spectral factorization (matrix-fraction decomposition) as a
+  fallback when cepstrum is ill-conditioned
 - Interval-arithmetic root isolation for high-degree polynomials
-- Full iterative convergence to quasi-equiripple antenna return loss
-- Type-II junction model with resonating node capacitance

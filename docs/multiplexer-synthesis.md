@@ -293,9 +293,10 @@ not asserted (approximate model / tolerance).
    E/F from it is consumed by the output matrices; the simplified model's
    residual is not asserted below machine tolerance (see deviation item 5).
 6. ✅ **No regression**: `cargo test --no-fail-fast` passes across all
-   integration suites and doctests (only the 3 pre-existing, unrelated lib
-   failures remain — they fail at baseline). The recovered-channel passband
-   diagnostic is un-`#[ignore]`d and passes.
+   integration suites, lib tests, and doctests (the lib suite is fully green as
+   of 2026-09-28; the "3 pre-existing lib failures" noted at review time are
+   gone). The recovered-channel passband diagnostic is un-`#[ignore]`d and
+   passes.
 
 ## Risks & Mitigations
 
