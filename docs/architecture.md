@@ -70,6 +70,7 @@ src/
 │   │   ├── expansion.rs        Residue expansion, classification
 │   │   └── transversal.rs      Transversal coupling-matrix assembly
 │   ├── orchestration.rs    High-level synthesis + evaluation helpers
+│   ├── recovery.rs         Shared duplexer/multiplexer channel recovery
 │   └── sections.rs         SectionSynthesis (triplet/quadruplet/trisection)
 ├── transform/          Topology transformations
 │   ├── mod.rs              Transform facade, response invariance checking
@@ -87,7 +88,7 @@ src/
 │   ├── mod.rs              Module facade
 │   ├── context.rs          SynthesisContext, PipelineOptions, PipelineMetadata
 │   ├── stages.rs           Stage trait + 4 concrete stages
-│   ├── request.rs          SynthesisRequest parsing, run_full_pipeline
+│   ├── request.rs          SynthesisRequest, context_from_request, run_full_pipeline
 │   ├── execution.rs        Incremental execution, context persistence
 │   └── schema.rs           JSON Schema generation
 ├── output/             Report rendering
@@ -193,7 +194,10 @@ Implements the generalized Chebyshev approximation algorithm.
 - `PolynomialSet` — E(s), F(s), P(s) polynomials with metadata (eps, eps_r, order)
 - `ComplexPolynomial` — complex-coefficient polynomial with arithmetic, evaluation, root finding
 - `AdaptiveRootSolver` — canonical production chain: **faer companion-matrix
-  eigenvalues → Durand-Kerner → Aberth-Ehrlich** (fall-through on error)
+  eigenvalues → Durand-Kerner → Aberth-Ehrlich** (fall-through on error). The
+  faer stage is gated on a backward-residual check (≤ 1e-3) and a
+  non-finiteness check, so an ill-conditioned companion matrix yields a typed
+  error and fall-through rather than silently shipped garbage eigenvalues.
 - `FaerRootSolver` / `DurandKernerRootSolver` / `AberthRootSolver` — the three
   solvers in the chain
 - `CompanionMatrixRootSolver` — nalgebra Schur companion solver; kept as a
@@ -317,6 +321,7 @@ normalized. Unknown or incomplete mappings are rejected with
 `MfsError::InvalidFrequency` (previously the field was accepted but ignored).
 
 **Features:**
+- `context_from_request(request)` — canonical request→context prologue
 - `run_full_pipeline(request)` — complete execution from JSON
 - `run_stage(context, stage_name)` — incremental single-stage execution
 - `save_context` / `load_context` — file-based persistence for resume
@@ -420,7 +425,7 @@ All errors are `Serialize + Deserialize` for structured JSON error reporting.
 
 ### Test Layers
 
-1. **Unit tests** (146 in `src/`) — per-function validation with known inputs
+1. **Unit tests** (198 in `src/`, as of 0.5.0) — per-function validation with known inputs
 2. **Property-based tests** (10 properties, 100 iterations each in `tests/synthesis_properties.rs`)
 3. **Regression tests** (36 in `tests/synthesis_regression.rs`) — previously-failing configurations
 4. **Integration tests** (14 files in `tests/`) — end-to-end pipeline validation
@@ -511,8 +516,9 @@ let context = run_full_pipeline(request)?;
 
 | Configuration | Status |
 |---------------|--------|
-| All-pole (order 2–8) | ✅ Fully supported |
-| Finite TZs, \|zero\| ≥ 1.1 (order 2–8) | ✅ Fully supported |
+| All-pole (order 2–8, fixture-anchored) | ✅ Fully supported |
+| Finite TZs, \|zero\| ≥ 1.1 (order 2–8, fixture-anchored) | ✅ Fully supported |
+| High order (10–30), all-pole + finite TZs | ✅ Numerically stable — see `examples/high_order_stability.rs` (no literature fixtures above order 8) |
 | Symmetric TZ pairs | ✅ Fully supported |
 | Asymmetric TZ placement | ✅ Fully supported |
 | Complex-residue configurations | ✅ Fixed (conjugate pairing) |

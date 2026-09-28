@@ -13,7 +13,11 @@ clear, non-overlapping responsibilities and a well-defined integration point.
 
 ## Current State
 
-- `src/duplexer.rs` (1222 lines) implements a 2-channel (TX/RX) diplexer:
+> **Status as of 0.5.0:** the N-channel multiplexer described below has been
+> implemented and shipped. The pre-implementation state recorded here is
+> kept for context; "Current State" now reflects the code.
+
+- `src/duplexer.rs` (~950 lines) implements the 2-channel (TX/RX) duplexer:
   - `Duplexer` — analysis: combines two `FilterDesign`s, evaluates the 3-port
     response.
   - `DuplexerSynthesis` — Macchiarella-Tamiazzo iterative synthesis.
@@ -21,10 +25,20 @@ clear, non-overlapping responsibilities and a well-defined integration point.
   - `ChannelSpec` — single-channel spec (order, RL, zeros, center, bandwidth).
   - `DuplexerSynthesisResult` — `{ tx, rx, iterations, convergence_error,
     junction, s_tx_roots, s_rx_roots }`.
-  - A full spectral-factorization path is present but `#[allow(dead_code)]`;
-    the active path is a simplified perturbation fallback.
-  - 5 unit tests.
-- `src/spectral.rs` — spectral factorization (`spectral_factor`).
+  - The full spectral-factorization path is opt-in via
+    `DuplexerSynthesis::full_iteration(true)` (0.5.0; previously a hardcoded
+    `false` flag). It is **not** numerically converged for order ≥ 4 — see
+    `docs/architecture.md` Known Limitations and
+    `docs/multiplexer-code-review.md`. The active path is the simplified
+    frequency-offset perturbation.
+- `src/multiplexer.rs` (~700 lines) — the N-channel generalization shipped
+  with this design; the post-iteration channel recovery is the shared
+  `mfs::synthesis::recover_channel_design` (0.5.0+; previously a
+  per-module `recover_filter_design` copy) which writes the perturbed E/F
+  back to `generalized.e_s/f_s` (0.5.0 P1 fix), so the mutual loading
+  actually propagates into the output coupling matrices.
+- `src/spectral.rs` — spectral factorization (`spectral_factor`), used by the
+  full-iteration path.
 - Existing doc `docs/duplexer-synthesis.md` derives the 2-channel math.
 
 ## Design Goal

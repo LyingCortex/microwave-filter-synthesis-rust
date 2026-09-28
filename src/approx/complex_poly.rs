@@ -45,7 +45,7 @@ pub struct CompanionMatrixRootSolver;
 /// Preserves polynomial symmetry better than iterative methods.
 ///
 /// The returned eigenvalues are gated on a backward-residual check
-/// (`max_backward_residual` ≤ [`FAER_BACKWARD_RESIDUAL_TOL`]) and a
+/// (`max_backward_residual` ≤ the private `FAER_BACKWARD_RESIDUAL_TOL` constant) and a
 /// non-finiteness check: a companion matrix whose eigenvalue problem is
 /// ill-conditioned can yield garbage eigenvalues without the call reporting
 /// an error, and the gate converts that silent corruption into a typed error
