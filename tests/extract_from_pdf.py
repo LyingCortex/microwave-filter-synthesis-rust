@@ -35,6 +35,16 @@ except ImportError:
     tabula = None
     print("Warning: tabula-py not installed. Install with: pip install tabula-py")
 
+_TABULA_ERRORS = (OSError, ValueError, RuntimeError)
+try:
+    from subprocess import CalledProcessError as _CalledProcessError
+
+    from jpype import JException as _JException
+    from tabula.errors import JavaNotFoundError as _JavaNotFoundError
+    _TABULA_ERRORS += (_CalledProcessError, _JException, _JavaNotFoundError)
+except ImportError:
+    pass
+
 
 # ─── Pattern matchers for common filter paper formats ─────────────────────────
 
@@ -101,7 +111,7 @@ def extract_tables_from_pdf(pdf_path, pages=None):
     try:
         tables = tabula.read_pdf(pdf_path, **kwargs)
         return tables
-    except Exception as e:
+    except _TABULA_ERRORS as e:
         print(f"Warning: tabula extraction failed: {e}")
         return []
 
@@ -144,9 +154,8 @@ def find_filter_specs(text):
         matches = re.findall(pattern, text, re.IGNORECASE)
         for m in matches:
             val = float(m)
-            if 0.5 < val < 10.0:  # Reasonable range for normalized zeros
-                if val not in zeros:
-                    zeros.append(val)
+            if 0.5 < val < 10.0 and val not in zeros:  # Reasonable range for normalized zeros
+                zeros.append(val)
     
     # Find epsilon
     epsilon = None
@@ -232,7 +241,7 @@ def build_fixture(spec, matrix_elements, polynomials, source_info):
     
     if matrix_elements:
         # Reconstruct matrix from elements
-        max_idx = max(max(r, c) for r, c in matrix_elements.keys())
+        max_idx = max(max(r, c) for r, c in matrix_elements)
         matrix = [[0.0] * (max_idx + 1) for _ in range(max_idx + 1)]
         for (r, c), v in matrix_elements.items():
             matrix[r][c] = v
@@ -293,7 +302,7 @@ def process_pdf(pdf_path, pages=None):
 def interactive_mode(pdf_path):
     """Interactive mode for manual data entry guided by PDF content."""
     print(f"\n{'='*60}")
-    print(f"Interactive Filter Data Extraction")
+    print("Interactive Filter Data Extraction")
     print(f"PDF: {pdf_path}")
     print(f"{'='*60}\n")
     
@@ -360,9 +369,8 @@ def main():
     if args.interactive:
         fixture = interactive_mode(pdf_path)
         fixtures = [fixture]
-        tables = []
     else:
-        fixtures, tables = process_pdf(pdf_path, args.pages)
+        fixtures, _tables = process_pdf(pdf_path, args.pages)
     
     # Load existing data if appending
     output_path = Path(args.output)
