@@ -65,6 +65,13 @@ return loss instead of the simplified perturbation's approximation.
    within ~2 dB of the independent-filter bound, and passband peaks within
    0.5 dB of the per-channel spec. Expected RED at the current state — this
    is the RED gate for everything else in this section.
+   Committed as a RED gate on 2026-09-29
+   (`duplexer::tests::full_iteration_order2_quasi_equiripple`,
+   `#[ignore]`d): order 2 exhausts 15/15 iterations without converging
+   (max root displacement 3.3e-2 ≫ 1e-8) and the recovered channels are
+   degenerate (Rx S21 ≈ -39 dB at center); order ≥ 4 additionally fails in
+   `recover_channel_design` with a typed pole-placement error. Un-ignore
+   when D2/D3 land.
 2. **D2 — Diagnose the order ≥ 4 non-convergence.** Instrument the
    iteration (residual per iteration, root-displacement via
    `compute_root_displacement`, spectral-factor relative error from
@@ -74,6 +81,49 @@ return loss instead of the simplified perturbation's approximation.
    (b) `solve_scaling_constants` ill-conditioning as the p₀ system grows,
    (c) under-relaxation `alpha` schedule too aggressive for the N(s) root
    movement. Fix the root cause, not the tolerance.
+   **D2 findings (2026-09-29, verified via instrumented trajectories):**
+   - **(a) spectral factorization ruled out.** With p₀ held fixed, the
+     iteration is a clean contraction (root displacement 0.55 → 0.02 over
+     37 iterations, monotone); `select_lhp_roots` / cepstrum is not the
+     breaker.
+   - **(b) The 2×2 edge-RL p₀ solve, verified against the code.**
+     `solve_scaling_constants` (`duplexer.rs:720`) implements the
+     unitary-condition form with the antenna RL spec substituted in
+     (`|D|² = |N|²/ε` at each edge) and `n₀` fixed at 1 — coherent with
+     the unitary condition, and `n₀ = 1` is **confirmed by the paper**
+     (eq. 12, verified by OCR: “|n₀| = 1 for both junction types”). The
+     doc's Step-3 line (`|N|² + |p₀|²|P|² = 10^(−RL/10)`) is the
+     unphysical transcription (it predicts 0 dB antenna RL at the edge).
+     Measured: the 2×2 is singular for the D1 gate's *symmetric* setup
+     (equal order/RL/adjacent bands): `det → 0` at iter 0, degenerate
+     fallback fires (p₀² ≈ 707), p₀² then runs to ~1e8 and the
+     iteration plateaus at max_delta ≈ 0.07.
+   - **Fixed p₀ = 1 is not the answer.** Unity passband gain removes the
+     divergence but converges to a *physically wrong* diplexer: recovered
+     channel passband peaks −4.9 / −5.4 dB (spec ≈ 0), antenna ≈ −1 dB
+     (spec ≈ −22). p₀ = 1 is a false lead — it is a contraction to the
+     wrong fixed point.
+   - **Asymmetric probe resolved (2026-09-29).** An asymmetric 2/4
+     diplexer (different order/RL, adjacent bands,
+     `full_iteration(true)`, 40 iters) diverged:
+     convergence_error → 2.89, recovered channels degenerate (Tx S21
+     ≈ −46 dB, Rx ≈ −128 dB). `n₀ = 1` is confirmed correct by the paper
+     (eq. 12), so the divergence is a construction mismatch in N/Pt/Pr/D,
+     not the n₀ normalization — and not a symmetric-degeneracy artifact.
+   - **D3 unblocked (2026-09-29, paper OCR).** The Macchiarella–Tamiazzo
+     paper is vendored in the repo (`tests/Macchiarella and Tamiazzo -
+     2006 - Novel Approach to the Synthesis of Microwave Diplexers.pdf`);
+     its equations are image-rendered but were recovered by OCR. Verified
+     from the paper: `|n₀| = 1` (eq. 12); the p₀ equation the code
+     implements (eq. 13 reduced via the unitary condition + edge RL spec);
+     loop steps 1–5. **Section V prints a complete worked Type-I design**
+     (RX 14.9–15.1 / TX 15.15–15.35 GHz, 20 dB, 7 poles each,
+     `n = 1.47`, `b₀ = −0.171`) with all coefficients: `n₀N`, `D`, `Pt`,
+     `Pr`, `p₀t = 4.717e−4+1.743e−4i`, `p₀r = 4.336e−4+1.6e−4i` (complex
+     p₀; the code currently keeps p₀ real). That worked design is the
+     regression fixture: run the loop on it and match the printed
+     polynomials.
+
 3. **D3 — Converge order ≥ 4 and pin it.** Extend the D1 tests to order 4
    and order 6 (per channel); assert the same fidelity band. Only after D3,
    consider changing the default to `full_iteration(true)` — that is a

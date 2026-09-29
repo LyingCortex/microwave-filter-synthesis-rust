@@ -113,6 +113,29 @@ $$
 $$
 
 Solve the 2×2 linear system for |p₀r|² and |p₀t|².
+> **Diagnostic (2026-09-29, D2):** Step 3 as written is internally
+> inconsistent with the unitary condition below in this step: Step 3
+> imposes the constant `|N|² + |p₀|²|P|² = 10^(−RL/10)`, whereas the
+> unitary condition is `|n₀|²|N|² + |p₀|²|P|² = |D|²`. The code's
+> `solve_scaling_constants` implements the unitary-condition form with
+> the antenna RL spec substituted in (`|D|² = |N|²/ε` at each edge) —
+> OCR of the paper confirms this is the intended form (eq. 12:
+> `|n₀| = 1` for both junctions; eq. 13 reduces to
+> `|p₀|²|P|² = |N|²(1−ε)/ε` via the unitary condition). Measured
+> (pre common-domain
+> rewrite): spectral factorization is sound (with p₀ held fixed the
+> iteration is a clean contraction, root displacement 0.55 → 0.02 over
+> 37 iters); the 2×2 edge-RL p₀ system is singular for the standard
+> order-2 probe (equal order/RL/adjacent bands) — `det → 0`, degenerate
+> fallback p₀² ≈ 707; fixing p₀ = 1 removes the divergence but
+> converges to a physically wrong diplexer (passband peaks −4.9 / −5.4
+> dB vs spec ≈ 0, antenna ≈ −1 dB vs spec ≈ −22). After the common-
+> domain rewrite: an asymmetric 2/4 probe diverges (err → 2.89); the
+> order-2 gate is still RED (root displacement 4.8e-2 after 30 iters,
+> antenna S11 ≈ 0 dB, channel peaks −14 / −19 dB). The paper's
+> Section V worked design (see Future Work) pins the remaining
+> construction mismatch.
+
 
 Apply spectral factorization to the unitary condition to get D(s):
 
@@ -213,14 +236,37 @@ infrastructure includes:
 - `compute_s_product`: S_TX × S_RX product from N(s) and D(s)
 - `assign_roots`: root assignment via minimum-distance matching
 
-**Status (2026-09-28):** the full path is reachable but **not numerically
-converged for order ≥ 4** (typed error; order 2 runs but exhausts its
-iterations), and no test or example invokes it. The continuation plan for
-converging it is section A of `docs/continuation-plan.md`.
+**Status (2026-09-29):** the full path is reachable but **not numerically
+converged at any tested order**. The D1 symmetric gate (order 2, 22 dB,
+adjacent bands) exhausts its iterations (root displacement ~5e-2 after 30
+iters); order ≥ 4 fails with a typed numerical error. OCR of the paper
+shows the code's p₀ return-loss equation is the paper's eq. (13) reduced
+through the unitary condition with `|n₀| = 1`, so the p₀ solve is not the
+defect — the mismatch is in how N/Pt/Pr/D are constructed. The paper's
+Section V worked design (see Future Work) is the anchor for locating and
+fixing it. The continuation plan for converging it is section A of
+`docs/continuation-plan.md`.
 
 ### Future Work
 
-- Convergence of the full spectral path at order ≥ 4 (continuation plan A)
+- **D3 — pin the normalization against the paper's worked example.**
+  The Macchiarella–Tamiazzo paper is **vendored in the repo**
+  (`tests/Macchiarella and Tamiazzo - 2006 - …Diplexers.pdf`); its
+  equations are image-rendered and were recovered by OCR. Eq. (12) states
+  `|n₀| = 1`; the p₀ return-loss equation (eq. 13) reduces, via the
+  unitary condition plus the edge RL spec, to
+  `|p₀t|²|Pt|² + |p₀r|²|Pr|² = |N|²(1−ε)/ε` — **the same form the code's
+  `solve_scaling_constants` already implements**, so the p₀ equation is not
+  the defect. Section V prints a complete worked Type-I design (RX
+  14.9–15.1 / TX 15.15–15.35 GHz, 20 dB, 7 poles each, `n = 1.47`,
+  `b₀ = −0.171`) with all coefficients (`n₀N`, `D`, `Pt`, `Pr`,
+  `p₀t = 4.717e−4+1.743e−4i`, `p₀r = 4.336e−4+1.6e−4i`): that is a
+  ready regression fixture to reproduce and match, which pins the
+  remaining normalization/domain mismatch in the N/Pt/Pr/D construction.
+- **N=2 unification** — fold the duplexer's full-path iteration loop into
+  a shared N-channel module so `MultiplexerSynthesis(N=2)` and
+  `DuplexerSynthesis` maintain the Macchiarella–Tamiazzo loop once
+  (continuation plan B2; depends on D3).
 - Robust spectral factorization (matrix-fraction decomposition) as a
-  fallback when cepstrum is ill-conditioned
-- Interval-arithmetic root isolation for high-degree polynomials
+  fallback when cepstrum is ill-conditioned.
+- Interval-arithmetic root isolation for high-degree polynomials.
