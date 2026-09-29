@@ -113,6 +113,37 @@ impl ComplexPolynomial {
         self.coefficients.len().saturating_sub(1)
     }
 
+    /// Returns the polynomial with its argument shifted: the coefficients of
+    /// `P(s + shift)`.
+    ///
+    /// This is the common-domain transform used by the N-channel
+    /// Macchiarella-Tamiazzo diplexer iteration, which must express one
+    /// channel's polynomials in another channel's normalized-frequency domain.
+    ///
+    /// Computed by Horner's rule in the argument `(s + shift)`:
+    /// `P(x+c) = (...((a_n (x+c) + a_{n-1})(x+c) + ...)(x+c) + a_0)`, which is
+    /// exact up to roundoff and needs no root-finding. Numerically well
+    /// behaved for the narrow-band shifts encountered in diplexer synthesis
+    /// (`|shift|` = O(band separation / bandwidth)).
+    pub fn shift(&self, shift: ComplexCoefficient) -> Result<Self> {
+        // acc = 0; for a in coeffs (descending) { acc = acc * (s + shift) + a }.
+        // Multiplying ascending vector acc by (s + shift):
+        //   next[k]  += shift * acc[k]   (the c·acc part)
+        //   next[k+1] += acc[k]          (the s·acc part)
+        let mut acc: Vec<ComplexCoefficient> = Vec::new();
+        for &a in self.coefficients.iter().rev() {
+            let len = acc.len();
+            let mut next = vec![COMPLEX_ZERO; len + 1];
+            for k in 0..len {
+                next[k] += shift * acc[k];
+                next[k + 1] += acc[k];
+            }
+            next[0] += a;
+            acc = next;
+        }
+        Self::new(trim_trailing_complex_zeros(acc))
+    }
+
     /// Multiplies every coefficient by the given scalar.
     pub fn scale(&self, scalar: ComplexCoefficient) -> Result<Self> {
         Self::new(
@@ -881,6 +912,41 @@ mod tests {
             diff <= tol,
             "expected {lhs} ~= {rhs} within {tol}, diff={diff}"
         );
+    }
+
+    #[test]
+    fn shift_reconstructs_argument_shifted_polynomial() -> Result<()> {
+        // P(s) = s^2 + 2 s + 3;  P(s + j5) = s^2 + (2 + j10) s + (-22 + j10).
+        let p = ComplexPolynomial::new(vec![
+            Complex64::new(3.0, 0.0),
+            Complex64::new(2.0, 0.0),
+            Complex64::new(1.0, 0.0),
+        ])?;
+        let q = p.shift(Complex64::new(0.0, 5.0))?;
+        let expected = vec![
+            Complex64::new(-22.0, 10.0),
+            Complex64::new(2.0, 10.0),
+            Complex64::new(1.0, 0.0),
+        ];
+        assert_eq!(q.coefficients.len(), expected.len());
+        for (k, e) in expected.iter().enumerate() {
+            assert!(
+                (q.coefficients[k] - *e).norm() < 1e-12,
+                "coeff {k}: {} (want {})",
+                q.coefficients[k],
+                e
+            );
+        }
+        // P(s+c) evaluated at x must equal P evaluated at x+c.
+        let c = Complex64::new(-0.7, 2.3);
+        let r = p.shift(c)?;
+        for x in [Complex64::new(0.0, 0.0), Complex64::new(1.5, -0.4), Complex64::new(-2.0, 3.0)] {
+            let lhs = r.evaluate(x);
+            let rhs = p.evaluate(x + c);
+            let scale = (lhs.norm() + rhs.norm()).max(1.0);
+            assert!((lhs - rhs).norm() / scale < 1e-11, "identity failed at {x}");
+        }
+        Ok(())
     }
 
     #[test]

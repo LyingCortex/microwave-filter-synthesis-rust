@@ -154,7 +154,8 @@ impl Duplexer {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 use crate::approx::{
-    compute_root_displacement, generalized_chebyshev_polynomials, multiply_by_s, ComplexPolynomial,
+    compute_root_displacement, generalized_chebyshev_polynomials, multiply_by_s, ComplexCoefficient,
+    ComplexPolynomial,
 };
 use crate::spec::FilterSpec;
 use crate::synthesis::build_filter_spec;
@@ -412,16 +413,40 @@ impl DuplexerSynthesis {
         let p_tx = &tx_polys.p;
         let p_rx = &rx_polys.p;
 
-        let mut s_tx_roots = s_tx_init.roots()?;
-        let mut s_rx_roots = s_rx_init.roots()?;
-
         let n_tx = self.tx_order;
         let n_rx = self.rx_order;
 
-        // Compute normalized frequency separation between bands
+        // ── Common-domain (Macchiarella) setup ────────────────────────────────
+        // The diplexer polynomials N, D, Pt, Pr are only well-defined when both
+        // channels are expressed in one shared normalized-frequency variable.
+        // We take the Tx prototype domain as the common domain and translate the
+        // Rx channel into it by the normalized band separation. This is the
+        // narrow-band linearization of the bandpass transform (Rx's center is
+        // at prototype frequency +Δ in Tx's variable) — the same
+        // `normalized_separation` convention the simplified path uses.
         let delta_center = self.rx_center - self.tx_center;
         let avg_bw = (self.tx_bw + self.rx_bw) / 2.0;
         let normalized_separation = 2.0 * delta_center / avg_bw;
+        // common-domain Rx polynomial = Rx prototype evaluated at (v - jΔ),
+        // i.e. `poly.shift(-jΔ)`; a common-domain root v = r_proto + jΔ.
+        let cshift = Complex64::new(0.0, normalized_separation);
+        let neg_cshift = -cshift;
+
+        // State is kept in the prototype domain (shared with the simplified
+        // path and `recover_channel_design`); the full loop translates to the
+        // common domain at the boundaries.
+        let mut s_tx_roots = s_tx_init.roots()?;
+        let mut s_rx_roots = s_rx_init.roots()?;
+
+        // Passband edges in the common (Tx-prototype) domain: the Tx
+        // passband is at [-j, +j]; the Rx passband sits at [j(Δ-1), j(Δ+1)].
+        // The p₀ return-loss conditions are imposed at the two *outer* edges
+        // (Tx lower, -j; Rx upper, j(Δ+1)) — the edges farthest from the
+        // other channel, which keeps the 2×2 p₀ system well-conditioned
+        // (the inner edges are gap-symmetric and give a near-singular
+        // system for equal bands).
+        let tx_edge = Complex64::new(0.0, -1.0);
+        let rx_edge = Complex64::new(0.0, normalized_separation + 1.0);
 
         let mut iterations = 0;
         let mut convergence_error = f64::INFINITY;
@@ -432,28 +457,35 @@ impl DuplexerSynthesis {
             for iter in 0..self.max_iterations {
                 iterations = iter + 1;
 
-                // Build current S polynomials from roots
-                let s_tx_current = ComplexPolynomial::from_complex_roots(&s_tx_roots)?;
-                let s_rx_current = ComplexPolynomial::from_complex_roots(&s_rx_roots)?;
+                // ── State (prototype domain) → common domain ────────────────
+                // TX is already the common (Tx-prototype) domain; RX is
+                // translated up by jΔ so both channels share one variable.
+                let s_tx_common_roots: Vec<Complex64> = s_tx_roots.to_vec();
+                let s_rx_common_roots: Vec<Complex64> =
+                    s_rx_roots.iter().map(|&r| r + cshift).collect();
 
-                // Compute transmission polynomials in common frequency domain
-                // We need to frequency-shift one filter's polynomials to the other's domain
-                // Pt(s) = P_TX(s) * S_RX(s - jΔ) where Δ is the normalized separation
-                // For the common-domain approach, we evaluate at shifted frequencies.
-                //
-                // Simplified: use the polynomials in their own domains but account for
-                // the frequency offset in the N(s) computation.
-                let pt = p_tx.multiply(&s_rx_current)?;
-                let pr = p_rx.multiply(&s_tx_current)?;
+                let s_tx_common = ComplexPolynomial::from_complex_roots(&s_tx_common_roots)?;
+                // s_rx_common_roots already hold the common-domain roots (λ + jΔ),
+                // so no further shift is needed (unlike d_rx / p_rx, which are
+                // prototype-domain polynomials).
+                let s_rx_common = ComplexPolynomial::from_complex_roots(&s_rx_common_roots)?;
+                let d_rx_common = d_rx.shift(neg_cshift)?;
+                let p_rx_common = p_rx.shift(neg_cshift)?;
 
-                // Compute N(s) with frequency-offset correction
-                let n_poly =
-                    self.compute_n_polynomial(&s_tx_current, &s_rx_current, &d_tx, &d_rx)?;
+                // Diplexer transmission polynomials, all in the common domain:
+                //   Pt(v) = P_TXn(v) · S_RX(v),  Pr(v) = P_RXn(v) · S_TX(v)
+                let pt = p_tx.multiply(&s_rx_common)?;
+                let pr = p_rx_common.multiply(&s_tx_common)?;
 
-                // Compute scaling constants
-                let (p0t_sq, p0r_sq) = self.solve_scaling_constants(&n_poly, &pt, &pr)?;
+                // Antenna-reflection numerator N(v) in the common domain.
+                let n_poly = self.compute_n_polynomial(&s_tx_common, &s_rx_common, &d_tx, &d_rx_common)?;
 
-                // Build |D|² polynomial and factorize using robust method
+                // |p0t|², |p0r|² from the return-loss conditions at the two
+                // passband edges (Tx upper edge +j, Rx lower edge j(Δ-1)).
+                let (p0t_sq, p0r_sq) =
+                    self.solve_scaling_constants(&n_poly, &pt, &pr, &tx_edge, &rx_edge)?;
+
+                // |D|² = |N|² + |p₀t|²|Pt|² + |p₀r|²|Pr|²  (on the jv axis)
                 let n_conj = n_poly.alternating_conjugate()?;
                 let nn = n_poly.multiply(&n_conj)?;
                 let pt_conj = pt.alternating_conjugate()?;
@@ -468,19 +500,29 @@ impl DuplexerSynthesis {
                 // Spectral factorization using cepstrum + balanced companion
                 let d_poly = crate::spectral::spectral_factor(&r_poly, n_tx + n_rx)?;
 
-                // Compute new S_TX * S_RX product
+                // New S_TX · S_RX product (common domain)
                 let product_poly = self.compute_s_product(&n_poly, &d_poly)?;
 
-                // Find roots and assign
+                // Find roots and assign in the common domain. RX roots sit ~Δ
+                // higher (in the +j direction) than TX roots, so proximity
+                // matching against the previous common-domain roots separates
+                // the two channels cleanly.
                 let product_roots = product_poly.roots()?;
-                let (raw_tx, raw_rx) =
-                    self.assign_roots(&product_roots, n_tx, n_rx, &s_tx_roots, &s_rx_roots)?;
+                let (raw_tx_common, raw_rx_common) = self.assign_roots(
+                    &product_roots,
+                    n_tx,
+                    n_rx,
+                    &s_tx_common_roots,
+                    &s_rx_common_roots,
+                )?;
 
-                // Under-relaxation
+                // ── Common domain → state (prototype domain) ────────────────
+                // Under-relaxation in the prototype domain (Tx is the identity
+                // mapping; Rx is translated back by −jΔ).
                 let alpha = (0.3 + 0.04 * iter as f64).min(0.7);
                 let new_s_tx_roots: Vec<Complex64> = s_tx_roots
                     .iter()
-                    .zip(raw_tx.iter())
+                    .zip(raw_tx_common.iter())
                     .map(|(&old, &new_r)| {
                         if new_r.re.is_finite() && new_r.im.is_finite() && new_r.norm() < 50.0 {
                             old * (1.0 - alpha) + new_r * alpha
@@ -491,10 +533,11 @@ impl DuplexerSynthesis {
                     .collect();
                 let new_s_rx_roots: Vec<Complex64> = s_rx_roots
                     .iter()
-                    .zip(raw_rx.iter())
+                    .zip(raw_rx_common.iter())
                     .map(|(&old, &new_r)| {
-                        if new_r.re.is_finite() && new_r.im.is_finite() && new_r.norm() < 50.0 {
-                            old * (1.0 - alpha) + new_r * alpha
+                        let new_proto = new_r - cshift;
+                        if new_proto.re.is_finite() && new_proto.im.is_finite() && new_proto.norm() < 50.0 {
+                            old * (1.0 - alpha) + new_proto * alpha
                         } else {
                             old
                         }
@@ -507,6 +550,7 @@ impl DuplexerSynthesis {
                 s_tx_roots = new_s_tx_roots;
                 s_rx_roots = new_s_rx_roots;
                 convergence_error = max_delta;
+
 
                 if max_delta < self.convergence_tol {
                     break;
@@ -663,64 +707,58 @@ impl DuplexerSynthesis {
         }
     }
 
-    /// Solves for |p₀t|² and |p₀r|² from return loss conditions.
+    /// Solves for |p₀t|² and |p₀r|² from the return-loss conditions.
     ///
-    /// Uses the condition that at the Tx passband edge (s = +j) and
-    /// Rx passband edge (s = -j), the power conservation must hold
-    /// with the specified return loss.
+    /// Each channel's return loss is imposed at its own passband edge in the
+    /// *common* (Tx-prototype) domain: `tx_edge` (Tx passband, +j) and
+    /// `rx_edge` (Rx passband, j(Δ−1)).
+    ///
+    /// At an edge `e`: `|S11|² = |N|²/|D|² = ε`, and unitarity gives
+    /// `|D|² = |N|² + |p₀t|²|Pt|² + |p₀r|²|Pr|²`, so
+    /// `|N|²(1−ε)/ε = |p₀t|²|Pt|² + |p₀r|²|Pr|²`.
     #[allow(dead_code)]
     fn solve_scaling_constants(
         &self,
         n_poly: &ComplexPolynomial,
         pt: &ComplexPolynomial,
         pr: &ComplexPolynomial,
+        tx_edge: &ComplexCoefficient,
+        rx_edge: &ComplexCoefficient,
     ) -> Result<(f64, f64)> {
-        // At s = +j (upper passband edge of TX in normalized domain):
-        //   |S11|² = |N(j)|² / |D(j)|² = 10^(-RL_TX/10)
-        // At s = -j (lower passband edge of RX in normalized domain):
-        //   |S11|² = |N(-j)|² / |D(-j)|² = 10^(-RL_RX/10)
-        //
-        // From unitarity: |D|² = |N|² + |p₀t|²|Pt|² + |p₀r|²|Pr|²
-        // So: |N|² / (|N|² + |p₀t|²|Pt|² + |p₀r|²|Pr|²) = ε_RL
-        //
-        // Rearranging: |N|²(1-ε_RL) = ε_RL(|p₀t|²|Pt|² + |p₀r|²|Pr|²)
-
-        let s_plus_j = Complex64::new(0.0, 1.0);
-        let s_minus_j = Complex64::new(0.0, -1.0);
-
         let epsilon_tx = 10.0_f64.powf(-self.tx_rl / 10.0);
         let epsilon_rx = 10.0_f64.powf(-self.rx_rl / 10.0);
 
-        let n_at_pj = n_poly.evaluate(s_plus_j).norm_sqr();
-        let pt_at_pj = pt.evaluate(s_plus_j).norm_sqr();
-        let pr_at_pj = pr.evaluate(s_plus_j).norm_sqr();
+        let n_tx = n_poly.evaluate(*tx_edge).norm_sqr();
+        let pt_tx = pt.evaluate(*tx_edge).norm_sqr();
+        let pr_tx = pr.evaluate(*tx_edge).norm_sqr();
 
-        let n_at_mj = n_poly.evaluate(s_minus_j).norm_sqr();
-        let pt_at_mj = pt.evaluate(s_minus_j).norm_sqr();
-        let pr_at_mj = pr.evaluate(s_minus_j).norm_sqr();
+        let n_rx = n_poly.evaluate(*rx_edge).norm_sqr();
+        let pt_rx = pt.evaluate(*rx_edge).norm_sqr();
+        let pr_rx = pr.evaluate(*rx_edge).norm_sqr();
 
-        // System of equations:
-        // n_pj * (1 - eps_tx) / eps_tx = p0t² * pt_pj + p0r² * pr_pj
-        // n_mj * (1 - eps_rx) / eps_rx = p0t² * pt_mj + p0r² * pr_mj
-        let rhs1 = n_at_pj * (1.0 - epsilon_tx) / epsilon_tx;
-        let rhs2 = n_at_mj * (1.0 - epsilon_rx) / epsilon_rx;
+        // System of equations (rows: Tx edge, Rx edge):
+        //   pt_tx * p0t² + pr_tx * p0r² = n_tx * (1 - eps_tx) / eps_tx
+        //   pt_rx * p0t² + pr_rx * p0r² = n_rx * (1 - eps_rx) / eps_rx
+        let rhs1 = n_tx * (1.0 - epsilon_tx) / epsilon_tx;
+        let rhs2 = n_rx * (1.0 - epsilon_rx) / epsilon_rx;
 
-        // 2×2 linear system:  [pt_pj  pr_pj] [p0t²]   [rhs1]
-        //                      [pt_mj  pr_mj] [p0r²] = [rhs2]
-        let det = pt_at_pj * pr_at_mj - pt_at_mj * pr_at_pj;
+        // 2×2 linear system:  [pt_tx  pr_tx] [p0t²]   [rhs1]
+        //                      [pt_rx  pr_rx] [p0r²] = [rhs2]
+        let det = pt_tx * pr_rx - pt_rx * pr_tx;
 
         if det.abs() < 1e-30 {
             // Degenerate case: use equal scaling
-            let p0_sq = (rhs1 + rhs2) / (pt_at_pj + pr_at_pj + pt_at_mj + pr_at_mj);
+            let p0_sq = (rhs1 + rhs2) / (pt_tx + pr_tx + pt_rx + pr_rx);
             return Ok((p0_sq.max(1e-15), p0_sq.max(1e-15)));
         }
 
-        let p0t_sq = (rhs1 * pr_at_mj - rhs2 * pr_at_pj) / det;
-        let p0r_sq = (pt_at_pj * rhs2 - pt_at_mj * rhs1) / det;
+        let p0t_sq = (rhs1 * pr_rx - rhs2 * pr_tx) / det;
+        let p0r_sq = (pt_tx * rhs2 - pt_rx * rhs1) / det;
 
         // Clamp to positive values (numerical safety)
         Ok((p0t_sq.max(1e-15), p0r_sq.max(1e-15)))
     }
+
     /// Computes the S_TX × S_RX product polynomial from N(s) and D(s).
     #[allow(dead_code)]
     fn compute_s_product(
@@ -991,6 +1029,103 @@ mod tests {
         assert!((prod.coefficients[0].re - 3.0).abs() < 1e-12);
         assert!((prod.coefficients[1].re - 7.0).abs() < 1e-12);
         assert!((prod.coefficients[2].re - 2.0).abs() < 1e-12);
+        Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // D1 — full-iteration RED gate (continuation-plan section A).
+    // These assert what the full Macchiarella spectral path is *supposed* to
+    // deliver (converged, quasi-equiripple, valid channels) at order 2 — the
+    // smallest case. They are RED at the current state: order 2 exhausts all
+    // iterations without converging (max root displacement ~7e-2 ≫ 1e-8) and
+    // the recovered channels are degenerate (band-center S21 ≈ -14 to -46 dB,
+    // antenna S11 ≈ 0 dB), and order ≥ 4 fails with a typed numerical error
+    // (pole-placement tolerance at order 4, Aberth non-convergence at order
+    // 6). The fix is section A's D2 (diagnose) → D3 (converge order ≥ 4, 6); un-ignore the
+    // order-2 test once the full path converges there.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Sample a duplexer response at the frequency nearest `target_hz`.
+    fn nearest(response: &DuplexerResponse, target_hz: f64) -> usize {
+        response
+            .frequencies
+            .iter()
+            .enumerate()
+            .min_by(|a, b| {
+                (a.1 - target_hz).abs().total_cmp(&(b.1 - target_hz).abs())
+            })
+            .map(|(i, _)| i)
+            .expect("non-empty response")
+    }
+
+    #[test]
+    #[ignore = "D1 RED gate: full Macchiarella iteration does not converge at order 2 (D2/D3 is the fix)"]
+    fn full_iteration_order2_quasi_equiripple() -> Result<()> {
+        // Order-2 Tx/Rx, adjacent 200 MHz bands (the classic waveguide
+        // diplexer geometry), ideal Type-I junction. This is the D1 RED gate
+        // for section A: the full spectral path must (a) converge within the
+        // tolerance, (b) keep the antenna reflection within ~2 dB of the
+        // per-channel spec at each passband center (quasi-equiripple), and
+        // (c) produce valid passbands (S21 within 0.5 dB of the per-channel
+        // spec) on both channels.
+        let result = DuplexerSynthesis::new()
+            .tx(2, 22.0, 14.9e9, 15.1e9)
+            .rx(2, 22.0, 15.15e9, 15.35e9)
+            .junction(JunctionType::TypeI { n: 1.0, b0: 0.0 })
+            .max_iterations(15)
+            .convergence_tol(1e-8)
+            .full_iteration(true)
+            .synthesize()?;
+
+        assert_eq!(result.tx.order(), 2);
+        assert_eq!(result.rx.order(), 2);
+        assert!(
+            result.convergence_error < 1e-8,
+            "full iteration must converge to the root-displacement tolerance, got {:.3e} after {} iterations",
+            result.convergence_error,
+            result.iterations
+        );
+
+        let resp = Duplexer::new(result.tx.clone(), result.rx.clone())?.response(14.8e9, 15.45e9, 121)?;
+
+        // Passband peaks within 0.5 dB of the per-channel spec (22 dB RL →
+        // S21 center ≈ -0.05 dB; the mutual-loading correction may cost a
+        // little more, hence the 0.5 dB allowance).
+        let tx_i = nearest(&resp, 15.0e9);
+        let rx_i = nearest(&resp, 15.25e9);
+        assert!(
+            resp.tx_s21_db[tx_i] > -0.5,
+            "Tx passband peak: {:.2} dB (want > -0.5)",
+            resp.tx_s21_db[tx_i]
+        );
+        assert!(
+            resp.rx_s21_db[rx_i] > -0.5,
+            "Rx passband peak: {:.2} dB (want > -0.5)",
+            resp.rx_s21_db[rx_i]
+        );
+
+        // Quasi-equiripple antenna return loss: within ~2 dB of the 22 dB
+        // spec at each passband center, i.e. ≤ -20 dB.
+        assert!(
+            resp.antenna_s11_db[tx_i] < -20.0,
+            "antenna RL at Tx center: {:.2} dB (want ≤ -20, i.e. within 2 dB of spec)",
+            resp.antenna_s11_db[tx_i]
+        );
+        assert!(
+            resp.antenna_s11_db[rx_i] < -20.0,
+            "antenna RL at Rx center: {:.2} dB (want ≤ -20, i.e. within 2 dB of spec)",
+            resp.antenna_s11_db[rx_i]
+        );
+
+        // No degenerate (fully reflective / all-zero) antenna port anywhere.
+        assert!(
+            resp
+                .antenna_s11_db
+                .iter()
+                .all(|&db| db.is_finite() && db < 0.0 && db > -300.0),
+            "antenna S11 degenerate somewhere: {:?} dB",
+            resp.antenna_s11_db
+        );
         Ok(())
     }
 }

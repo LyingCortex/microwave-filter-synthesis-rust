@@ -56,6 +56,18 @@
   fixed-δ finite-difference Jacobian's scale sensitivity — the defect
   D2-opt (scale-aware step) is meant to fix — and will be un-`#[ignore]`d
   when that lands.
+- **`duplexer::tests::full_iteration_order2_quasi_equiripple` — the
+  duplexer full-path RED→GREEN gate** (continuation plan D1). An order-2
+  Tx/Rx diplexer run with `full_iteration(true)` is asserted to converge to
+  the root-displacement tolerance, keep the antenna reflection within ~2 dB
+  of the 22 dB spec at each passband center (quasi-equiripple), and keep both
+  channel passband peaks within 0.5 dB of the per-channel spec. `#[ignore]`d
+  with the current failure documented: order 2 exhausts 15/15 iterations
+  without converging (max root displacement ~7e-2) and the recovered
+  channels are degenerate (band-center S21 ≈ −14 to −46 dB, antenna
+  S11 ≈ 0 dB); order ≥ 4 additionally fails with a typed numerical error
+  (pole-placement tolerance at order 4, Aberth non-convergence at order 6). The
+  fix is section A's D2 (diagnose) → D3 (converge order ≥ 4, 6).
 
 ### Fixed
 
