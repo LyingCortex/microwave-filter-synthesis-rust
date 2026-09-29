@@ -61,10 +61,6 @@ section should be released as the next version tag when the maintainer cuts it.
   still carries its own 2-channel iteration loop; it could become an N=2
   `MultiplexerSynthesis` call so the Macchiarella-Tamiazzo iteration is
   maintained once.
-- **High-order integration tests (N=8)** — root-solver unit tests cover
-  degrees 10/20/30 and `examples/high_order_stability.rs` stresses up to 30,
-  but the documented "order 2–8" fixture band has no N=8 regression entry in
-  `tests/`.
 - **Builder symmetry ergonomics** — `CouplingMatrixBuilder::set` writes a
   single entry (symmetry is the caller's job; `set_symmetric` exists).
   Consider a symmetric-by-default builder for the public API.
@@ -93,3 +89,4 @@ section should be released as the next version tag when the maintainer cuts it.
 | Root-residual validation in `FaerRootSolver` | 0.5.0+ | backward-residual gate (`≤ 1e-3`) + non-finite check; fall-through to iterative methods; DK/Aberth in-loop NaN guards |
 | Duplicate `recover_filter_design` path | 0.5.0+ | single `mfs::synthesis::recover_channel_design` used by both duplexer and multiplexer |
 | `HighPassMapping` / `BandStopMapping` | 0.5.0+ | `freq` now covers all four prototype families; singular points (`f = 0` for HP, `f = f0` for BS) clamp to `-SINGULAR_CLAMP`, edges map to ±1 exactly under the geometric-mean convention (E3, continuation plan) |
+| High-order integration tests (N=8) | 0.5.0+ | `tests/benchmark_standard.rs::mfs_synthesized_folded_order8_reproduces_the_printed_book_matrix` pins order 8 against the printed Cameron 2018 `EIGHT_THREE_FOLDED` anchor (E4, continuation plan) |

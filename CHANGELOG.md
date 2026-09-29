@@ -39,6 +39,23 @@
   `f = f0` for band-stop), and implement exact forward/inverse round trips —
   band-stop edges hit ±1 exactly under the geometric-mean convention and the
   inverse is defined for both signs of `ω`.
+- **N=8 regression entry in the documented order 2–8 fixture band**
+  (continuation plan E4). `tests/benchmark_standard.rs` gains
+  `mfs_synthesized_folded_order8_reproduces_the_printed_book_matrix`:
+  the standard's only order-8 case (`twoport_8_3`, Cameron 2018 Sec 9.6 /
+  Fig 9.22a) is synthesized and folded, and the folded matrix + response are
+  pinned against the printed `EIGHT_THREE_FOLDED` anchor at the 4-decimal
+  printing quantum.
+- **`tests/optimizer_integration.rs` — the optimizer's RED→GREEN gate**
+  (continuation plan D1-opt). Two order-6 integration tests, both
+  `#[ignore]`d with their current failure documented: (a) synthesize →
+  perturb four inter-resonator couplings by 7 % → re-optimize from the
+  perturbed good-guess matrix and assert 1e-4 relative coupling recovery
+  (currently stops at ~8.3e-3); (b) `extract_matrix` from its crude uniform
+  guess (currently wanders into a singular response solve). They pin the
+  fixed-δ finite-difference Jacobian's scale sensitivity — the defect
+  D2-opt (scale-aware step) is meant to fix — and will be un-`#[ignore]`d
+  when that lands.
 
 ### Fixed
 

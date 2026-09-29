@@ -682,6 +682,62 @@ fn mfs_synthesized_folded_matrix_reproduces_the_printed_book_matrix() {
     }
 }
 
+/// N=8 regression entry for the documented "order 2–8 fixture band".
+///
+/// `twoport_8_3` (Cameron 2018 Sec 9.6 / Fig 9.22a, p.347) is the standard's
+/// only order-8 two-port case, and its anchor `EIGHT_THREE_FOLDED` carries
+/// the printed **folded** matrix only (no transversal transcription), so it
+/// cannot ride on [`anchor_pair`]. This test therefore goes straight from
+/// the case spec through synthesis and folding, and pins the result against
+/// the printed folded matrix at the printing quantum — the same two
+/// conventions (zero-sign reflection, 4-decimal printing) are absorbed as in
+/// [`mfs_synthesized_folded_matrix_reproduces_the_printed_book_matrix`].
+#[test]
+fn mfs_synthesized_folded_order8_reproduces_the_printed_book_matrix() {
+    let qualid = "twoport_8_3";
+    let case = data::case(qualid).expect("case");
+    let order = gates::spec_usize(&case.spec, "order").expect("order");
+    assert_eq!(order, 8, "{qualid}: this regression entry pins the N=8 band edge");
+
+    let anchors = data::anchors("twoport").expect("twoport anchors");
+    let printed_folded = coupling_matrix_from_anchor(
+        "EIGHT_THREE_FOLDED",
+        &anchors["EIGHT_THREE_FOLDED"]["folded"],
+    );
+    assert_eq!(printed_folded.order(), order, "anchor order must match the case");
+
+    let design = mfs::design::FilterDesign::prototype(
+        order,
+        gates::spec_f64(&case.spec, "rl").expect("rl"),
+    )
+    .zeros(gates::spec_f64_vec(&case.spec, "zeros").expect("zeros"))
+    .synthesize()
+    .expect("synthesis");
+    let folded = design.to_folded().expect("folding");
+    assert_eq!(
+        gates::folded_mask_violations(&folded),
+        0.0,
+        "{qualid}: folded matrix must be inside the contract's folded mask"
+    );
+
+    let deviation = gates::coupling_set_deviation(&folded, &printed_folded).expect("sets");
+    assert!(
+        deviation < 0.02,
+        "{qualid}: folded matrix leaves the printed matrix's equivalence class: {deviation:e}"
+    );
+
+    let grid = contract_grid();
+    let ours = evaluate(&folded, &grid);
+    let printed = evaluate(&printed_folded, &grid);
+    let metric = invariance_metric(&ours, &printed)
+        .min(invariance_metric(&ours, &reflected_omega(&printed)));
+    assert!(
+        metric < ANCHOR_PRINTED_PAIR_TOL,
+        "{qualid}: mfs's folded matrix does not reproduce the printed matrix's response: \
+         max|Δ| = {metric:e} >= {ANCHOR_PRINTED_PAIR_TOL:e} (4-decimal printing quantum)"
+    );
+}
+
 /// The same response read in the opposite Ω direction (`ω -> -ω`), which is how
 /// the two sign conventions for the lattice transmission zeros differ.
 fn reflected_omega(

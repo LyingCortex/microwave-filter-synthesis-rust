@@ -259,13 +259,15 @@ from the CLI/Python surfaces, with integration-level evidence.
 
 ### Work items (ordered)
 
-1. **D1 (opt) — Integration test: synthesize → perturb → extract.**
-   Generate an order-6 folded matrix, evaluate its response, perturb 3–5
-   entries by 5–10 %, run `extract_matrix` with a *good* initial guess (the
-   unperturbed matrix) and `tune_matrix` from the crude guess; assert
-   recovered couplings within 1e-4 relative. This is the RED→GREEN gate for
-   the rest of the section and exposes the fixed-δ Jacobian's scale
-   sensitivity (1e-7 is only safe when couplings are O(1)).
+1. **D1 (opt) — Integration test: synthesize → perturb → extract — RED gate committed (2026-09-29).**
+   `tests/optimizer_integration.rs` (two `#[ignore]`d RED tests, order 6):
+   (a) perturb four inter-resonator couplings by 7 %, re-optimize from the
+   perturbed good-guess matrix, assert 1e-4 relative recovery — currently
+   stops at ~8.3e-3; (b) `extract_matrix` from its crude uniform guess —
+   currently wanders into a singular response solve. Both `#[ignore]`d with
+   the failure documented; they are the RED→GREEN gate for the rest of this
+   section and the scale-sensitivity exposure of the fixed-δ Jacobian that
+   D2-opt is meant to fix.
 2. **D2 (opt) — Scale-aware Jacobian step.** Replace the fixed 1e-7 with
    `delta = 1e-7 * max(1, |x_i|)` (or central differences if the FD cost
    stays acceptable at our problem sizes — measure first, don't assume).
@@ -315,16 +317,20 @@ Ordered by how much they block the areas above:
    and `BandStopMapping` are implemented in `freq` with the shared
    `SINGULAR_CLAMP` convention at their singular points. Unblocks
    stop-band-anchored multi-band specs (C1).
-4. **High-order integration tests (N=8 fixture band).** The documented
-   fixture band is order 2–8 but `tests/` has no N=8 regression entry;
-   add one (root-solver unit tests already cover 10/20/30).
+4. **High-order integration tests (N=8 fixture band) — closed (2026-09-29).**
+   `tests/benchmark_standard.rs` gained
+   `mfs_synthesized_folded_order8_reproduces_the_printed_book_matrix`:
+   the standard's only order-8 case (`twoport_8_3`, Cameron 2018 Sec 9.6 /
+   Fig 9.22a) is synthesized and folded, and its matrix + response are
+   pinned against the printed `EIGHT_THREE_FOLDED` anchor at the 4-decimal
+   printing quantum.
 
 ---
 
 ## Suggested execution order
 
 ```
-Wave 1 (parallel):  E4 (N=8 regression) · D1-opt (RED)   [E3 + C1 closed 2026-09-29]
+Wave 1 (parallel):  E4 (N=8 regression) · D1-opt (RED)   [E3 + C1 + E4 closed; D1-opt RED gate committed 2026-09-29]
 Wave 2 (serial):    D1–D4 (duplexer full path)  ← critical path for B
 Wave 3 (parallel):  D2–D4-opt (optimizer) · C0 (multi-band design doc + route choice)
 Wave 4 (serial):    B1 → B2 → B3 → B4 (multiplexer; needs Wave 2)
