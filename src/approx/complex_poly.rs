@@ -923,7 +923,7 @@ mod tests {
             Complex64::new(1.0, 0.0),
         ])?;
         let q = p.shift(Complex64::new(0.0, 5.0))?;
-        let expected = vec![
+        let expected = [
             Complex64::new(-22.0, 10.0),
             Complex64::new(2.0, 10.0),
             Complex64::new(1.0, 0.0),
