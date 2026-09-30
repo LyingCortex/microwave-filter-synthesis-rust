@@ -432,19 +432,31 @@ impl DuplexerSynthesis {
         let cshift = Complex64::new(0.0, normalized_separation);
         let neg_cshift = -cshift;
 
+        // The paper's Steps 16-17 re-derive D_TX / D_RX (in the common
+        // domain) from the diplexer spectral factor D and the current
+        // S_TX / S_RX roots at every iteration; the N(s) of eq. (8) must
+        // be built from D_TX / D_RX consistent with the *current* S, not
+        // the frozen independent-synthesis values. Loop state for the
+        // common-domain pair: TX is already the common (Tx-prototype)
+        // domain; RX is translated by -jΔ (a common root v = λ + jΔ maps
+        // to prototype λ = v - jΔ, so D_RX_common(v) = D_RX_proto(v - jΔ)).
+        let mut d_tx_common = d_tx.clone();
+        let mut d_rx_common = d_rx.shift(neg_cshift)?;
+
         // State is kept in the prototype domain (shared with the simplified
         // path and `recover_channel_design`); the full loop translates to the
         // common domain at the boundaries.
         let mut s_tx_roots = s_tx_init.roots()?;
         let mut s_rx_roots = s_rx_init.roots()?;
 
-        // Passband edges in the common (Tx-prototype) domain: the Tx
-        // passband is at [-j, +j]; the Rx passband sits at [j(Δ-1), j(Δ+1)].
-        // The p₀ return-loss conditions are imposed at the two *outer* edges
-        // (Tx lower, -j; Rx upper, j(Δ+1)) — the edges farthest from the
-        // other channel, which keeps the 2×2 p₀ system well-conditioned
-        // (the inner edges are gap-symmetric and give a near-singular
-        // system for equal bands).
+        // Return-loss edges: the paper's Step 3 (eq. 13) imposes the two
+        // return-loss conditions at the two *outer* passband edges of the
+        // combined band in the common domain. In this (Tx-prototype) common
+        // domain the combined band spans [-j, j(Δ+1)], so the outer edges
+        // are the Tx lower edge (-j) and the Rx upper edge (+j(Δ+1)).
+        // Each condition is imposed at the point where that channel's own
+        // |P| term is O(1) and the other channel's is small, which keeps
+        // the 2×2 p0 system well-conditioned for adjacent bands.
         let tx_edge = Complex64::new(0.0, -1.0);
         let rx_edge = Complex64::new(0.0, normalized_separation + 1.0);
 
@@ -466,26 +478,21 @@ impl DuplexerSynthesis {
 
                 let s_tx_common = ComplexPolynomial::from_complex_roots(&s_tx_common_roots)?;
                 // s_rx_common_roots already hold the common-domain roots (λ + jΔ),
-                // so no further shift is needed (unlike d_rx / p_rx, which are
-                // prototype-domain polynomials).
+                // so no further shift is needed (unlike p_rx, which is a
+                // prototype-domain polynomial). d_rx_common is the loop state
+                // (Steps 16-17 re-derive it each iteration); the TX pair needs
+                // no translation: TX prototype *is* the common domain.
                 let s_rx_common = ComplexPolynomial::from_complex_roots(&s_rx_common_roots)?;
-                let d_rx_common = d_rx.shift(neg_cshift)?;
                 let p_rx_common = p_rx.shift(neg_cshift)?;
 
                 // Diplexer transmission polynomials, all in the common domain:
                 //   Pt(v) = P_TXn(v) · S_RX(v),  Pr(v) = P_RXn(v) · S_TX(v)
                 let pt = p_tx.multiply(&s_rx_common)?;
                 let pr = p_rx_common.multiply(&s_tx_common)?;
-
                 // Antenna-reflection numerator N(v) in the common domain.
-                let n_poly = self.compute_n_polynomial(&s_tx_common, &s_rx_common, &d_tx, &d_rx_common)?;
-
-                // |p0t|², |p0r|² from the return-loss conditions at the two
-                // passband edges (Tx upper edge +j, Rx lower edge j(Δ-1)).
+                let n_poly = self.compute_n_polynomial(&s_tx_common, &s_rx_common, &d_tx_common, &d_rx_common)?;
                 let (p0t_sq, p0r_sq) =
                     self.solve_scaling_constants(&n_poly, &pt, &pr, &tx_edge, &rx_edge)?;
-
-                // |D|² = |N|² + |p₀t|²|Pt|² + |p₀r|²|Pr|²  (on the jv axis)
                 let n_conj = n_poly.alternating_conjugate()?;
                 let nn = n_poly.multiply(&n_conj)?;
                 let pt_conj = pt.alternating_conjugate()?;
@@ -497,52 +504,61 @@ impl DuplexerSynthesis {
                     .add(&ptpt.scale(Complex64::new(p0t_sq, 0.0))?)?
                     .add(&prpr.scale(Complex64::new(p0r_sq, 0.0))?)?;
 
-                // Spectral factorization using cepstrum + balanced companion
+                // Spectral factorization: cepstrum with the adaptive
+                // (faer-gated) companion-matrix fallback.
                 let d_poly = crate::spectral::spectral_factor(&r_poly, n_tx + n_rx)?;
+                eprintln!(
+                    "[DBG] iter={} p0t_sq={:.4e} p0r_sq={:.4e} d_lead={:.3e}{:+.3e}j degD={}",
+                    iter,
+                    p0t_sq,
+                    p0r_sq,
+                    d_poly.coefficients.last().map(|c| c.re).unwrap_or(0.0),
+                    d_poly.coefficients.last().map(|c| c.im).unwrap_or(0.0),
+                    d_poly.degree()
+                );
 
                 // New S_TX · S_RX product (common domain)
                 let product_poly = self.compute_s_product(&n_poly, &d_poly)?;
 
-                // Find roots and assign in the common domain. RX roots sit ~Δ
-                // higher (in the +j direction) than TX roots, so proximity
-                // matching against the previous common-domain roots separates
-                // the two channels cleanly.
+                // Find roots and assign in the common domain: the paper's
+                // Step 4 sorts by imaginary part — the lower set goes to the
+                // lower band (TX), the upper set to the upper band (RX).
                 let product_roots = product_poly.roots()?;
-                let (raw_tx_common, raw_rx_common) = self.assign_roots(
-                    &product_roots,
-                    n_tx,
-                    n_rx,
-                    &s_tx_common_roots,
-                    &s_rx_common_roots,
-                )?;
+                let (raw_tx_common, raw_rx_common) = Self::assign_roots(&product_roots, n_tx, n_rx)?;
+                eprintln!(
+                    "[DBG] tx={:?} rx={:?}",
+                    raw_tx_common
+                        .iter()
+                        .map(|r| format!("{:.4e}{:+.4e}j", r.re, r.im))
+                        .collect::<Vec<_>>(),
+                    raw_rx_common
+                        .iter()
+                        .map(|r| format!("{:.4e}{:+.4e}j", r.re, r.im))
+                        .collect::<Vec<_>>()
+                );
 
                 // ── Common domain → state (prototype domain) ────────────────
-                // Under-relaxation in the prototype domain (Tx is the identity
-                // mapping; Rx is translated back by −jΔ).
-                let alpha = (0.3 + 0.04 * iter as f64).min(0.7);
-                let new_s_tx_roots: Vec<Complex64> = s_tx_roots
+                // Pure fixed-point update (Macchiarella-Tamiazzo step 4/5):
+                // adopt the newly computed S_TX/S_RX roots directly. The
+                // paper converges in 5–10 iterations; no relaxation ramp is
+                // needed (a ramp that *increases* the step size over time
+                // destabilizes the fixed point and causes a limit cycle).
+                let new_s_tx_roots: Vec<Complex64> = raw_tx_common
                     .iter()
-                    .zip(raw_tx_common.iter())
-                    .map(|(&old, &new_r)| {
-                        if new_r.re.is_finite() && new_r.im.is_finite() && new_r.norm() < 50.0 {
-                            old * (1.0 - alpha) + new_r * alpha
-                        } else {
-                            old
-                        }
-                    })
+                    .filter(|r| r.re.is_finite() && r.im.is_finite() && r.norm() < 50.0)
+                    .copied()
                     .collect();
-                let new_s_rx_roots: Vec<Complex64> = s_rx_roots
+                let new_s_rx_roots: Vec<Complex64> = raw_rx_common
                     .iter()
-                    .zip(raw_rx_common.iter())
-                    .map(|(&old, &new_r)| {
-                        let new_proto = new_r - cshift;
-                        if new_proto.re.is_finite() && new_proto.im.is_finite() && new_proto.norm() < 50.0 {
-                            old * (1.0 - alpha) + new_proto * alpha
-                        } else {
-                            old
-                        }
-                    })
+                    .map(|&r| r - cshift)
+                    .filter(|r| r.re.is_finite() && r.im.is_finite() && r.norm() < 50.0)
                     .collect();
+
+                if new_s_tx_roots.len() != n_tx || new_s_rx_roots.len() != n_rx {
+                    return Err(MfsError::NumericalFailure(
+                        "Full iteration produced a non-finite root set".into(),
+                    ));
+                }
 
                 let max_delta = compute_root_displacement(&s_tx_roots, &new_s_tx_roots)
                     .max(compute_root_displacement(&s_rx_roots, &new_s_rx_roots));
@@ -551,6 +567,24 @@ impl DuplexerSynthesis {
                 s_rx_roots = new_s_rx_roots;
                 convergence_error = max_delta;
 
+                // Steps 16-17: re-derive D_TX / D_RX (common domain) from
+                // this iteration's spectral factor D and the new S roots.
+                // N(s) (eq. 8) must be built from D_TX / D_RX consistent
+                // with the *current* S; freezing the independent-synthesis
+                // values breaks the fixed point from iteration 1 on.
+                if matches!(self.junction, JunctionType::TypeI { .. }) {
+                    let s_rx_common_roots_new: Vec<Complex64> =
+                        s_rx_roots.iter().map(|&r| r + cshift).collect();
+                    let (new_d_tx_common, new_d_rx_common) =
+                        self.rederive_channel_d(&d_poly, &s_tx_roots, &s_rx_common_roots_new)?;
+                    eprintln!(
+                        "[DBG] re-derive degDtx={} degDrx={}",
+                        new_d_tx_common.degree(),
+                        new_d_rx_common.degree()
+                    );
+                    d_tx_common = new_d_tx_common;
+                    d_rx_common = new_d_rx_common;
+                }
 
                 if max_delta < self.convergence_tol {
                     break;
@@ -626,10 +660,19 @@ impl DuplexerSynthesis {
             }
         }
 
-        // Step 3: Recover filter designs from modified S roots
+        // Recover filter designs from the modified S roots. In the full
+        // iteration the per-channel D polynomials are the ones re-derived
+        // at the last iteration (Steps 16-17), translated back to the
+        // prototype domain (TX is the identity; RX by +jΔ, since a
+        // common-domain root v = λ + jΔ maps to prototype λ).
+        let (d_tx_recover, d_rx_recover) = if self.full_iteration {
+            (d_tx_common.clone(), d_rx_common.shift(cshift)?)
+        } else {
+            (d_tx.clone(), d_rx.clone())
+        };
         let tx_design = crate::synthesis::recover_channel_design(
             &s_tx_roots,
-            &d_tx,
+            &d_tx_recover,
             &tx_polys,
             self.tx_order,
             self.tx_rl,
@@ -638,7 +681,7 @@ impl DuplexerSynthesis {
         )?;
         let rx_design = crate::synthesis::recover_channel_design(
             &s_rx_roots,
-            &d_rx,
+            &d_rx_recover,
             &rx_polys,
             self.rx_order,
             self.rx_rl,
@@ -745,6 +788,10 @@ impl DuplexerSynthesis {
         // 2×2 linear system:  [pt_tx  pr_tx] [p0t²]   [rhs1]
         //                      [pt_rx  pr_rx] [p0r²] = [rhs2]
         let det = pt_tx * pr_rx - pt_rx * pr_tx;
+        eprintln!(
+            "[2x2] det={:.4e} pt_tx={:.4e} pr_tx={:.4e} pt_rx={:.4e} pr_rx={:.4e} n_tx={:.4e} n_rx={:.4e} rhs1={:.4e} rhs2={:.4e}",
+            det, pt_tx, pr_tx, pt_rx, pr_rx, n_tx, n_rx, rhs1, rhs2
+        );
 
         if det.abs() < 1e-30 {
             // Degenerate case: use equal scaling
@@ -756,7 +803,9 @@ impl DuplexerSynthesis {
         let p0r_sq = (pt_tx * rhs2 - pt_rx * rhs1) / det;
 
         // Clamp to positive values (numerical safety)
-        Ok((p0t_sq.max(1e-15), p0r_sq.max(1e-15)))
+        let (p0t_sq, p0r_sq) = (p0t_sq.max(1e-15), p0r_sq.max(1e-15));
+        eprintln!("[2x2] p0t_sq={:.4e} p0r_sq={:.4e}", p0t_sq, p0r_sq);
+        Ok((p0t_sq, p0r_sq))
     }
 
     /// Computes the S_TX × S_RX product polynomial from N(s) and D(s).
@@ -802,105 +851,139 @@ impl DuplexerSynthesis {
         }
     }
 
-    /// Assigns product roots to S_TX and S_RX based on proximity to
-    /// previous iteration's roots.
-    #[allow(dead_code)]
+    /// Assigns the S_TX·S_RX product roots to S_TX and S_RX by the
+    /// paper's Step 4: sort by increasing imaginary part, then take the
+    /// lower set for the lower band (TX in the common domain) and the
+    /// upper set for the upper band (RX). This is deterministic and
+    /// avoids the assignment flips of proximity matching.
     fn assign_roots(
-        &self,
         product_roots: &[Complex64],
         n_tx: usize,
         n_rx: usize,
-        prev_s_tx: &[Complex64],
-        prev_s_rx: &[Complex64],
     ) -> Result<(Vec<Complex64>, Vec<Complex64>)> {
-        let total = n_tx + n_rx;
+        if product_roots.len() < n_tx + n_rx {
+            return Err(MfsError::NumericalFailure(format!(
+                "S_TX·S_RX product has {} roots, expected {}",
+                product_roots.len(),
+                n_tx + n_rx
+            )));
+        }
 
-        // If product polynomial yielded fewer roots than total, this indicates
-        // a degenerate case (leading term cancellation). Fall back to keeping
-        // previous roots with small perturbation.
-        if product_roots.len() < total {
-            // Perturb previous roots slightly to allow convergence progress
-            let perturbed_tx: Vec<Complex64> = prev_s_tx
+        let mut sorted = product_roots.to_vec();
+        sorted.sort_by(|a, b| {
+            a.im.partial_cmp(&b.im).unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.re.partial_cmp(&b.re).unwrap_or(std::cmp::Ordering::Equal))
+        });
+
+        let raw_tx_common = sorted[..n_tx].to_vec();
+        let raw_rx_common = sorted[n_tx..n_tx + n_rx].to_vec();
+
+        Ok((raw_tx_common, raw_rx_common))
+    }
+
+    /// Re-derives the per-channel D polynomials D_TX / D_RX (common domain)
+    /// from the diplexer spectral factor D(v) and the current S_TX / S_RX
+    /// roots, per the paper's Steps 16-17.
+    ///
+    /// D_TX is determined by the n_tx values
+    /// `D(zS_TX_k) / (A · S_RX(zS_TX_k))` at the roots `zS_TX_k` of S_TX
+    /// (eq. 16); D_RX analogously at the roots of S_RX (eq. 17). Since both
+    /// are degree (n−1) polynomials, the reconstruction is the exact
+    /// Lagrange interpolant through the nodes. Type-I only: there the
+    /// coupling constant A = n²/(1 − j·n²·b₀) is the same one appearing in
+    /// N(s) (eq. 8), so the D used in the spectral factor is exactly the
+    /// D on the right-hand side of eqs. 16-17.
+    fn rederive_channel_d(
+        &self,
+        d_poly: &ComplexPolynomial,
+        s_tx_roots: &[Complex64],
+        s_rx_roots: &[Complex64],
+    ) -> Result<(ComplexPolynomial, ComplexPolynomial)> {
+        let JunctionType::TypeI { n, b0 } = self.junction else {
+            return Err(MfsError::PreconditionViolation(
+                "D_TX/D_RX re-derivation is defined for the Type-I junction".into(),
+            ));
+        };
+        let a = Complex64::new(n * n, 0.0) / Complex64::new(1.0, -n * n * b0);
+        let s_tx_common = ComplexPolynomial::from_complex_roots(s_tx_roots)?;
+        let s_rx_common = ComplexPolynomial::from_complex_roots(s_rx_roots)?;
+        let d_tx = Self::rederive_channel_d_at(d_poly, s_tx_roots, &s_rx_common, a)?;
+        let d_rx = Self::rederive_channel_d_at(d_poly, s_rx_roots, &s_tx_common, a)?;
+        Ok((d_tx, d_rx))
+    }
+
+    /// Exact Lagrange reconstruction of the degree-`(n−1)` channel D
+    /// polynomial through its values `D(z_k)/(A·other(z_k))` at the nodes
+    /// `z_k` (roots of the channel's S polynomial, monic degree n).
+    ///
+    /// Basis polynomial `l_k(v) = (S(v)/(v − z_k)) / S′(z_k)`: the numerator
+    /// is a synthetic division of the monic S by `(v − z_k)`, and the
+    /// denominator is `S′(z_k)` (the derivative of a monic polynomial
+    /// evaluated at its root, i.e. the product of `z_k − z_m` over the
+    /// other nodes).
+    fn rederive_channel_d_at(
+        d_poly: &ComplexPolynomial,
+        roots: &[Complex64],
+        other: &ComplexPolynomial,
+        a: Complex64,
+    ) -> Result<ComplexPolynomial> {
+        if roots.len() < 2 {
+            return Err(MfsError::NumericalFailure(format!(
+                "channel D re-derivation needs ≥2 S roots, got {}",
+                roots.len()
+            )));
+        }
+        // Monic S polynomial in ascending coefficients.
+        let s_poly = ComplexPolynomial::from_complex_roots(roots)?;
+        let mut sum = vec![Complex64::new(0.0, 0.0)];
+        for &z_k in roots {
+            // y_k = D(z_k) / (A · S_other(z_k))
+            let denom = a * other.evaluate(z_k);
+            if denom.norm() < 1e-14 {
+                return Err(MfsError::NumericalFailure(
+                    "channel D re-derivation: S_other vanishes at an S root".into(),
+                ));
+            }
+            let y_k = d_poly.evaluate(z_k) / denom;
+
+            // Basis l_k = s(v)/(v − z_k) / s′(z_k), where s is the monic S.
+            // Synthetic division of s by (v − z_k) gives the monic quotient
+            // q (degree n−1). Ascending coefficients:
+            //   q[n−1] = c[n];  q[j−1] = c[j] + z_k·q[j]   (j = n−1 … 1)
+            // The Lagrange basis scaling is s′(z_k) = q(z_k) (Horner):
+            // s(v)/(v − z_k) evaluated at v = z_k equals s′(z_k).
+            let n = s_poly.coefficients.len() - 1;
+            let mut q = vec![Complex64::new(0.0, 0.0); n];
+            q[n - 1] = s_poly.coefficients[n];
+            for j in (1..n).rev() {
+                q[j - 1] = s_poly.coefficients[j] + z_k * q[j];
+            }
+            let prim = q
                 .iter()
-                .map(|r| r + Complex64::new(1e-6, 1e-6))
-                .collect();
-            let perturbed_rx: Vec<Complex64> = prev_s_rx
-                .iter()
-                .map(|r| r + Complex64::new(1e-6, 1e-6))
-                .collect();
-            return Ok((perturbed_tx, perturbed_rx));
-        }
-
-        // Use Hungarian-like greedy assignment based on minimum distance
-        let mut assigned = vec![false; product_roots.len()];
-        let mut tx_roots = Vec::with_capacity(n_tx);
-        let mut rx_roots = Vec::with_capacity(n_rx);
-
-        // Assign roots closest to previous TX roots
-        for prev in prev_s_tx.iter() {
-            let mut best_idx = 0;
-            let mut best_dist = f64::INFINITY;
-            for (idx, &root) in product_roots.iter().enumerate() {
-                if assigned[idx] {
-                    continue;
-                }
-                let dist = (root - prev).norm();
-                if dist < best_dist {
-                    best_dist = dist;
-                    best_idx = idx;
-                }
+                .rev()
+                .copied()
+                .fold(Complex64::new(0.0, 0.0), |acc, c| acc * z_k + c);
+            if prim.norm() < 1e-14 {
+                return Err(MfsError::NumericalFailure(
+                    "channel D re-derivation: S root is (numerically) multiple".into(),
+                ));
             }
-            if !assigned[best_idx] {
-                assigned[best_idx] = true;
-                tx_roots.push(product_roots[best_idx]);
+            for (i, c) in q.iter().enumerate() {
+                if i >= sum.len() {
+                    sum.push(Complex64::new(0.0, 0.0));
+                }
+                sum[i] += y_k * c / prim;
             }
         }
-
-        // Assign roots closest to previous RX roots
-        for prev in prev_s_rx.iter() {
-            let mut best_idx = 0;
-            let mut best_dist = f64::INFINITY;
-            for (idx, &root) in product_roots.iter().enumerate() {
-                if assigned[idx] {
-                    continue;
-                }
-                let dist = (root - prev).norm();
-                if dist < best_dist {
-                    best_dist = dist;
-                    best_idx = idx;
-                }
-            }
-            if !assigned[best_idx] {
-                assigned[best_idx] = true;
-                rx_roots.push(product_roots[best_idx]);
-            }
+        // Trim near-zero high-degree coefficients (interpolation of a
+        // degree-(n-1) polynomial is exact up to roundoff).
+        while sum.len() > 2 && sum.last().is_some_and(|c| c.norm_sqr() <= 1e-24) {
+            sum.pop();
         }
-
-        // Fill any gaps with remaining unassigned roots
-        let mut remaining: Vec<Complex64> = product_roots
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| !assigned[*i])
-            .map(|(_, &r)| r)
-            .collect();
-        remaining.sort_by(|a, b| a.im.partial_cmp(&b.im).unwrap_or(std::cmp::Ordering::Equal));
-
-        while tx_roots.len() < n_tx && !remaining.is_empty() {
-            tx_roots.push(remaining.remove(0));
+        if sum.len() > 1 && sum.last().is_some_and(|c| c.norm() < 1e-15) {
+            sum.pop();
         }
-        while rx_roots.len() < n_rx && !remaining.is_empty() {
-            rx_roots.push(remaining.remove(0));
-        }
-
-        // Safety: if we still don't have enough roots, duplicate from previous
-        while tx_roots.len() < n_tx {
-            tx_roots.push(prev_s_tx[tx_roots.len() % prev_s_tx.len()]);
-        }
-        while rx_roots.len() < n_rx {
-            rx_roots.push(prev_s_rx[rx_roots.len() % prev_s_rx.len()]);
-        }
-
-        Ok((tx_roots, rx_roots))
+        ComplexPolynomial::new(sum)
     }
 }
 

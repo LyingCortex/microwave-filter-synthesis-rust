@@ -189,19 +189,28 @@ fn fit_polynomial_from_freq_samples(
 // Balanced companion matrix eigenvalue solver
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// Spectral factorization via balanced companion matrix eigenvalue decomposition.
+/// Spectral factorization via companion-matrix eigenvalue decomposition.
 ///
-/// Uses nalgebra's Schur decomposition on the companion matrix with
-/// LHP root selection for the spectral factor.
-pub fn balanced_companion_spectral_factor(
+/// Finds all roots of `R(s)` with the production
+/// [`AdaptiveRootSolver`](crate::approx::AdaptiveRootSolver) chain (faer complex companion
+/// eigenvalues gated on a backward residual, falling through to Durand-Kerner and
+/// Aberth-Ehrlich), then selects the LHP roots for the spectral factor.
+///
+/// Note: the nalgebra `CompanionMatrixRootSolver` is deliberately NOT used
+/// here — its complex-coefficient branch (2n×2n real embedding) returns
+/// conjugate-flipped non-roots (the 2n eigenvalues are
+/// `{λ, conj(λ)} ∪ {eig(C)}`, so a root and its conjugate are indistinguishable
+/// by conjugate-pair matching alone). See
+/// `companion_matrix_solver_complex_branch_returns_conjugate_flipped_non_roots`.
+pub fn companion_spectral_factor(
     r_poly: &ComplexPolynomial,
     target_degree: usize,
 ) -> Result<ComplexPolynomial> {
-    use crate::approx::CompanionMatrixRootSolver;
+    use crate::approx::AdaptiveRootSolver;
     use crate::approx::ComplexRootSolver;
 
-    // Find all roots of R(s) using companion matrix
-    let all_roots = CompanionMatrixRootSolver.roots_of(r_poly)?;
+    // Find all roots of R(s) using the adaptive (faer-gated) chain
+    let all_roots = AdaptiveRootSolver.roots_of(r_poly)?;
 
     // Select LHP roots for the spectral factor
     let stable_roots = select_lhp_roots(&all_roots, target_degree);
@@ -343,32 +352,54 @@ pub fn spectral_factor(
 ) -> Result<ComplexPolynomial> {
     // Try cepstrum method first (most robust for well-conditioned problems)
     if let Ok(d) = cepstrum_spectral_factor(r_poly, target_degree) {
-        // Verify: D(j)*D*(-j) should approximate R(j) within tolerance
-        let s_j = Complex64::new(0.0, 1.0);
-        let r_val = r_poly.evaluate(s_j);
-        let d_val = d.evaluate(s_j);
-        let d_conj = d
-            .alternating_conjugate()
-            .ok()
-            .map(|dc| dc.evaluate(s_j))
-            .unwrap_or(Complex64::new(1.0, 0.0));
-        let product = d_val * d_conj;
+        // Verify the para-product identity D(v)·D̃(v) = R(v) at several
+        // axis points. A single-point check (e.g. only at s = j) can pass
+        // for a factor whose LHP root set is wrong; the identity must hold
+        // for every v, so sampling several points on the jω axis exposes
+        // a mis-factored result. On the axis D̃(jω) = conj(D(jω)), so the
+        // product is |D(jω)|².
+        let mut worst = 0.0_f64;
+        for k in 1..=8usize {
+            let omega = 0.375 * k as f64 * (r_poly.degree() as f64 + 2.0).sqrt();
+            let s_j = Complex64::new(0.0, omega);
+            let r_val = r_poly.evaluate(s_j);
+            let d_val = d.evaluate(s_j);
+            let product = d_val.norm_sqr();
+            let rel_err = if r_val.norm() > 1e-10 {
+                (product - r_val).norm() / r_val.norm()
+            } else {
+                product.abs()
+            };
+            worst = worst.max(rel_err);
+        }
 
-        let rel_err = if r_val.norm() > 1e-10 {
-            (product - r_val).norm() / r_val.norm()
-        } else {
-            product.norm()
-        };
-
-        if rel_err < 0.1 {
-            return Ok(d);
+        if worst < 0.01 {
+            return monic(d);
         }
         // Fall through to companion matrix if the cepstrum result is poor,
         // and likewise when the cepstrum method errors out.
     }
 
-    // Fallback: balanced companion matrix approach
-    balanced_companion_spectral_factor(r_poly, target_degree)
+    // Fallback: companion matrix (adaptive, faer-gated) approach
+    companion_spectral_factor(r_poly, target_degree).and_then(monic)
+}
+
+/// Rotates a spectral factor by a unit phase so its leading (highest-degree)
+/// coefficient is real and positive — the paper's monic normalization. The LHP
+/// factor is otherwise determined only up to a unit phase `k` (|k|² = 1), which
+/// leaves R(s) = D·D̃ invariant but changes any linear combination like
+/// `(a·N + b·D)/2` in the diplexer iteration.
+fn monic(d: ComplexPolynomial) -> Result<ComplexPolynomial> {
+    if d.degree() == 0 {
+        return Ok(d);
+    }
+    let lead = *d.coefficients.last().unwrap();
+    if lead.norm() < 1e-15 {
+        return Ok(d);
+    }
+    // Rotation k = conj(lead)/|lead|: unit phase taking lead → |lead| > 0.
+    let rotation = lead.conj() / lead.norm();
+    d.scale(rotation)
 }
 
 #[cfg(test)]
@@ -408,12 +439,17 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: investigate hang in CompanionMatrixRootSolver for s⁴+4
-    fn balanced_companion_factors_degree4() -> Result<()> {
+    fn companion_factors_degree4_complex_branch() -> Result<()> {
         // D(s) = s² + 2s + 2 (roots at -1±j)
         // D*(-s) = s² - 2s + 2 (roots at 1±j)
         // R(s) = D(s)*D*(-s) = (s²+2s+2)(s²-2s+2) = s⁴ + 4
         // coefficients: [4, 0, 0, 0, 1]
+        //
+        // This exercises the complex-coefficient root path end to end
+        // (R(s) is real here, but the factor's roots -1±j are complex, so
+        // LHP selection must pair them correctly). It previously hung /
+        // mis-factored under the nalgebra 2n×2n real embedding; the
+        // adaptive (faer-gated) chain resolves it.
         let r = ComplexPolynomial::new(vec![
             Complex64::new(4.0, 0.0),
             Complex64::new(0.0, 0.0),
@@ -422,15 +458,79 @@ mod tests {
             Complex64::new(1.0, 0.0),
         ])?;
 
-        let d = balanced_companion_spectral_factor(&r, 2)?;
+        let d = companion_spectral_factor(&r, 2)?;
         assert_eq!(d.degree(), 2);
 
-        // D roots should be at -1±j
+        // D roots should be at -1±j (LHP)
         let roots = d.roots()?;
         for root in &roots {
-            assert!(root.re < 0.0, "Root should be in LHP: {:.4}", root);
+            assert!(
+                root.re < 0.0 && (root.re + 1.0).abs() < 1e-6 && (root.im.abs() - 1.0).abs() < 1e-6,
+                "Root should be -1±j: {root:.6}",
+            );
+        }
+
+        // Para-product identity: D(v)·D̃(v) = R(v) (up to the s=0 scaling,
+        // which is exact here since R is real and even).
+        let d_conj = d.alternating_conjugate()?;
+        for omega in [0.0_f64, 0.5, 1.0, 2.0, 5.0] {
+            let v = Complex64::new(0.0, omega);
+            let lhs = d.evaluate(v) * d_conj.evaluate(v);
+            let rhs = r.evaluate(v);
+            assert!(
+                (lhs - rhs).norm() / rhs.norm().max(1e-300) < 1e-8,
+                "para-product identity violated at ω={omega}: |{lhs} - {rhs}|",
+            );
         }
 
         Ok(())
     }
+
+    #[test]
+    fn spectral_factor_complex_r_poly_matches_known_lhp_set() -> Result<()> {
+        // Regression for the conjugate-flip defect: R(s) with complex
+        // coefficients whose LHP set is known. Build R from a known LHP
+        // factor D, then check the dispatcher recovers the same LHP roots.
+        let d_roots: Vec<Complex64> = vec![
+            Complex64::new(-1.6718464616, 1.3824014892),
+            Complex64::new(-1.6718464616, 1.1176531574),
+            Complex64::new(-4.1116410137, -3.3228232740),
+            Complex64::new(-4.1116410137, 5.8228779206),
+        ];
+        let d = ComplexPolynomial::from_complex_roots(&d_roots)?;
+        let d_conj = d.alternating_conjugate()?;
+        let r = d.multiply(&d_conj)?;
+
+        let d_rec = spectral_factor(&r, 4)?;
+        assert_eq!(d_rec.degree(), 4);
+
+        // Recovered roots (up to the s=0 scale, which is positive here) must
+        // match the LHP set — specifically the -4.1116-3.3228j root, whose
+        // conjugate-flipped twin -4.1116+3.3228j is NOT a root of R.
+        //
+        // Match setwise (each expected root to its nearest recovered root),
+        // not elementwise: two roots of the fixture share a real part to
+        // ~1e-15, so any (re, im) sort order of the recovered set can
+        // legitimately differ from the literal's order while the sets are
+        // identical.
+        let rec = d_rec.roots()?;
+        assert_eq!(rec.len(), d_roots.len());
+        let mut used = vec![false; rec.len()];
+        for want in &d_roots {
+            let (best_i, best_d) = rec
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !used[*i])
+                .map(|(i, got)| (i, (*got - *want).norm()))
+                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .expect("no recovered roots left");
+            assert!(
+                best_d < 1e-6,
+                "root mismatch: want {want}, nearest recovered {best_d:.3e} away",
+            );
+            used[best_i] = true;
+        }
+        Ok(())
+    }
+
 }
