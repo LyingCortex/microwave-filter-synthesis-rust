@@ -507,15 +507,6 @@ impl DuplexerSynthesis {
                 // Spectral factorization: cepstrum with the adaptive
                 // (faer-gated) companion-matrix fallback.
                 let d_poly = crate::spectral::spectral_factor(&r_poly, n_tx + n_rx)?;
-                eprintln!(
-                    "[DBG] iter={} p0t_sq={:.4e} p0r_sq={:.4e} d_lead={:.3e}{:+.3e}j degD={}",
-                    iter,
-                    p0t_sq,
-                    p0r_sq,
-                    d_poly.coefficients.last().map(|c| c.re).unwrap_or(0.0),
-                    d_poly.coefficients.last().map(|c| c.im).unwrap_or(0.0),
-                    d_poly.degree()
-                );
 
                 // New S_TX · S_RX product (common domain)
                 let product_poly = self.compute_s_product(&n_poly, &d_poly)?;
@@ -525,17 +516,6 @@ impl DuplexerSynthesis {
                 // lower band (TX), the upper set to the upper band (RX).
                 let product_roots = product_poly.roots()?;
                 let (raw_tx_common, raw_rx_common) = Self::assign_roots(&product_roots, n_tx, n_rx)?;
-                eprintln!(
-                    "[DBG] tx={:?} rx={:?}",
-                    raw_tx_common
-                        .iter()
-                        .map(|r| format!("{:.4e}{:+.4e}j", r.re, r.im))
-                        .collect::<Vec<_>>(),
-                    raw_rx_common
-                        .iter()
-                        .map(|r| format!("{:.4e}{:+.4e}j", r.re, r.im))
-                        .collect::<Vec<_>>()
-                );
 
                 // ── Common domain → state (prototype domain) ────────────────
                 // Pure fixed-point update (Macchiarella-Tamiazzo step 4/5):
@@ -577,11 +557,6 @@ impl DuplexerSynthesis {
                         s_rx_roots.iter().map(|&r| r + cshift).collect();
                     let (new_d_tx_common, new_d_rx_common) =
                         self.rederive_channel_d(&d_poly, &s_tx_roots, &s_rx_common_roots_new)?;
-                    eprintln!(
-                        "[DBG] re-derive degDtx={} degDrx={}",
-                        new_d_tx_common.degree(),
-                        new_d_rx_common.degree()
-                    );
                     d_tx_common = new_d_tx_common;
                     d_rx_common = new_d_rx_common;
                 }
@@ -752,9 +727,13 @@ impl DuplexerSynthesis {
 
     /// Solves for |p₀t|² and |p₀r|² from the return-loss conditions.
     ///
-    /// Each channel's return loss is imposed at its own passband edge in the
-    /// *common* (Tx-prototype) domain: `tx_edge` (Tx passband, +j) and
-    /// `rx_edge` (Rx passband, j(Δ−1)).
+    /// In the *common* (Tx-prototype) domain the combined band spans
+    /// [-j, +j(Δ+1)], so the two return-loss conditions (eq. 13) are imposed
+    /// at the two *outer* passband edges: `tx_edge` = -j (Tx lower edge) and
+    /// `rx_edge` = +j(Δ+1) (Rx upper edge). Each condition is evaluated at
+    /// the point where that channel's own |P| term is O(1) and the other
+    /// channel's is small, keeping the 2×2 p₀ system well-conditioned for
+    /// adjacent bands.
     ///
     /// At an edge `e`: `|S11|² = |N|²/|D|² = ε`, and unitarity gives
     /// `|D|² = |N|² + |p₀t|²|Pt|² + |p₀r|²|Pr|²`, so
@@ -788,10 +767,6 @@ impl DuplexerSynthesis {
         // 2×2 linear system:  [pt_tx  pr_tx] [p0t²]   [rhs1]
         //                      [pt_rx  pr_rx] [p0r²] = [rhs2]
         let det = pt_tx * pr_rx - pt_rx * pr_tx;
-        eprintln!(
-            "[2x2] det={:.4e} pt_tx={:.4e} pr_tx={:.4e} pt_rx={:.4e} pr_rx={:.4e} n_tx={:.4e} n_rx={:.4e} rhs1={:.4e} rhs2={:.4e}",
-            det, pt_tx, pr_tx, pt_rx, pr_rx, n_tx, n_rx, rhs1, rhs2
-        );
 
         if det.abs() < 1e-30 {
             // Degenerate case: use equal scaling
@@ -804,7 +779,6 @@ impl DuplexerSynthesis {
 
         // Clamp to positive values (numerical safety)
         let (p0t_sq, p0r_sq) = (p0t_sq.max(1e-15), p0r_sq.max(1e-15));
-        eprintln!("[2x2] p0t_sq={:.4e} p0r_sq={:.4e}", p0t_sq, p0r_sq);
         Ok((p0t_sq, p0r_sq))
     }
 
@@ -927,11 +901,22 @@ impl DuplexerSynthesis {
         other: &ComplexPolynomial,
         a: Complex64,
     ) -> Result<ComplexPolynomial> {
-        if roots.len() < 2 {
+        if roots.is_empty() {
             return Err(MfsError::NumericalFailure(format!(
-                "channel D re-derivation needs ≥2 S roots, got {}",
-                roots.len()
+                "channel D re-derivation needs ≥1 S roots, got 0",
             )));
+        }
+        if roots.len() == 1 {
+            // Order-1 channel: D is a degree-0 constant D(z₀)/(A·other(z₀)).
+            let z0 = roots[0];
+            let denom = a * other.evaluate(z0);
+            if denom.norm() < 1e-14 {
+                return Err(MfsError::NumericalFailure(
+                    "channel D re-derivation: S_other vanishes at an S root".into(),
+                ));
+            }
+            let y0 = d_poly.evaluate(z0) / denom;
+            return ComplexPolynomial::new(vec![y0]);
         }
         // Monic S polynomial in ascending coefficients.
         let s_poly = ComplexPolynomial::from_complex_roots(roots)?;

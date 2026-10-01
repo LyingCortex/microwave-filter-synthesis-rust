@@ -123,11 +123,44 @@ return loss instead of the simplified perturbation's approximation.
      p₀; the code currently keeps p₀ real). That worked design is the
      regression fixture: run the loop on it and match the printed
      polynomials.
+   - **Corrected root cause (2026-10-01, decisive probe against the printed
+     Section-V design).** The earlier "construction mismatch / 2×2
+     near-singular" conclusions are **wrong**. The printed design is
+     self-consistent to print precision (unitary identity
+     `D·D* ≈ |n₀N|² + |p₀tPt|² + |p₀rPr|²` holds to ~1e-3 at high order,
+     degrading only in the tiny low-order coefficients, consistent with the
+     4–5-sig-fig print). Decisive tests:
+     - The eq.-13 2×2 is **well-conditioned** (cond ≈ 1.09 at iter 0;
+       `pt_tx≈pr_rx≈117.8`, `pr_tx≈pt_rx≈5.3`), **not** near-singular.
+     - The eq.-13 2×2 **formula is correct**: at the printed design's two
+       outer passband edges (`|S11|=0.1`, `s≈±j0.74`) it reproduces the
+       printed `|p₀t|²=2.5e-7` / `|p₀r|²=2.1e-7` (got 4.0e-7 / 1.7e-7).
+     - The breaker is a **domain + normalization mismatch**: the code builds
+       a narrow-band-linearized "common domain"
+       (`Δ = 2·Δcenter/avg_bw ≈ 2.5`) and leaves **N un-normalized**, while
+       the paper works in the true bandpass w-domain (RX/TX centered
+       ≈ ∓j0.55/+j0.56, `Δ≈1.11`) with **monic N**. In the stretched domain
+       `|p₀|²` explodes (order 2: 1.6e3 → 1.4e8 over 5 iters) and the root
+       set goes non-finite at **every** order 2/4/6/7.
+     - **D3 is blocked on a domain redesign, not a p₀-formula fix**: the full
+       path must be re-based on the paper's bandpass w-domain (or the
+       narrow-band linearization replaced by the exact transform) and N
+       normalized monic before the eq.-13 loop can converge. Evidence
+       scripts: `examples/paper_p0_edge_test.py`,
+       `examples/paper_domain_probe.py`, `examples/diag_paper_section5.rs`.
 
-3. **D3 — Converge order ≥ 4 and pin it.** Extend the D1 tests to order 4
-   and order 6 (per channel); assert the same fidelity band. Only after D3,
-   consider changing the default to `full_iteration(true)` — that is a
-   separate, deliberate behavior change with its own changelog entry.
+3. **D3 — Rebase the full path onto the paper's bandpass w-domain, then
+   converge order ≥ 4 and pin it.** Per the corrected root cause above,
+   the blocker is the narrow-band shared-bandwidth "common domain"
+   (Δ≈2.5, un-normalized N) vs the paper's exact per-channel bandpass
+   w-domain (Δ≈1.11, monic N). Re-base `compute_n_polynomial` / the eq.-13
+   loop on the true bandpass transform (or replace the linearization),
+   normalize N monic, and re-derive the per-channel D via Steps 16-17 in
+   that domain. Then extend the D1 tests to order 4 and 6 (per channel),
+   assert the same fidelity band, and match the printed Section-V design at
+   order 7. Only after D3, consider changing the default to
+   `full_iteration(true)` — that is a separate, deliberate behavior change
+   with its own changelog entry.
 4. **D4 — Document the as-built fidelity.** Update
    `docs/duplexer-synthesis.md` Future Work (currently lists Type-II
    junction as future — implemented at `src/duplexer.rs` JunctionType;

@@ -530,6 +530,21 @@ mod tests {
             );
             used[best_i] = true;
         }
+
+        // Pin the factor's scale/phase: the para-product identity
+        // D̃(v)·D(v) = R(v) must hold on the axis (D̃(v)=conj(D(v)) there),
+        // up to the s=0 scaling. A D with the right LHP roots but a wrong
+        // magnitude or phase would fail this.
+        let d_rec_conj = d_rec.alternating_conjugate()?;
+        for omega in [0.0_f64, 0.5, 1.0, 2.0, 5.0] {
+            let v = Complex64::new(0.0, omega);
+            let lhs = d_rec.evaluate(v) * d_rec_conj.evaluate(v);
+            let rhs = r.evaluate(v);
+            assert!(
+                (lhs - rhs).norm() / rhs.norm().max(1e-300) < 1e-6,
+                "para-product identity violated at ω={omega}: |{lhs} - {rhs}|",
+            );
+        }
         Ok(())
     }
 
