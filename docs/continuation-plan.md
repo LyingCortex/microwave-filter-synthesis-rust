@@ -197,13 +197,28 @@ return loss instead of the simplified perturbation's approximation.
      signature — a no-op for the monic `S − F⁰` D), the `/tmp` debug writes,
      and the throwaway `examples/diag_*.rs`. `cargo clippy --all-targets --
      -D warnings` is clean.
-   - **Remaining D3 work is order ≥ 4.** The order-2 gate is green. Extending
-     the D1 fidelity to order 4/6 and matching the printed Section-V order-7
-     design (n = 1.47, b₀ = −0.171) is still blocked on the domain
-     normalization (see the corrected root cause above); the exact bandpass
-     common-domain transform is in place and order-2 is lossless, but higher
-     orders need the N-normalization / p₀-scaling fixed before the loop
-     converges there.
+   - **(2026-10-03, order 4/6 verified GREEN; order 7 limit cycle.)** The
+     earlier claim that "order ≥ 4 fails in `recover_channel_design` with a
+     typed pole-placement error" was for the *old* narrow-band common domain.
+     The exact bandpass common-domain transform (in the WIP rewrite) already
+     converges order 4 (14 iters, conv 8.9e-9) and order 6 (9 iters, conv
+     7.7e-9) to a physically valid quasi-equiripple diplexer: Tx/Rx-port S21
+     ≈ −0.03 dB, antenna RL ≈ −22 dB at all four band edges and both band
+     centers. The D1 gate was refactored into
+     `assert_diplexer_quasi_equiripple(order)` and extended with
+     `full_iteration_order4` and `full_iteration_order6` tests — all green.
+     **Order 7 (and 5, 8) is a different, unsolved problem:** the iteration
+     plateaus at a ~1e-6 root-displacement floor in a limit cycle (D-coefficient
+     change oscillates ~2e-5; p0t²/min|D| freeze to 5 sig figs by iter 3), and
+     the plateau fixed point is **spurious** — Tx/Rx passband = 0 dB and
+     band-edge antenna RL ≈ −21 to −25 dB, but a ~−50 dB antenna null appears
+     at each band *center* (not quasi-equiripple). Damped fixed-point updates
+     (MFS_DAMP 0.2/0.3/0.5) do NOT break the cycle. Suspected root cause: the
+     `assign_roots` split (lowest n_tx product-roots → TX, rest → RX) flips
+     at the adjacent-band boundary at odd degree. This is the remaining D3
+     deliverable: make the order-7 (and 5, 8) full path converge to the paper's
+     §V quasi-equiripple design, then pin it against the printed order-7
+     fixture (n = 1.47, b₀ = −0.171).
 
 3. **D3 — Rebase the full path onto the paper's bandpass w-domain, then
    converge order ≥ 4 and pin it.** Per the corrected root cause above,

@@ -514,10 +514,13 @@ impl DuplexerSynthesis {
     /// calls `spectral::spectral_factor` and is heavier; it is opt-in until
     /// its performance and convergence are tuned.
     ///
-    /// Note: it is not numerically converged for order ≥ 4 yet (the recovered
-    /// transversal matrix can fail pole-placement validation with a typed
-    /// error), so treat it as an experimental foundation, not a drop-in
-    /// high-fidelity replacement.
+    /// Convergence status (continuation plan D1/D3): the exact bandpass
+    /// common-domain transform converges the order-2, 4 and 6 diplexers to a
+    /// physically valid quasi-equiripple 3-port (gated by
+    /// `full_iteration_order{2,4,6}_quasi_equiripple`). Odd and higher orders
+    /// (5, 7, 8) currently plateau at a ~1e-6 root-displacement floor in a
+    /// limit cycle (a spurious antenna null appears at the band center), so
+    /// they are not yet drop-in replacements for the simplified path.
     pub fn full_iteration(mut self, enabled: bool) -> Self {
         self.full_iteration = enabled;
         self
