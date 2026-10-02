@@ -1269,21 +1269,16 @@ mod tests {
             .expect("non-empty response")
     }
 
-    #[test]
-    fn full_iteration_order2_quasi_equiripple() -> Result<()> {
-        // Order-2 Tx/Rx, adjacent 200 MHz bands (the classic waveguide
-        // diplexer geometry), ideal Type-I junction.
-        let result = DuplexerSynthesis::new()
-            .tx(2, 22.0, 14.9e9, 15.1e9)
-            .rx(2, 22.0, 15.15e9, 15.35e9)
-            .junction(JunctionType::TypeI { n: 1.0, b0: 0.0 })
-            .max_iterations(30)
-            .convergence_tol(1e-8)
-            .full_iteration(true)
-            .synthesize()?;
-
-        assert_eq!(result.tx.order(), 2);
-        assert_eq!(result.rx.order(), 2);
+    /// Shared D1 assertions for a full-iteration result of a given per-channel
+    /// order: convergence, junction-level channel passbands within 0.5 dB of
+    /// unity, quasi-equiripple antenna return loss within ~2 dB of the 22 dB
+    /// spec at both band centers, and no degenerate antenna port.
+    fn assert_diplexer_quasi_equiripple(
+        result: &DuplexerSynthesisResult,
+        order: usize,
+    ) -> Result<()> {
+        assert_eq!(result.tx.order(), order);
+        assert_eq!(result.rx.order(), order);
         assert!(
             result.convergence_error < 1e-8,
             "full iteration must converge to the root-displacement tolerance, got {:.3e} after {} iterations",
@@ -1292,7 +1287,9 @@ mod tests {
         );
 
         // Junction-level 3-port response — the physical observable of the
-        // full spectral path (not the standalone recovered channels).
+        // full spectral path (not the standalone recovered channels, which
+        // each carry only their share of the junction power split and cannot
+        // reach 0 dB).
         let resp = result
             .diplexer_response(14.8e9, 15.45e9, 121)
             .expect("full path must expose a junction-level response");
@@ -1335,5 +1332,51 @@ mod tests {
             resp.antenna_s11_db
         );
         Ok(())
+    }
+
+    #[test]
+    fn full_iteration_order2_quasi_equiripple() -> Result<()> {
+        // Order-2 Tx/Rx, adjacent 200 MHz bands (the classic waveguide
+        // diplexer geometry), ideal Type-I junction.
+        let result = DuplexerSynthesis::new()
+            .tx(2, 22.0, 14.9e9, 15.1e9)
+            .rx(2, 22.0, 15.15e9, 15.35e9)
+            .junction(JunctionType::TypeI { n: 1.0, b0: 0.0 })
+            .max_iterations(30)
+            .convergence_tol(1e-8)
+            .full_iteration(true)
+            .synthesize()?;
+        assert_diplexer_quasi_equiripple(&result, 2)
+    }
+
+    #[test]
+    fn full_iteration_order4_quasi_equiripple() -> Result<()> {
+        // Order-4 Tx/Rx, same geometry. Extends the D1 gate (continuation
+        // plan D3) to order 4: the full spectral path must converge to the
+        // tolerance and give a quasi-equiripple diplexer at higher order.
+        let result = DuplexerSynthesis::new()
+            .tx(4, 22.0, 14.9e9, 15.1e9)
+            .rx(4, 22.0, 15.15e9, 15.35e9)
+            .junction(JunctionType::TypeI { n: 1.0, b0: 0.0 })
+            .max_iterations(40)
+            .convergence_tol(1e-8)
+            .full_iteration(true)
+            .synthesize()?;
+        assert_diplexer_quasi_equiripple(&result, 4)
+    }
+
+    #[test]
+    fn full_iteration_order6_quasi_equiripple() -> Result<()> {
+        // Order-6 Tx/Rx, same geometry. Extends the D1 gate (continuation
+        // plan D3) to order 6.
+        let result = DuplexerSynthesis::new()
+            .tx(6, 22.0, 14.9e9, 15.1e9)
+            .rx(6, 22.0, 15.15e9, 15.35e9)
+            .junction(JunctionType::TypeI { n: 1.0, b0: 0.0 })
+            .max_iterations(40)
+            .convergence_tol(1e-8)
+            .full_iteration(true)
+            .synthesize()?;
+        assert_diplexer_quasi_equiripple(&result, 6)
     }
 }
