@@ -148,6 +148,33 @@ return loss instead of the simplified perturbation's approximation.
        normalized monic before the eq.-13 loop can converge. Evidence
        scripts: `examples/paper_p0_edge_test.py`,
        `examples/paper_domain_probe.py`, `examples/diag_paper_section5.rs`.
+   - **Root cause isolated to the RECOVERY step (2026-10-02, WIP branch
+     `wip/d3-duplexer-full-iteration`).** A WIP common-domain rewrite (the
+     affine `Ω = b_i + a_i·ω` map + fixed f-zero N + `rederive_channel_d`
+     per iteration) **does converge** at the D1 gate (order 2, err 4.5e-10,
+     16 iters) — so the loop/domain mismatch above is not the only blocker.
+     The surviving break is entirely in how the converged S is turned back
+     into a channel design. The WIP discarded the paper-scaled
+     `rederive_channel_d` output (`d_tx_common`/`d_rx_common`, computed then
+     never read) and recovered with `D_ch = S_ch − F⁰_ch` (the fixed
+     independent-synthesis F). That shortcut is normalization-free and
+     **mathematically invalid**: it yields a triangular polynomial pair
+     whose realized 2-port violates losslessness —
+     `E·E~ − F·F~ = 38.37` for order 2 (RHS must be `P·P~ = 0`), giving the
+     recovered channel `|S11| ≈ −9 dB` at its own band center instead of the
+     designed RL. (The coupling matrix stays unitary `|S11|²+|S21|²=1`
+     because it is built from a *consistent* E/F pair — but at the wrong
+     ripple scale.) The D1 gate fails on exactly this: recovered Tx peak
+     `−0.61 dB` vs `> −0.5` (REQ); a polynomial-conformance check would fail
+     far harder.
+     **D3 remainder:** stop discarding `rederive_channel_d`; feed the
+     paper-scaled per-channel D (mapped common→prototype) into
+     `recover_channel_design`, and confirm the recovered E/F satisfy
+     `E·E~ − F·F~ = P·P~` (add that identity as the D3 regression assertion,
+     stronger and less ambiguous than the −0.5 dB peak probe). WIP has 4
+     clippy warnings (dead `d_*_common`), `/tmp` debug dumps, and throwaway
+     `examples/diag_*.rs`; master was restored to green `95f39c1` +
+     clippy-parity `dec53e5`.
 
 3. **D3 — Rebase the full path onto the paper's bandpass w-domain, then
    converge order ≥ 4 and pin it.** Per the corrected root cause above,
