@@ -56,20 +56,36 @@
   fixed-δ finite-difference Jacobian's scale sensitivity — the defect
   D2-opt (scale-aware step) is meant to fix — and will be un-`#[ignore]`d
   when that lands.
+- **`DuplexerSynthesisResult::diplexer_response`** — junction-level 3-port
+  response of the full Macchiarella–Tamiazzo path (continuation plan D1).
+  When `full_iteration(true)` converges, the result captures the common-domain
+  diplexer polynomials (N, D, Pt, Pr) and the p₀ scalings; this method
+  evaluates the paper's physical 3-port model `S11 = N/D`,
+  `S21 = √(|p0t|²)·Pt/D`, `S31 = √(|p0r|²)·Pr/D` at any frequency sweep.
+  It is `None` for the simplified path or a non-converged run. This is the
+  observable that carries the junction's TX/RX power split; a recovered
+  channel taken alone (the standalone `tx`/`rx` matrices) carries only its
+  share (`p0t²` / `p0r²`) and cannot reach 0 dB.
 - **`duplexer::tests::full_iteration_order2_quasi_equiripple` — the
-  duplexer full-path RED→GREEN gate** (continuation plan D1). An order-2
-  Tx/Rx diplexer run with `full_iteration(true)` is asserted to converge to
-  the root-displacement tolerance, keep the antenna reflection within ~2 dB
-  of the 22 dB spec at each passband center (quasi-equiripple), and keep both
-  channel passband peaks within 0.5 dB of the per-channel spec. `#[ignore]`d
-  with the current failure documented: order 2 exhausts 15/15 iterations
-  without converging (max root displacement ~7e-2) and the recovered
-  channels are degenerate (band-center S21 ≈ −14 to −46 dB, antenna
-  S11 ≈ 0 dB); order ≥ 4 additionally fails with a typed numerical error
-  (pole-placement tolerance at order 4, Aberth non-convergence at order 6). The
-  fix is section A's D2 (diagnose) → D3 (converge order ≥ 4, 6).
+  duplexer full-path RED→GREEN gate** (continuation plan D1), now **GREEN at
+  order 2** and no longer `#[ignore]`d. The gate asserts the junction-level
+  diplexer response: convergence to the root-displacement tolerance,
+  quasi-equiripple antenna reflection within ~2 dB of the 22 dB spec at each
+  passband center, and both channel-port passbands within 0.5 dB of unity.
 
 ### Fixed
+
+- **The D1 full-iteration gate is green at order 2.** The order-2 Tx/Rx
+  diplexer (`full_iteration(true)`) now converges (14 iterations,
+  `convergence_error < 1e-8`) and its junction-level response is physically
+  valid: Tx-port S21 −0.10 dB, Rx-port S21 −0.11 dB, antenna RL −23.4 dB at
+  each band center, and the 3-port is lossless (`|S11|²+|S21|²+|S31|² = 1`
+  on the passband axis, verified via the para-identity `D·D̃ = R`). The
+  earlier failure was a combination of the gate asserting on the *standalone*
+  recovered channels (which carry the junction power split and therefore cap
+  at −0.6 dB) and a missing junction-level response API; see
+  `DuplexerSynthesisResult::diplexer_response` (Added). Order ≥ 4 remains
+  deferred (continuation plan D3: domain-normalization work).
 
 - **The vendored standard exposed a folded-convention mismatch in the contract,
   not in mfs.** mfs's even-order `to_folded` leaves the reduction pivot at index

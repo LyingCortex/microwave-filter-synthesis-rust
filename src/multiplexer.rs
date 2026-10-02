@@ -262,7 +262,6 @@ impl MultiplexerSynthesis {
                 self.channels[i].return_loss_db,
                 centers[i],
                 bandwidths[i],
-                true,
             )?;
             channels.push(design);
         }

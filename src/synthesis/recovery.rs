@@ -17,21 +17,12 @@ use num_complex::Complex64;
 /// iteration has updated the channel's S-polynomial roots.
 ///
 /// `s_roots` are the converged S-polynomial roots (left half-plane);
-/// `d_original` is the D polynomial for the channel; `original_polys` is the
-/// channel's initial `PolynomialSet`. The perturbed E/F are written into both
-/// the plain `e`/`f` fields and `generalized.e_s`/`f_s` — the synthesis engine
-/// reads `generalized.e_s/f_s` (not `.e/.f`), so writing only the plain fields
-/// silently drops the loading correction (see architecture-review P1).
-///
-/// `rescale_d` selects how D is normalized against S:
-/// - `true` (simplified/perturbation paths): D is the channel's *independent*
-///   D, whose leading coefficient is not tied to the perturbed S; scale it so
-///   its leading coefficient matches S's. This is the historical behaviour for
-///   the multiplexer and the duplexer's simplified path.
-/// - `false` (duplexer full spectral path): D has already been re-derived from
-///   the diplexer spectral factor by Lagrange interpolation (paper Steps
-///   16-17), so its leading coefficient already matches S; rescaling would
-///   corrupt the exact reconstruction.
+/// `d_original` is the D polynomial from the channel's initial synthesis;
+/// `original_polys` is the channel's initial `PolynomialSet`. The perturbed
+/// E/F are written into both the plain `e`/`f` fields and
+/// `generalized.e_s`/`f_s` — the synthesis engine reads `generalized.e_s/f_s`
+/// (not `.e/.f`), so writing only the plain fields silently drops the loading
+/// correction (see architecture-review P1).
 pub(crate) fn recover_channel_design(
     s_roots: &[Complex64],
     d_original: &ComplexPolynomial,
@@ -40,16 +31,18 @@ pub(crate) fn recover_channel_design(
     return_loss_db: f64,
     center_hz: f64,
     bandwidth_hz: f64,
-    rescale_d: bool,
 ) -> Result<FilterDesign> {
     // Build S polynomial from converged roots
     let s_poly = ComplexPolynomial::from_complex_roots(s_roots)?;
 
     // E = S + D,  F = S - D.
+    // In a fully converged solution D would be re-derived from the diplexer
+    // D polynomial via interpolation; in practice the original D is scaled
+    // to match the new S polynomial's leading coefficient.
     let s_leading = s_poly.leading_coefficient();
     let d_leading = d_original.leading_coefficient();
 
-    let d_scaled = if rescale_d && d_leading.norm() > 1e-15 {
+    let d_scaled = if d_leading.norm() > 1e-15 {
         let scale_factor = s_leading / d_leading;
         d_original.scale(scale_factor)?
     } else {
