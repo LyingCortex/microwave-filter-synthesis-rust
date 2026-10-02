@@ -902,9 +902,9 @@ impl DuplexerSynthesis {
         a: Complex64,
     ) -> Result<ComplexPolynomial> {
         if roots.is_empty() {
-            return Err(MfsError::NumericalFailure(format!(
-                "channel D re-derivation needs ≥1 S roots, got 0",
-            )));
+            return Err(MfsError::NumericalFailure(
+                "channel D re-derivation needs ≥1 S roots, got 0".to_string(),
+            ));
         }
         if roots.len() == 1 {
             // Order-1 channel: D is a degree-0 constant D(z₀)/(A·other(z₀)).
