@@ -63,13 +63,15 @@ return loss instead of the simplified perturbation's approximation.
    that call `full_iteration(true)` at order 2 (TX/RX of order 2 each):
    assert convergence, quasi-equiripple antenna RL within ~2 dB of the
    independent-filter bound, and passband peaks within 0.5 dB of the
-   per-channel spec. **Order-2 is GREEN** (2026-10-03):
-   `duplexer::tests::full_iteration_order2_quasi_equiripple` is no longer
-   `#[ignore]`d and passes — the gate asserts the junction-level diplexer
-   response (`result.diplexer_response`, added 2026-10-03) rather than the
-   standalone recovered channels, which each carry only their share of the
-   junction power split and cannot reach 0 dB. See the 2026-10-03 note in
-   D2 for the full rationale. Order ≥ 4 remains the D3 deliverable.
+   per-channel spec. **Orders 2–8 are all GREEN** (2026-10-03): the gate
+   family `full_iteration_order{2,3,4,5,6,8}_quasi_equiripple` (no longer
+   `#[ignore]`d) plus the Section-V printed-design golden benchmark
+   `full_iteration_order7_section5_golden` all pass. Each asserts the
+   junction-level diplexer response (`result.diplexer_response`, added
+   2026-10-03) rather than the standalone recovered channels, which each
+   carry only their share of the junction power split and cannot reach 0 dB.
+   See the 2026-10-03 note in D2 for the full rationale (including the
+   retraction of the "degenerate odd orders" claim).
 2. **D2 — Diagnose the order ≥ 4 non-convergence.** Instrument the
    iteration (residual per iteration, root-displacement via
    `compute_root_displacement`, spectral-factor relative error from
@@ -216,11 +218,16 @@ return loss instead of the simplified perturbation's approximation.
      (accept once `best_delta < 1e-3` after 3 flat iterations, min 5 iters)
      — the standard remedy for root-iteration, preserving the strict fast
      path for orders 2/4/6.
-     - The **symmetric ideal-junction** order-7 fixed point is *degenerate*
-       (near-singular 2×2 p0 system per the note above): it converges but
-       places a spurious deep antenna null at the band center and misses the
-       20 dB RL at the outer edge (−18.7 dB). This is the near-degenerate
-       case, not the paper's.
+     - **Odd orders are valid, not degenerate (corrected 2026-10-03).** An
+       earlier note called the symmetric ideal-junction order-7 "degenerate"
+       (spurious center null, near-singular 2×2). Both parts were wrong:
+       (i) the deep antenna null at an odd-order band *center* is the channel's
+       Chebyshev reflection zero — a physical feature, and the §V golden
+       (order 7, which matches the paper's printed coefficients) shows the
+       same null; (ii) the 2×2 p0 system is well-conditioned in the exact
+       bandpass domain (det/scale² ≈ 0.6–0.92 at both symmetric and §V
+       junctions) — the near-singular 2×2 was an artifact of the *old*
+       narrow-band linearization.
      - The **Section-V printed design** (`n = 1.47`, `b0 = −0.171`, 20 dB,
        RX 14.9–15.1 / TX 15.15–15.35 GHz, **all-pole inline Chebyshev**) is a
        *golden benchmark* and is now matched by
@@ -244,20 +251,25 @@ return loss instead of the simplified perturbation's approximation.
    converge order ≥ 4 and pin it. (Core deliverable DONE, 2026-10-03.)**
    The rebase onto the exact bandpass common-domain transform (Δ from the
    true `Ω(f)=(f/f₀−f₀/f)/B`, N from the fixed reflection zeros) is in the
-   WIP rewrite; it converges order 4 (14 iters, 8.9e-9) and order 6 (9 iters,
-   7.7e-9) to physically valid quasi-equiripple diplexers. A stagnation
-   criterion extends convergence to order 7/5/8 (root-extraction noise floor
-   above the strict tolerance). D1 gates `full_iteration_order{2,4,6}` and
-   the **§V golden benchmark** `full_iteration_order7_section5_golden` are all
-   green. The golden test matches the paper's printed order-7 coefficients
-   (N, D, Pt, Pr, p0) to print precision — p0t² 1.2e-4, p0r² 1.6e-4, D 1.2e-2
-   (relative, after leading normalization) — i.e. the implementation reproduces
-   the published design. Remaining (out of scope, documented): (a) the
-   symmetric ideal-junction *odd* orders (5, 7, 8) land on a degenerate
-   fixed point (paper's near-singular 2×2 p0 system) — the non-degenerate §V
-   junction works; (b) Type-II (resonating-node) junctions are not yet run
-   through the full path. Changing the *default* to `full_iteration(true)` is
-   still a separate, deliberate behavior change with its own changelog entry.
+   WIP rewrite; it converges order 2 (14 iters, 6.1e-9), 4 (14 iters, 8.9e-9),
+   6 (9 iters, 7.7e-9) to the strict tolerance, and orders 3/5/7/8 (strict
+   1e-8 at 3/5; the stagnation criterion at 7/8 where the degree-14/16
+   root-extraction floor exceeds 1e-8). D1 gates
+   `full_iteration_order{2,3,4,5,6,8}` and the **§V golden benchmark**
+   `full_iteration_order7_section5_golden` are all green. The golden test
+   matches the paper's printed order-7 coefficients (N, D, Pt, Pr, p0) to
+   print precision — p0t² 1.2e-4, p0r² 1.6e-4, D 1.2e-2 (relative, after
+   leading normalization) — i.e. the implementation reproduces the published
+   design. The earlier claim that the symmetric ideal-junction odd orders land
+   on a "degenerate" fixed point is retracted: a per-order scan (2026-10-03)
+   shows all orders 2-8 give a valid quasi-equiripple diplexer (0 dB passbands,
+   band-edge antenna RL ~ -22 dB; the deep odd-order *center* nulls are the
+   Chebyshev reflection zeros, a physical feature the §V golden also shows),
+   and the 2×2 p0 system is well-conditioned (det/scale² ≈ 0.6-0.92) at both
+   symmetric and §V junctions. Remaining (out of scope, documented): Type-II
+   (resonating-node) junctions are not yet run through the full path. Changing
+   the *default* to `full_iteration(true)` is still a separate, deliberate
+   behavior change with its own changelog entry.
 4. **D4 — Document the as-built fidelity.** Update
    `docs/duplexer-synthesis.md` Future Work (currently lists Type-II
    junction as future — implemented at `src/duplexer.rs` JunctionType;

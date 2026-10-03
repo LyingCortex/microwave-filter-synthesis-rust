@@ -66,25 +66,34 @@
   observable that carries the junction's TX/RX power split; a recovered
   channel taken alone (the standalone `tx`/`rx` matrices) carries only its
   share (`p0t²` / `p0r²`) and cannot reach 0 dB.
-- **`duplexer::tests::full_iteration_order2_quasi_equiripple` — the
-  duplexer full-path RED→GREEN gate** (continuation plan D1), now **GREEN at
-  order 2** and no longer `#[ignore]`d. The gate asserts the junction-level
-  diplexer response: convergence to the root-displacement tolerance,
-  quasi-equiripple antenna reflection within ~2 dB of the 22 dB spec at each
-  passband center, and both channel-port passbands within 0.5 dB of unity.
+- **Duplexer full-path D1 gate family** (continuation plan D1/D3), now
+  **GREEN** and no longer `#[ignore]`d:
+  `full_iteration_order{2,3,4,5,6,8}_quasi_equiripple` plus the
+  Section-V printed-design golden benchmark
+  `full_iteration_order7_section5_golden`. Each asserts the junction-level
+  diplexer response: a captured fixed point, both channel-port passbands
+  within 0.5 dB of unity, and quasi-equiripple antenna reflection at the four
+  band edges (the 22/20 dB RL spec is pinned there by eq. 13, not at the band
+  centers, where odd orders place a Chebyshev reflection zero). The golden
+  test additionally matches the paper's printed order-7 N/D/Pt/Pr/p0
+  coefficients to print precision.
 
 ### Fixed
 
-- **The D1 full-iteration gate is green at orders 2, 4, and 6.** The
-  order-2/4/6 Tx/Rx diplexers (`full_iteration(true)`) converge (order 2: 14
-  iters, conv 6e-9; order 4: 14 iters, 8.9e-9; order 6: 9 iters, 7.7e-9) to a
-  physically valid quasi-equiripple diplexer at the junction level: Tx/Rx-port
-  S21 ≈ −0.1 dB, antenna RL ≈ −22 dB (within ~2 dB of the 22 dB spec) at each
-  passband center, lossless 3-port (`D·D̃ = R`). The original failure was the
-  gate asserting on the *standalone* recovered channels (each carries only its
-  share of the junction power split, capping at −0.6 dB) rather than the
-  diplexer's port response; the gate now asserts the junction-level
-  `diplexer_response` (Added).
+- **The D1 full-iteration gate is green at orders 2, 3, 4, 5, 6, and 8.**
+  The Tx/Rx diplexers (`full_iteration(true)`, ideal Type-I junction, 22 dB)
+  all converge to a physically valid quasi-equiripple diplexer at the
+  junction level: 0 dB passbands at both ports, and band-edge antenna return
+  loss ≈ −22 dB (within ~2 dB of the spec) at the four passband limits where
+  eq. 13 pins the RL. Orders 2/3/4/5/6 converge to the strict 1e-8 tolerance
+  (conv 6e-9 … 2.5e-9); orders 7/8 capture their fixed point via the
+  stagnation criterion (degree-14/16 root-extraction floor exceeds 1e-8). The
+  original failure was the gate asserting on the *standalone* recovered
+  channels (each carries only its share of the junction power split, capping
+  at −0.6 dB) rather than the diplexer's port response; the gate now asserts
+  the junction-level `diplexer_response` (Added). The deep odd-order antenna
+  null at a band *center* is the channel's Chebyshev reflection zero — a
+  physical feature, not a defect (an earlier note mislabeled it "degenerate").
 - **Order-7 full-iteration convergence via a stagnation criterion, plus the
   Section-V printed-design anchor.** At degree 14 the per-iteration
   root-extraction noise floor (~5e-6) exceeds the strict `convergence_tol`
@@ -102,8 +111,9 @@
   D 1.2e-2, Pt 9.4e-3, Pr 5.9e-3, N 1.5e-2 — all at the paper's print-rounding
   level (p0 to 4 sig figs, polynomials to 2–3 sig figs), i.e. the code
   reproduces the printed design, not a near-miss. The gate also asserts the
-  physical §V response (0 dB passbands, band-edge antenna RL within ~2 dB of
-  the 20 dB spec).
+  para-identity `D(s)·D̃(−s) = R(s)` on-axis (the exact losslessness invariant
+  of the spectral factorization) and the physical §V response (0 dB
+  passbands, band-edge antenna RL within ~2 dB of the 20 dB spec).
 - **The vendored standard exposed a folded-convention mismatch in the contract,
   not in mfs.** mfs's even-order `to_folded` leaves the reduction pivot at index
   sum `N+2`, like the book's own printed folded matrices, and outside the
