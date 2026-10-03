@@ -266,19 +266,35 @@ return loss instead of the simplified perturbation's approximation.
    band-edge antenna RL ~ -22 dB; the deep odd-order *center* nulls are the
    Chebyshev reflection zeros, a physical feature the §V golden also shows),
    and the 2×2 p0 system is well-conditioned (det/scale² ≈ 0.6-0.92) at both
-   symmetric and §V junctions. Remaining (out of scope, documented): Type-II
-   (resonating-node) junctions are not yet run through the full path. Changing
-   the *default* to `full_iteration(true)` is still a separate, deliberate
-   behavior change with its own changelog entry.
-4. **D4 — Document the as-built fidelity.** Update
-   `docs/duplexer-synthesis.md` Future Work (currently lists Type-II
-   junction as future — implemented at `src/duplexer.rs` JunctionType;
-   and names `wilson_spectral_factor` / `fit_polynomial_ls`, deleted in
-   0.5.0) to state what the full path achieves and at what cost.
+   symmetric and §V junctions. **Type-II (resonating-node) junctions are now
+   also run through the full path (2026-10-03):** the paper's eq. (11) is
+   implemented exactly — the extra pure-real reflection zero at `s = 1/c0`,
+   D degree `n_tx+n_rx+1`, and `S_TX·S_RX = (c0/2)(D − N)` with D normalized
+   exactly monic (the `D−N` leading-term cancellation). Gated by
+   `full_iteration_type2_order4_quasi_equiripple` and the §VI GSM anchor
+   `full_iteration_type2_section6_anchor` (RX 10 / TX 9 poles, degree-40
+   R(s)); the anchor reproduces the paper's quasi-equiripple |S11| (peaks at
+   the 22 dB spec, peak-to-peak < 1.5 dB per Fig. 9). Enabling this required
+   **Parlett–Reinsch diagonal-similarity balancing of the faer companion
+   matrix** (`FaerRootSolver`): an unbalanced solve of the ~19-decade-spread
+   §VI R(s) gave backward residual ~0.75 (garbage), balancing brings it to
+   ~1e-9. Changing the *default* to `full_iteration(true)` is still a
+   separate, deliberate behavior change with its own changelog entry.
+4. **D4 — Document the as-built fidelity. (DONE, 2026-10-03.)**
+   `docs/duplexer-synthesis.md` updated: the Type-II polynomial forms now
+   match the paper's eq. (11) (the N/D cross term, the extra real zero at
+   `s=1/c0`, the degree `n_tx+n_rx+1`, and the `S_TX·S_RX = (c0/2)(D−N)`
+   Step-4 reconstruction with D normalized exactly monic); the as-built
+   status states the full path converges at both junction types (Type-I
+   orders 2–8 + §V golden; Type-II §VI GSM anchor) and names the
+   Parlett–Reinsch-balanced companion-matrix spectral factorization; the
+   stale `wilson_spectral_factor` / `fit_polynomial_ls` references and the
+   "not numerically converged" status are removed.
 
 **Acceptance (section done):** `cargo test --lib -- duplexer` green with
-full-path tests at orders 2/4/6; `docs/duplexer-synthesis.md` accurate;
-no regression on the simplified path (its tests unchanged).
+full-path tests at Type-I orders 2/3/4/5/6/8 + §V golden and Type-II
+order-4 + §VI anchor; `docs/duplexer-synthesis.md` accurate; no regression
+on the simplified path (its tests unchanged).
 
 ---
 

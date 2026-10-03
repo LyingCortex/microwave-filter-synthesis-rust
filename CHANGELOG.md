@@ -77,6 +77,20 @@
   centers, where odd orders place a Chebyshev reflection zero). The golden
   test additionally matches the paper's printed order-7 N/D/Pt/Pr/p0
   coefficients to print precision.
+- **Type-II (resonating-node) junction through the full spectral path**
+  (continuation plan D4), with two gates: `full_iteration_type2_order4_quasi_equiripple`
+  (symmetric order 4, same quasi-equiripple assertions as the Type-I family)
+  and `full_iteration_type2_section6_anchor` (the paper's §VI GSM design: RX
+  10 / TX 9 poles, 22 dB, transmission zeros, real reflection zero 1.5 ⟹
+  `c0 = 2/3`, degree-40 R(s)). The §VI anchor is *response-based*, not
+  coefficient-based, because §VI prints coupling matrices (Tables I/II)
+  rather than the N/D/Pt/Pr polynomials: it asserts 0 dB channel passbands,
+  quasi-equiripple antenna |S11| (local peaks within ~2 dB of the 22 dB spec,
+  peak-to-peak ripple < 2.5 dB — the paper reports < 1.5 dB, Fig. 9), and the
+  lossless para-identity `D·D̃ = R` on the passband axis. The paper's eq. (11)
+  is implemented exactly: N/D degree `n_tx+n_rx+1` with the extra pure-real
+  reflection zero at `s = 1/c0`, and `S_TX·S_RX = (c0/2)(D − N)` with D
+  normalized exactly monic so the leading terms cancel to machine precision.
 
 ### Fixed
 
@@ -133,6 +147,23 @@
   margin) and a non-finiteness check, and returns
   `MfsError::NumericalFailure` when it fires, so the adaptive chain falls
   through to Durand-Kerner / Aberth-Ehrlich.
+- **`FaerRootSolver` balances its companion matrix before the eigenvalue
+  solve** (Parlett–Reinsch diagonal-similarity, LAPACK `xGEbal` style), so the
+  backward-residual gate above no longer fires on well-behaved-but-ill-scaled
+  inputs. A companion matrix whose coefficients span many decades (the §VI
+  type-II diplexer R(s) spans ~19, from 1.6e-18 to 5.6e1) is severely
+  unbalanced — one row/column has a 1-norm ~1e-18 while another ~1e2 — which
+  makes the raw eigenvalue problem ill-conditioned; the gate measured a
+  backward residual of ~0.75 (garbage) on it and forced a fall-through to the
+  iterative solvers, which also failed at degree 40. Balancing applies a
+  sequence of eigenvalue-preserving similarity transforms (row i scaled by
+  `d_i`, column i by `d_i⁻¹`, `d_i = sqrt(col_norm/row_norm)`), bringing the
+  §VI R(s) backward residual to ~1e-9 and recovering the degree-40 factor the
+  unbalanced path could not. The gate remains as a safety net; two existing
+  regression tests that pinned the *pre-balancing* premise (faer must be
+  gated on a 21-decade geometric polynomial) now assert the recovered root
+  quality instead, and `faer_solver_recovers_ill_conditioned_geometric_polynomial`
+  locks the improvement.
 - **Durand-Kerner and Aberth-Ehrlich no longer return NaN root sets as
   "converged".** Their in-loop convergence check compared `max_delta`
   (accumulated with `f64::max`, which swallows NaN) against the tolerance,

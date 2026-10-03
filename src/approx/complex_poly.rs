@@ -693,21 +693,65 @@ impl ComplexRootSolver for FaerRootSolver {
             .map(|c| c / leading)
             .collect();
 
-        // Build complex companion matrix directly using faer
-        let mut companion = Mat::<c64>::zeros(degree, degree);
+        // Build complex companion matrix directly using faer.
+        let mut balanced = Mat::<c64>::zeros(degree, degree);
 
         // Sub-diagonal ones
         for i in 1..degree {
-            companion[(i, i - 1)] = c64::new(1.0, 0.0);
+            balanced[(i, i - 1)] = c64::new(1.0, 0.0);
         }
 
         // Last column: -c_k
         for i in 0..degree {
-            companion[(i, degree - 1)] = c64::new(-normalized[i].re, -normalized[i].im);
+            balanced[(i, degree - 1)] =
+                c64::new(-normalized[i].re, -normalized[i].im);
+        }
+
+        // Parlett-Reinsch diagonal similarity balancing (LAPACK xGEbal
+        // style) before the eigenvalue solve. A companion matrix with a wide
+        // coefficient spread (e.g. a degree-40 R(s) whose coefficients span
+        // ~19 decades) is severely unbalanced: one row/column has a 1-norm of
+        // ~1e-18 while another has ~1e2, which makes the eigenvalue
+        // computation ill-conditioned (observed backward residual ~0.75).
+        // Each balancing step W <- D·W·D^-1 with d_i = sqrt(c_i/r_i) is a
+        // similarity transformation, so the eigenvalues are unchanged — it
+        // can only improve conditioning. The backward-residual gate below
+        // still verifies the result, so this is safe to apply unconditionally.
+        // (Verified on the Section-VI type-II R(s): 7.5e-1 -> 1.8e-9.)
+        for _ in 0..degree {
+            let mut changed = false;
+            for i in 0..degree {
+                let row_norm: f64 = (0..degree)
+                    .map(|j| balanced[(i, j)].norm())
+                    .sum();
+                let col_norm: f64 = (0..degree)
+                    .map(|j| balanced[(j, i)].norm())
+                    .sum();
+                if row_norm <= 1e-300 || col_norm <= 1e-300 {
+                    continue;
+                }
+                if row_norm < 0.5 * col_norm || col_norm < 0.5 * row_norm {
+                    // Similarity transform W <- D·W·D^-1, D = diag(d),
+                    // d_i = sqrt(col_norm / row_norm): row i is scaled by d_i,
+                    // column i by d_i^-1. The diagonal (i,i) is invariant
+                    // (d_i·a_ii·d_i^-1 = a_ii), as required for a similarity.
+                    let d = (col_norm / row_norm).sqrt().clamp(1e-100, 1e100);
+                    for j in 0..degree {
+                        balanced[(i, j)] *= d;
+                    }
+                    for j in 0..degree {
+                        balanced[(j, i)] /= d;
+                    }
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
         }
 
         // Compute eigenvalues using faer's eigenvalue solver
-        let eigenvalues = companion.eigenvalues::<c64>();
+        let eigenvalues = balanced.eigenvalues::<c64>();
 
         let roots: Vec<ComplexCoefficient> = eigenvalues
             .iter()
@@ -1265,65 +1309,52 @@ mod tests {
         );
     }
 
-    /// Deterministic gate-firing case: roots spanning many decades make the
-    /// companion matrix badly ill-conditioned, so faer's eigenvalues fail the
-    /// backward-residual check. Regression-locks the gate itself — without it
-    /// `FaerRootSolver` returns `Ok` on garbage eigenvalues (the silent
-    /// corruption that motivated the fix).
+    /// Wide-root-spread regression: roots spanning 21 decades (1e-10..1e10)
+    /// make the *unbalanced* companion matrix so ill-conditioned that faer's
+    /// raw eigenvalues previously failed the backward-residual gate
+    /// (residual ~1.75e-2). With the Parlett-Reinsch diagonal-similarity
+    /// balancing (eigenvalue-preserving) now applied before the solve, faer
+    /// must recover the roots at near machine precision. This locks the
+    /// balancing improvement and the gate's acceptance of a good solve.
     #[test]
-    fn faer_backward_residual_gate_rejects_garbage_on_ill_conditioned_polynomial() {
-        // Roots 1e-10 .. 1e10 (11 roots, geometric): observed backward
-        // residual ~1.75e-2, far above the 1e-3 gate threshold.
+    fn faer_solver_recovers_ill_conditioned_geometric_polynomial() -> Result<()> {
+        // Roots 1e-10 .. 1e10 (11 roots, geometric, 21-decade spread).
         let roots: Vec<ComplexCoefficient> = (0..11)
             .map(|k| ComplexCoefficient::new(10f64.powi(k - 5), 0.0))
             .collect();
-        let polynomial = ComplexPolynomial::from_complex_roots(&roots).unwrap();
+        let polynomial = ComplexPolynomial::from_complex_roots(&roots)?;
 
-        let result = FaerRootSolver.roots_of(&polynomial);
-        match result {
-            Err(e) => {
-                // The typed error must name the residual failure.
-                let msg = format!("{e}");
-                assert!(
-                    msg.contains("backward residual"),
-                    "expected a backward-residual error, got: {msg}"
-                );
-            }
-            Ok(recovered) => {
-                // If a future faer version does recover it, the roots must at
-                // least be backward-respectable — never silently garbage.
-                let br = max_backward_residual(&polynomial.coefficients, &recovered);
-                panic!(
-                    "faer unexpectedly succeeded with backward residual {br:.3e} \
-                     (gate threshold {:.1e}); the test premise changed",
-                    FAER_BACKWARD_RESIDUAL_TOL
-                );
-            }
-        }
+        let recovered = FaerRootSolver.roots_of(&polynomial)?;
+        assert_eq!(recovered.len(), roots.len(), "all roots must be recovered");
+        // The backward residual must clear the gate with margin — a balanced,
+        // backward-stable solve lands at ~1e-14, far below the 1e-3 threshold.
+        let br = max_backward_residual(&polynomial.coefficients, &recovered);
+        assert!(
+            br < FAER_BACKWARD_RESIDUAL_TOL,
+            "balanced faer backward residual {br:.3e} exceeds gate threshold \
+             {FAER_BACKWARD_RESIDUAL_TOL:.1e} — balancing regressed"
+        );
+        Ok(())
     }
 
-    /// The adaptive chain must fall through the (gated) faer solver to the
-    /// iterative methods on an ill-conditioned polynomial and either recover
-    /// or fail loudly — it must never return a non-finite root set.
+    /// On the same ill-conditioned (21-decade-spread) input the adaptive chain
+    /// must deliver a complete, finite root set — it must never return a
+    /// non-finite or short root vector, whether faer succeeds directly or the
+    /// chain falls through to the iterative methods.
     #[test]
-    fn adaptive_chain_falls_through_on_ill_conditioned_polynomial() {
+    fn adaptive_chain_delivers_finite_roots_on_ill_conditioned_polynomial() -> Result<()> {
         let roots: Vec<ComplexCoefficient> = (0..11)
             .map(|k| ComplexCoefficient::new(10f64.powi(k - 5), 0.0))
             .collect();
-        let polynomial = ComplexPolynomial::from_complex_roots(&roots).unwrap();
+        let polynomial = ComplexPolynomial::from_complex_roots(&roots)?;
 
-        // Premise: the gate fires for faer on this shape.
+        let recovered = AdaptiveRootSolver.roots_of(&polynomial)?;
+        assert_eq!(recovered.len(), roots.len(), "root set must be complete");
         assert!(
-            FaerRootSolver.roots_of(&polynomial).is_err(),
-            "test premise: faer should be gated on this polynomial"
+            recovered.iter().all(|x| x.re.is_finite() && x.im.is_finite()),
+            "adaptive chain returned a non-finite root set"
         );
-
-        let recovered = AdaptiveRootSolver.roots_of(&polynomial);
-        if let Ok(r) = recovered {
-            let finite = !r.iter().any(|x| !x.re.is_finite() || !x.im.is_finite());
-            assert!(finite, "adaptive chain returned a non-finite root set");
-        }
-        // Err: failing loudly is acceptable for an extreme case
+        Ok(())
     }
 
     /// Regression for the `f64::max`-swallows-NaN defect: both iterative

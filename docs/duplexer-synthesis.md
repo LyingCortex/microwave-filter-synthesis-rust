@@ -75,12 +75,19 @@ $$
 
 ### Diplexer Polynomials (Type-II Junction)
 
+The resonating node adds one *pure-real* reflection zero (the paper's
+suggested value is 1.5, which determines `c0 = 1/1.5 = 2/3`) and one extra
+pole, so `N` and `D` have degree `n_tx + n_rx + 1`. In the monic/n0-factored
+normalization (n0 = −1, |n0| = 1):
+
 $$
-N(s) = s \cdot S_{TX} S_{RX} - \frac{1}{c_0}(S_{TX} S_{RX} - D_{TX} D_{RX})
+N(s) = S_{TX} S_{RX}\left(s - \tfrac{1}{c_0}\right)
+       + \tfrac{1}{c_0}\left(D_{TX} S_{RX} + S_{TX} D_{RX}\right)
 $$
 
 $$
-D(s) = s \cdot S_{TX} S_{RX} + \frac{1}{c_0}(S_{TX} S_{RX} + D_{TX} S_{RX} + S_{TX} D_{RX})
+D(s) = S_{TX} S_{RX}\left(s + \tfrac{1}{c_0}\right)
+       + \tfrac{1}{c_0}\left(D_{TX} S_{RX} + S_{TX} D_{RX}\right)
 $$
 
 $$
@@ -151,7 +158,17 @@ $$
 \frac{a \cdot N(s) + b \cdot D(s)}{2} = S_{TX}(s) \cdot S_{RX}(s)
 $$
 
-where `a = 1 - jn²b₀` and `b = 1 + jn²b₀` (Type-I) or `b = -a = 1` (Type-II).
+where `a = 1 - jn²b₀` and `b = 1 + jn²b₀` (Type-I). For a Type-II junction
+the two monic polynomials satisfy `D(s) - N(s) = (2/c0)·S_TX·S_RX`, so the
+product is recovered as
+
+$$
+S_{TX}(s) \cdot S_{RX}(s) = \tfrac{c_0}{2}\,\bigl(D(s) - N(s)\bigr)
+$$
+
+(the degree-`(n_tx+n_rx+1)` leading terms cancel; `D` is normalized exactly
+monic before the subtraction, since `spectral_factor` only fixes its leading
+coefficient's *phase*).
 
 Sort roots by imaginary part. Assign first np_RX roots to S_RX, last np_TX to S_TX.
 
@@ -227,42 +244,52 @@ The complete Macchiarella algorithm with spectral factorization is implemented
 behind `DuplexerSynthesis::full_iteration(true)` (default `false`). The
 infrastructure includes:
 
-- `compute_n_polynomial`: diplexer reflection numerator N(s)
-- `solve_scaling_constants`: |p₀t|² and |p₀r|² from return-loss conditions
+- `solve_scaling_constants`: |p₀t|² and |p₀r|² from the return-loss
+  conditions (eq. 13)
 - `spectral_factor` (`src/spectral.rs`): cepstrum (rustfft) with a
-  balanced-companion-matrix fallback — this replaced the earlier Wilson
-  iteration, whose `wilson_spectral_factor` / `fit_polynomial_ls` helpers
-  were removed in the 0.5.0 dead-code cleanup
-- `compute_s_product`: S_TX × S_RX product from N(s) and D(s)
-- `assign_roots`: root assignment via minimum-distance matching
+  **Parlett–Reinsch-balanced** faer companion-matrix fallback. The companion
+  matrix is balanced by diagonal similarity (eigenvalue-preserving) before the
+  solve: a companion whose coefficients span many decades (the §VI Type-II
+  R(s) spans ~19) is otherwise so unbalanced that faer's eigenvalues fail the
+  backward-residual gate (residual ~0.75); balancing brings it to ~1e-9. This
+  replaced the earlier Wilson iteration, whose `wilson_spectral_factor` /
+  `fit_polynomial_ls` helpers were removed in the 0.5.0 dead-code cleanup.
+- `compute_s_product`: S_TX × S_RX product from N(s) and D(s) (eq. 11 form
+  for Type-II: `(c0/2)(D − N)` with D normalized exactly monic)
+- `assign_roots`: root assignment by increasing imaginary part (paper Step 4)
 
-**Status (2026-09-29):** the full path is reachable but **not numerically
-converged at any tested order**. The D1 symmetric gate (order 2, 22 dB,
-adjacent bands) exhausts its iterations (root displacement ~5e-2 after 30
-iters); order ≥ 4 fails with a typed numerical error. OCR of the paper
-shows the code's p₀ return-loss equation is the paper's eq. (13) reduced
-through the unitary condition with `|n₀| = 1`, so the p₀ solve is not the
-defect — the mismatch is in how N/Pt/Pr/D are constructed. The paper's
-Section V worked design (see Future Work) is the anchor for locating and
-fixing it. The continuation plan for converging it is section A of
-`docs/continuation-plan.md`.
+**Status (2026-10-03):** the full path **converges to a physically valid
+quasi-equiripple 3-port at both junction types**, in the paper's exact bandpass
+common-domain variable `Ω(f) = (f/f₀ − f₀/f)/B`:
+
+- **Type-I:** orders 2–8 gated by `full_iteration_order{2,3,4,5,6,8}_quasi_equiripple`
+  plus the §V printed-design golden benchmark `full_iteration_order7_section5_golden`
+  (matches the paper's printed order-7 N/D/Pt/Pr/p0 to print precision).
+- **Type-II** (resonating node): gated by `full_iteration_type2_order4_quasi_equiripple`
+  and the §VI GSM-design anchor `full_iteration_type2_section6_anchor`
+  (RX 10 / TX 9 poles, transmission zeros, real reflection zero 1.5 ⟹ c0 = 2/3,
+  degree-40 R(s)). The anchor reproduces the paper's Fig. 9: |S11| peaks at the
+  22 dB spec with peak-to-peak ripple < 1.5 dB, 0 dB channel passbands, and a
+  lossless para-identity. This is the highest-degree design the balanced
+  spectral factorization has been validated on.
+
+Changing the *default* to `full_iteration(true)` remains a separate, deliberate
+behavior change with its own changelog entry. The continuation plan is section
+A of `docs/continuation-plan.md`.
 
 ### Future Work
 
-- **D3 — pin the normalization against the paper's worked example.**
-  The Macchiarella–Tamiazzo paper is **vendored in the repo**
-  (`tests/Macchiarella and Tamiazzo - 2006 - …Diplexers.pdf`); its
-  equations are image-rendered and were recovered by OCR. Eq. (12) states
-  `|n₀| = 1`; the p₀ return-loss equation (eq. 13) reduces, via the
+- **DONE (2026-10-03): normalization pinned against the paper's worked
+  examples.** The Macchiarella–Tamiazzo paper is vendored in the repo
+  (`tests/…Diplexers.pdf`); its image-rendered equations were recovered by
+  OCR and implemented exactly (eq. (8)–(11)). Eq. (12) states `|n₀| = 1` for
+  both junction types; the p₀ return-loss equation (eq. 13) reduces, via the
   unitary condition plus the edge RL spec, to
-  `|p₀t|²|Pt|² + |p₀r|²|Pr|² = |N|²(1−ε)/ε` — **the same form the code's
-  `solve_scaling_constants` already implements**, so the p₀ equation is not
-  the defect. Section V prints a complete worked Type-I design (RX
-  14.9–15.1 / TX 15.15–15.35 GHz, 20 dB, 7 poles each, `n = 1.47`,
-  `b₀ = −0.171`) with all coefficients (`n₀N`, `D`, `Pt`, `Pr`,
-  `p₀t = 4.717e−4+1.743e−4i`, `p₀r = 4.336e−4+1.6e−4i`): that is a
-  ready regression fixture to reproduce and match, which pins the
-  remaining normalization/domain mismatch in the N/Pt/Pr/D construction.
+  `|p₀t|²|Pt|² + |p₀r|²|Pr|² = |N|²(1−ε)/ε` — the same form
+  `solve_scaling_constants` implements. Two worked designs are regression
+  anchors: the §V Type-I golden (order 7, matches printed N/D/Pt/Pr/p0 to
+  print precision) and the §VI Type-II GSM anchor (order 10/9, reproduces the
+  Fig. 9 quasi-equiripple |S11|).
 - **N=2 unification** — fold the duplexer's full-path iteration loop into
   a shared N-channel module so `MultiplexerSynthesis(N=2)` and
   `DuplexerSynthesis` maintain the Macchiarella–Tamiazzo loop once
