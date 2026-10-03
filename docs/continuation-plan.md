@@ -221,19 +221,24 @@ return loss instead of the simplified perturbation's approximation.
        places a spurious deep antenna null at the band center and misses the
        20 dB RL at the outer edge (−18.7 dB). This is the near-degenerate
        case, not the paper's.
-     - The **Section-V printed design** (`n = 1.47`, `b0 = −0.171`, 20 dB)
-       is the non-degenerate case and converges to a physically valid
-       quasi-equiripple diplexer: band-edge antenna RL = −21.5 / −20.2 /
-       −20.0 / −18.7 dB (all within ~2 dB of the 20 dB spec — the paper's
-       stated "max RL deviation from equiripple < 2 dB"), 0 dB passbands,
-       deep reflection zeros at band centers (correct for odd order),
-       in-band unitarity 0.023, 10 iters. Gated by
-       `full_iteration_order7_section5_anchor`.
-     - **Exact printed N/D/p0 coefficients are NOT matched:** the paper
-       imposes specific transmission zeros (method [11], generalized
-       Chebyshev) that this crate's standard-Chebyshev channels do not; the
-       gate anchors the design *performance* (the paper's own §V acceptance
-       criterion), which is what matters.
+     - The **Section-V printed design** (`n = 1.47`, `b0 = −0.171`, 20 dB,
+       RX 14.9–15.1 / TX 15.15–15.35 GHz, **all-pole inline Chebyshev**) is a
+       *golden benchmark* and is now matched by
+       `full_iteration_order7_section5_golden`. The §V spec is the same
+       standard-Chebyshev geometry the code synthesizes, so the converged
+       common-domain polynomials are compared coefficient-by-coefficient
+       against the paper's printed N, D, Pt, Pr and p0. Measured (2026-10-03):
+       |p0t|² 1.2e-4, |p0r|² 1.6e-4, D 1.2e-2, Pt 9.4e-3, Pr 5.9e-3, N 1.5e-2
+       (relative, after leading normalization) — all at the paper's
+       *print-rounding* level (p0 to 4 sig figs, polynomials to 2–3 sig figs),
+       i.e. the code reproduces the printed design, not a near-miss. The gate
+       also asserts the physical §V response (0 dB passbands, band-edge
+       antenna RL within ~2 dB of the 20 dB spec).
+     - **Note for future work:** an earlier note (2026-10-03) wrongly said the
+       printed coefficients "cannot be matched" because the paper imposes
+       specific transmission zeros (method [11]). That confusion came from §VI
+       (the Type-II GSM design, which does use imposed zeros); §V is all-pole
+       Chebyshev and matches to print precision.
 
 3. **D3 — Rebase the full path onto the paper's bandpass w-domain, then
    converge order ≥ 4 and pin it. (Core deliverable DONE, 2026-10-03.)**
@@ -243,13 +248,16 @@ return loss instead of the simplified perturbation's approximation.
    7.7e-9) to physically valid quasi-equiripple diplexers. A stagnation
    criterion extends convergence to order 7/5/8 (root-extraction noise floor
    above the strict tolerance). D1 gates `full_iteration_order{2,4,6}` and
-   the §V order-7 anchor `full_iteration_order7_section5_anchor` are all
-   green. Remaining: (a) the symmetric ideal-junction odd orders still land
-   on a degenerate fixed point (paper's near-singular 2×2) — the non-degenerate
-   §V junction works; (b) exact printed N/D/p0 coefficient matching requires
-   the paper's imposed transmission zeros (method [11]), not implemented.
-   Changing the *default* to `full_iteration(true)` is still a separate,
-   deliberate behavior change with its own changelog entry.
+   the **§V golden benchmark** `full_iteration_order7_section5_golden` are all
+   green. The golden test matches the paper's printed order-7 coefficients
+   (N, D, Pt, Pr, p0) to print precision — p0t² 1.2e-4, p0r² 1.6e-4, D 1.2e-2
+   (relative, after leading normalization) — i.e. the implementation reproduces
+   the published design. Remaining (out of scope, documented): (a) the
+   symmetric ideal-junction *odd* orders (5, 7, 8) land on a degenerate
+   fixed point (paper's near-singular 2×2 p0 system) — the non-degenerate §V
+   junction works; (b) Type-II (resonating-node) junctions are not yet run
+   through the full path. Changing the *default* to `full_iteration(true)` is
+   still a separate, deliberate behavior change with its own changelog entry.
 4. **D4 — Document the as-built fidelity.** Update
    `docs/duplexer-synthesis.md` Future Work (currently lists Type-II
    junction as future — implemented at `src/duplexer.rs` JunctionType;

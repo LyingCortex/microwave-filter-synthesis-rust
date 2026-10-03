@@ -1418,29 +1418,39 @@ mod tests {
         assert_diplexer_quasi_equiripple(&result, 6)
     }
 
-    /// Section-V printed-design anchor (continuation plan D3). The paper's
-    /// order-7 waveguide diplexer uses a non-ideal Type-I junction
-    /// (`n = 1.47`, `b0 = -0.171`), 20 dB RL, RX 14.9-15.1 / TX 15.15-15.35
-    /// GHz. This is the non-degenerate case (the symmetric ideal-junction
-    /// order-7 is near-degenerate, per the plan's 2x2-singularity note).
+    /// **Golden benchmark: the paper's printed Section-V design.**
     ///
-    /// At degree 14 the per-iteration root-extraction noise floor (~5e-6)
-    /// sits above the strict 1e-8 tolerance, so this order converges via the
-    /// stagnation criterion, not the strict path. We therefore assert the
-    /// physical fidelity the paper promises — "maximum deviation of the return
-    /// loss from the ideal equiripple condition is less than 2 dB" — rather
-    /// than a 1e-8 root displacement: the four band edges (where the 20 dB RL
-    /// spec is pinned) must be within ~2 dB of -20 dB, and both passbands
-    /// near unity. The exact printed N/D/p0 coefficients are not asserted
-    /// because the paper imposes specific transmission zeros (method [11])
-    /// that this crate's standard-Chebyshev channels do not; the *design
-    /// performance* is the anchor.
+    /// Macchiarella & Tamiazzo (2006), §V, print a complete worked order-7
+    /// Type-I waveguide diplexer: RX 14.9–15.1 / TX 15.15–15.35 GHz, 20 dB
+    /// return loss, all-pole inline Chebyshev, junction `n = 1.47`,
+    /// `b0 = −0.171` (WR62 tee). Their printed diplexer polynomials
+    /// (descending coefficients) are the known-correct answer for this
+    /// specification — the strongest possible validation that the full
+    /// spectral path is implemented correctly (not merely that it *runs*).
+    ///
+    /// The test synthesizes the §V spec and compares the converged
+    /// common-domain polynomials (N, D, Pt, Pr) and the p0 scalings against
+    /// the printed values. Tolerances reflect the paper's *print precision*:
+    /// p0 is printed to 4 significant figures (1e-3 relative), N/D/Pt/Pr to
+    /// 2–3 significant figures (5e-2 relative after leading normalization).
+    /// Measured agreement (2026-10-03): p0t² 1.2e-4, p0r² 1.6e-4, D 1.2e-2,
+    /// Pt 9.4e-3, Pr 5.9e-3, N 1.5e-2 — all at the print-rounding level,
+    /// i.e. the code reproduces the printed design, not a near-miss.
+    ///
+    /// The printed N is `n0·N_true` with `n0 = (1−j·n²·b0)/(1+j·n²·b0)`
+    /// (unit magnitude); the code's N is the monic `N_true`, so the printed
+    /// N is divided by n0 before comparison.
     #[test]
-    fn full_iteration_order7_section5_anchor() -> Result<()> {
+    fn full_iteration_order7_section5_golden() -> Result<()> {
+        let n_j = 1.47;
+        let b0 = -0.171;
+        let n_sq_b0 = n_j * n_j * b0;
+        let n0 = (Complex64::new(1.0, -n_sq_b0)) / (Complex64::new(1.0, n_sq_b0));
+
         let result = DuplexerSynthesis::new()
             .rx(7, 20.0, 14.9e9, 15.1e9)
             .tx(7, 20.0, 15.15e9, 15.35e9)
-            .junction(JunctionType::TypeI { n: 1.47, b0: -0.171 })
+            .junction(JunctionType::TypeI { n: n_j, b0 })
             .max_iterations(60)
             .convergence_tol(1e-8)
             .full_iteration(true)
@@ -1448,35 +1458,94 @@ mod tests {
 
         assert_eq!(result.tx.order(), 7);
         assert_eq!(result.rx.order(), 7);
-        // Stagnation-criterion floor at degree 14 is ~5e-6; a value below
-        // 1e-3 confirms the fixed point was captured (not a divergent run).
+        let common = result
+            .diplexer_common
+            .as_ref()
+            .expect("order-7 §V full path must capture the common-domain state");
+
+        // Leading-normalized relative error between two polynomials given in
+        // *ascending* coefficient order (the crate's convention).
+        fn max_rel_err(a: &[Complex64], b: &[Complex64]) -> f64 {
+            assert_eq!(a.len(), b.len(), "polynomial degree mismatch");
+            let a_lead = a.last().copied().unwrap();
+            let b_lead = b.last().copied().unwrap();
+            assert!(a_lead.norm() > 1e-15 && b_lead.norm() > 1e-15);
+            let a_n = a.iter().map(|c| c / a_lead).collect::<Vec<_>>();
+            let b_n = b.iter().map(|c| c / b_lead).collect::<Vec<_>>();
+            a_n.iter()
+                .zip(b_n.iter())
+                .map(|(x, y)| {
+                    let denom = y.norm().max(1e-30);
+                    (x - y).norm() / denom
+                })
+                .fold(0.0_f64, f64::max)
+        }
+        fn asc(coeffs_desc: &[Complex64]) -> Vec<Complex64> {
+            coeffs_desc.iter().rev().copied().collect()
+        }
+        fn c(re: f64, im: f64) -> Complex64 {
+            Complex64::new(re, im)
+        }
+
+        // Printed (descending) — Macchiarella & Tamiazzo 2006, §V.
+        let printed_n0_n = [
+            c(0.76, 0.65), c(0.033, -0.039), c(2.166, 1.854), c(0.09, -0.105),
+            c(2.31, 1.976), c(0.0886, -0.103), c(1.14, 0.977), c(0.0391, -0.04561),
+            c(0.265, 0.226), c(0.0076, -0.0089), c(0.026, 0.022), c(5.5e-4, -6.48e-4),
+            c(9.29e-4, 7.95e-4), c(1.055e-5, -1.23e-5), c(8.87e-6, 7.59e-6),
+        ];
+        let printed_d = [
+            c(1.0, 0.0), c(1.77, -0.051), c(4.417, -0.104), c(5.3, -0.242),
+            c(6.724, -0.3119), c(5.61, -0.376), c(4.425, -0.326), c(2.51, -0.24),
+            c(1.25, -0.14), c(0.44, -0.065), c(0.128, -0.02248), c(0.024, -5.7e-3),
+            c(3.27e-3, -9.5e-4), c(2.26e-4, -9.21e-5), c(1.123e-5, -4.25e-6),
+        ];
+        let printed_pt = [
+            c(1.0, 0.0), c(0.455, 3.9), c(-6.027, 1.53), c(-1.97, -4.6),
+            c(1.833, -1.21), c(0.359, 0.351), c(-0.0275, 0.046), c(-0.0018, -0.000579),
+        ];
+        let printed_pr = [
+            c(1.0, 0.0), c(0.43, -4.29), c(-7.337, -1.6), c(-2.31, 6.37),
+            c(2.95, 1.6), c(0.565, -0.7), c(-0.076, -0.091), c(-0.005, 0.0027),
+        ];
+        let printed_p0t = c(4.717e-4, 1.743e-4);
+        let printed_p0r = c(4.336e-4, 1.6e-4);
+
+        // p0 scalings — 4 sig figs printed, tightest golden signal.
+        let p0t2_err = (common.p0t_sq - printed_p0t.norm_sqr()) / printed_p0t.norm_sqr();
+        let p0r2_err = (common.p0r_sq - printed_p0r.norm_sqr()) / printed_p0r.norm_sqr();
         assert!(
-            result.convergence_error < 1e-3,
-            "order-7 full iteration must reach a captured fixed point, got {:.3e} after {} iterations",
-            result.convergence_error,
-            result.iterations
+            p0t2_err.abs() < 1e-3,
+            "|p0t|² vs printed: rel err {:.2e}",
+            p0t2_err
+        );
+        assert!(
+            p0r2_err.abs() < 1e-3,
+            "|p0r|² vs printed: rel err {:.2e}",
+            p0r2_err
         );
 
+        // Polynomials — 2–3 sig figs printed; 5e-2 relative after leading
+        // normalization catches any O(1) implementation error.
+        let printed_n_true_asc = printed_n0_n.iter().rev().map(|x| x / n0).collect::<Vec<_>>();
+        let d_err = max_rel_err(&common.d.coefficients, &asc(&printed_d));
+        let pt_err = max_rel_err(&common.pt.coefficients, &asc(&printed_pt));
+        let pr_err = max_rel_err(&common.pr.coefficients, &asc(&printed_pr));
+        let n_err = max_rel_err(&common.n.coefficients, &printed_n_true_asc);
+        assert!(d_err < 5e-2, "D vs printed: max rel err {:.2e}", d_err);
+        assert!(pt_err < 5e-2, "Pt vs printed: max rel err {:.2e}", pt_err);
+        assert!(pr_err < 5e-2, "Pr vs printed: max rel err {:.2e}", pr_err);
+        assert!(n_err < 5e-2, "N vs printed: max rel err {:.2e}", n_err);
+
+        // And the physical observable: 0 dB passbands + quasi-equiripple
+        // band-edge return loss (the paper's §V acceptance statement).
         let resp = result
             .diplexer_response(14.88e9, 15.38e9, 1001)
-            .expect("full path must expose a junction-level response");
-
-        // 0 dB passbands at the diplexer ports.
+            .expect("golden §V run must expose a junction-level response");
         let tx_i = nearest(&resp, 15.25e9);
         let rx_i = nearest(&resp, 15.0e9);
-        assert!(
-            resp.tx_s21_db[tx_i] > -0.5,
-            "diplexer Tx-port S21: {:.2} dB (want > -0.5)",
-            resp.tx_s21_db[tx_i]
-        );
-        assert!(
-            resp.rx_s21_db[rx_i] > -0.5,
-            "diplexer Rx-port S21: {:.2} dB (want > -0.5)",
-            resp.rx_s21_db[rx_i]
-        );
-
-        // Quasi-equiripple: the 20 dB RL spec is pinned at the four band
-        // edges (eq. 13), so each must be within ~2 dB of -20 dB.
+        assert!(resp.tx_s21_db[tx_i] > -0.5, "Tx-port S21 {:.2} dB", resp.tx_s21_db[tx_i]);
+        assert!(resp.rx_s21_db[rx_i] > -0.5, "Rx-port S21 {:.2} dB", resp.rx_s21_db[rx_i]);
         for (label, target_hz) in [
             ("RX lower edge", 14.9e9),
             ("RX upper edge", 15.1e9),
@@ -1487,10 +1556,44 @@ mod tests {
             let rl = resp.antenna_s11_db[i];
             assert!(
                 rl < -18.0 && rl > -24.0,
-                "{label} antenna RL: {:.2} dB (want within ~2 dB of -20, i.e. [-24, -18])",
+                "{label} antenna RL: {:.2} dB (want within ~2 dB of -20)",
                 rl
             );
         }
+
+        // Losslessness invariant: the diplexer's spectral factor D must
+        // satisfy the para-identity D(s)·D̃(−s) = R(s) with
+        // R = N·Ñ + |p0t|²·Pt·Pt̃ + |p0r|²·Pr·Pr̃ on the passband axis. This is
+        // the exact condition that the 3-port is lossless (power-conserving),
+        // independent of coefficient magnitude. Verify it on-axis over the
+        // whole band; a large violation is the signature of an invalid
+        // high-degree spectral factorization.
+        let d_tilde = common.d.alternating_conjugate()?;
+        let n_tilde = common.n.alternating_conjugate()?;
+        let pt_tilde = common.pt.alternating_conjugate()?;
+        let pr_tilde = common.pr.alternating_conjugate()?;
+        let ptpt = common.pt.multiply(&pt_tilde)?.scale(Complex64::new(common.p0t_sq, 0.0))?;
+        let prpr = common.pr.multiply(&pr_tilde)?.scale(Complex64::new(common.p0r_sq, 0.0))?;
+        let r_poly = common.n.multiply(&n_tilde)?.add(&ptpt)?.add(&prpr)?;
+        let dd = common.d.multiply(&d_tilde)?;
+        let mut para_max = 0.0_f64;
+        for k in 0..257 {
+            let w = -1.5 + 3.0 * k as f64 / 256.0;
+            let s = Complex64::new(0.0, w);
+            let rv = r_poly.evaluate(s);
+            let dv = dd.evaluate(s);
+            let rel = if rv.norm() > 1e-30 {
+                (dv - rv).norm() / rv.norm()
+            } else {
+                dv.norm()
+            };
+            para_max = para_max.max(rel);
+        }
+        assert!(
+            para_max < 5e-2,
+            "para-identity D·D̃ = R violated on-axis: max rel err {:.2e}",
+            para_max
+        );
         Ok(())
     }
 }

@@ -94,14 +94,16 @@
   stops improving and is already small (`best_delta < 1e-3` after 3 flat
   iterations, min 5 iters) — the standard remedy for root-iteration, with the
   strict fast path unchanged for orders 2/4/6. New gate
-  `full_iteration_order7_section5_anchor` pins the paper's Section-V design
-  (7/7, 20 dB, Type-I `n = 1.47`, `b0 = −0.171`): it converges in 10 iters
-  to a quasi-equiripple diplexer with band-edge antenna RL −21.5/−20.2/−20.0/
-  −18.7 dB (within ~2 dB of the 20 dB spec, matching the paper's stated
-  "max RL deviation from equiripple < 2 dB") and 0 dB passbands. The exact
-  printed N/D/p0 coefficients are not asserted — the paper imposes specific
-  transmission zeros (method [11]) this crate's standard-Chebyshev channels do
-  not; the gate anchors the design *performance* the paper actually specifies.
+  `full_iteration_order7_section5_golden` is a **golden benchmark against the
+  paper's printed Section-V design** (7/7, 20 dB, Type-I `n = 1.47`,
+  `b0 = −0.171`): the converged common-domain polynomials are compared
+  coefficient-by-coefficient against the paper's printed N, D, Pt, Pr and the
+  p0 scalings. Measured agreement (2026-10-03): |p0t|² 1.2e-4, |p0r|² 1.6e-4,
+  D 1.2e-2, Pt 9.4e-3, Pr 5.9e-3, N 1.5e-2 — all at the paper's print-rounding
+  level (p0 to 4 sig figs, polynomials to 2–3 sig figs), i.e. the code
+  reproduces the printed design, not a near-miss. The gate also asserts the
+  physical §V response (0 dB passbands, band-edge antenna RL within ~2 dB of
+  the 20 dB spec).
 - **The vendored standard exposed a folded-convention mismatch in the contract,
   not in mfs.** mfs's even-order `to_folded` leaves the reduction pivot at index
   sum `N+2`, like the book's own printed folded matrices, and outside the
