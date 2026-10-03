@@ -269,7 +269,8 @@ common-domain variable `Ω(f) = (f/f₀ − f₀/f)/B`:
   and the §VI GSM-design anchor `full_iteration_type2_section6_anchor`
   (RX 10 / TX 9 poles, transmission zeros, real reflection zero 1.5 ⟹ c0 = 2/3,
   degree-40 R(s)). The anchor reproduces the paper's Fig. 9: |S11| peaks at the
-  22 dB spec with peak-to-peak ripple < 1.5 dB, 0 dB channel passbands, and a
+  22 dB spec with peak-to-peak ripple < 2.5 dB (measured ~1.3 dB; the paper
+  reports < 1.5 dB), 0 dB channel passbands, and a
   lossless para-identity. This is the highest-degree design the balanced
   spectral factorization has been validated on.
 

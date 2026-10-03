@@ -43,10 +43,11 @@ section should be released as the next version tag when the maintainer cuts it.
   Needs the complex-zero handling for the stopband-only assumption.
 - **Repeated poles in residue expansion** — `residues/expansion.rs` returns
   `NotImplemented` when a pole slope degenerates (no Laurent expansion).
-- **Converge the full Macchiarella spectral path (order ≥ 4)** for
-  N-channel mutual loading — `full_iteration(true)` exists on
-  `DuplexerSynthesis` but does not converge at order ≥ 4 (typed error; order 2
-  exhausts iterations). See `docs/multiplexer-code-review.md`.
+- **Generalize the full Macchiarella spectral path to N channels** for
+  mutual loading — the **duplexer** portion is done (2026-10-03):
+  `full_iteration(true)` converges and is gate-anchored at Type-I orders 2–8
+  and Type-II (incl. the §VI degree-40 GSM design). What remains is the
+  N > 2 multiplexer (continuation plan B2). See `docs/multiplexer-code-review.md`.
 
 ### Medium priority (engineering quality)
 

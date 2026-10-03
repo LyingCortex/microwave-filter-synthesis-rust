@@ -544,13 +544,13 @@ let context = run_full_pipeline(request)?;
    frequency-offset perturbation has limited passband fidelity for adjacent
    channels (it does not converge to machine tolerance for well-separated
    bands, and the loaded channel loses some passband peak). The full
-   Macchiarella spectral path exists behind
-   `DuplexerSynthesis::full_iteration(true)`, but it is **not numerically
-   converged for order ≥ 4 yet** (returns a typed error; order 2 runs but
-   exhausts its iterations) — it is a reachable foundation, not a drop-in
-   high-fidelity fix. The proper fix (converging the full spectral path) is
-   deferred. See `docs/multiplexer-code-review.md` and
-   `docs/internal/architecture-review-2026-09-25.md`.
+   Macchiarella spectral path behind `DuplexerSynthesis::full_iteration(true)`
+   is **converged and gate-anchored** at Type-I orders 2–8 and at Type-II
+   (resonating node, incl. the §VI degree-40 GSM design) (2026-10-03, plan
+   D1–D4); it remains **opt-in** (default is the simplified path) and is not
+   yet generalized to N > 2 channels. See `docs/multiplexer-code-review.md`,
+   `docs/internal/architecture-review-2026-09-25.md`, and
+   `docs/continuation-plan.md` section A.
 
 ## Future Roadmap
 
@@ -561,7 +561,8 @@ Worked plan with sequencing and acceptance criteria:
 |-------|---------|----------|
 | Next | Passband transmission zeros | High |
 | Next | Repeated-pole residue expansion | High |
-| Next | Converge the full Macchiarella spectral path (order ≥ 4) for high-fidelity N-channel loading | High |
+| Next | Generalize the full spectral path to N-channel (multiplexer) mutual loading | High |
+| Done | Full Macchiarella spectral path converged for the duplexer (Type-I orders 2–8 + Type-II, gate-anchored, 2026-10-03) | — |
 | Later | Butterworth/Elliptic approximation families | Low |
 | Later | Multi-band synthesis (true multi-passband, scope-1) — design doc first | Medium |
 

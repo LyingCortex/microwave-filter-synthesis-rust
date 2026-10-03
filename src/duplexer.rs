@@ -205,7 +205,9 @@ pub enum JunctionType {
     /// Parameters: transformer ratio `n`, susceptance `b0`.
     TypeI { n: f64, b0: f64 },
     /// Type-II: coaxial junction with resonating node.
-    /// Parameter: junction capacitance `c0`.
+    /// Parameter: junction capacitance `c0`, which must be finite and
+    /// positive (enforced by `synthesize`); the extra real reflection zero
+    /// sits at `s = 1/c0`.
     TypeII { c0: f64 },
 }
 
@@ -556,6 +558,17 @@ impl DuplexerSynthesis {
                 "Both Tx and Rx channels must be specified".into(),
             ));
         }
+        // Type-II junction: the resonating-node capacitance c0 must be finite
+        // and positive. A non-positive c0 is physically meaningless and, if
+        // passed silently, corrupts the Type-II reconstruction
+        // (S_TX·S_RX = (c0/2)·(D − N) → 0 or negative) instead of erroring.
+        if let JunctionType::TypeII { c0 } = self.junction {
+            if !c0.is_finite() || c0 <= 0.0 {
+                return Err(MfsError::PreconditionViolation(
+                    "Type-II junction capacitance c0 must be finite and positive".into(),
+                ));
+            }
+        }
 
         // Step 1: Synthesize Tx and Rx filters independently
         let tx_spec = self.build_spec(self.tx_order, self.tx_rl, &self.tx_zeros)?;
@@ -653,9 +666,8 @@ impl DuplexerSynthesis {
         // too; n0 = −1 has |n0| = 1, so S11 = n0·N/D = −N/D needs no extra
         // phase in the response.
         if let JunctionType::TypeII { c0 } = self.junction {
-            if c0 > 0.0 {
-                n_roots.push(Complex64::new(1.0 / c0, 0.0));
-            }
+            // c0 > 0 is guaranteed by the precondition check in synthesize().
+            n_roots.push(Complex64::new(1.0 / c0, 0.0));
         }
         let n_poly_fixed = ComplexPolynomial::from_complex_roots(&n_roots)?;
 
@@ -1254,6 +1266,26 @@ mod tests {
         assert_eq!(result.rx.order(), 4);
 
         Ok(())
+    }
+
+    #[test]
+    fn type2_junction_rejects_nonpositive_capacitance() {
+        // c0 ≤ 0 is physically meaningless and, if passed silently, corrupts
+        // the Type-II reconstruction (S_TX·S_RX = (c0/2)(D − N) → 0 or
+        // negative) instead of erroring.
+        for c0 in [0.0_f64, -1.0, f64::NAN] {
+            let err = DuplexerSynthesis::new()
+                .tx(4, 22.0, 14.9e9, 15.1e9)
+                .rx(4, 22.0, 15.15e9, 15.35e9)
+                .junction(JunctionType::TypeII { c0 })
+                .full_iteration(true)
+                .synthesize()
+                .expect_err("non-positive c0 must be rejected");
+            assert!(
+                matches!(err, MfsError::PreconditionViolation(_)),
+                "expected PreconditionViolation, got: {err:?}"
+            );
+        }
     }
 
     #[test]

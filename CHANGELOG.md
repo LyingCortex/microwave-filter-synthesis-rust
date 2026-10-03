@@ -170,6 +170,20 @@
   so an iteration that overflowed to NaN read as converged with
   `max_delta = 0.0`. Both solvers now also require all roots to be finite
   before the early return.
+- **Type-II junction rejects non-positive `c0`** with a typed
+  `PreconditionViolation`. A zero/negative resonating-node capacitance is
+  physically meaningless and would otherwise silently corrupt the Type-II
+  reconstruction (`S_TX·S_RX = (c0/2)(D − N)` → zero or negative product).
+  Regression: `type2_junction_rejects_nonpositive_capacitance`.
+- **The faer backward-residual gate's accept predicate is unit-tested
+  directly** (`faer_gate_accepts_predicate`). After the balancing fix, no
+  production input reaches the gate's rejection path, so the wiring that
+  turns a non-finite / over-threshold root set into a `NumericalFailure`
+  (and the adaptive chain's fall-through on it) needed its own lock.
+- **Stale "full path not converged at order ≥ 4" documentation reconciled**
+  across `docs/architecture.md` (Known Limitations #4 + roadmap),
+  `docs/internal/todo.md`, and `docs/continuation-plan.md` (baseline, known
+  limitations, B2).
 
 ### Changed (refactor)
 

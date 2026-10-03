@@ -20,7 +20,7 @@ carries *what to do next and how to know it is done*.
 | Area | Shipped state | Fidelity class |
 |---|---|---|
 | Two-port synthesis | Full generalized-Chebyshev pipeline, orders 2–8 fixture-anchored, 10–30 numerically stable | High (publication-anchored) |
-| Duplexer | Macchiarella–Tamiazzo **simplified** frequency-offset perturbation; full spectral path exists behind `DuplexerSynthesis::full_iteration(true)` but is **untested and non-convergent at order ≥ 4** | Medium (model is approximate; antenna-RL quasi-equiripple not asserted) |
+| Duplexer | Simplified frequency-offset perturbation (default); full Macchiarella–Tamiazzo spectral path behind `DuplexerSynthesis::full_iteration(true)` **converges at Type-I orders 2–8 and Type-II (incl. the §VI degree-40 GSM design), all gate-anchored** (2026-10-03) | High (publication-anchored, full path) / Medium (simplified default) |
 | Multiplexer (N-channel) | Independent per-channel synthesis + under-relaxed perturbation; shared `synthesis::recover_channel_design`; response is a **geometric-mean magnitude model**, not an (N+1)-port solve | Medium (channels are valid passband filters; isolation/antenna values are model approximations) |
 | Multi-band | **Mapping layer in place** — `freq` supports all four prototype families plus `MultiBandMapping` (E3/C1, 2026-09-29); no design doc, no multi-band approximation, no synthesis path | — |
 | Optimization | LM `tune_matrix` / `extract_matrix` (hand-rolled Gaussian elimination, fixed 1e-7 FD Jacobian, topology frozen to template); 3 lib unit tests at order 3–4 | Low (works on small well-posed cases; no integration coverage, no CLI/Python surface) |
@@ -32,9 +32,10 @@ Known limitations that gate the areas below (full list in
    rejects with `NotImplemented`.
 2. **Repeated poles** — `residues/expansion.rs` returns `NotImplemented`.
 3. ~~**HighPass / BandStop mappings**~~ — implemented in `freq` (E3, 2026-09-29: `HighPassMapping`, `BandStopMapping` with full forward + inverse and singular-point clamps).
-4. **N-channel mutual-loading fidelity** — simplified perturbation does not
-   converge to independent synthesis for well-separated channels; the full
-   spectral path is not converged at order ≥ 4.
+4. **N-channel mutual-loading fidelity** — the duplexer's full spectral path
+   converges (Type-I orders 2–8, Type-II, both gate-anchored; 2026-10-03), but
+   it is not yet generalized to N channels (multiplexer B2), and the
+   multiplexer's default still uses the simplified under-relaxed perturbation.
 
 ---
 
@@ -49,13 +50,14 @@ return loss instead of the simplified perturbation's approximation.
 - Simplified path (default): `src/duplexer.rs` — frequency-offset perturbation
   loop; channels converge to valid passband filters; antenna S11 is the
   geometric-mean model `√(|S11_tx|·|S11_rx|)`.
-- Full path: `compute_n_polynomial` → `solve_scaling_constants` →
-  `spectral_factor` (cepstrum + balanced-companion fallback in
-  `src/spectral.rs`) → `compute_s_product` → `assign_roots`. Wired behind
+- Full path: fixed reflection-zero `N` (channel F zeros + the Type-II real
+  zero) → `solve_scaling_constants` → `spectral_factor` (cepstrum +
+  Parlett–Reinsch-balanced faer companion fallback in `src/spectral.rs`) →
+  `compute_s_product` → `assign_roots`. Wired behind
   `DuplexerSynthesis::full_iteration(true)` (default `false`).
-  **No test, example, or bench anywhere invokes it.** It returns a typed
-  error at order ≥ 4 and exhausts iterations at order 2
-  (`docs/architecture.md` Known Limitations #5).
+  **Converged and gate-anchored at Type-I orders 2–8 and Type-II
+  (including the §VI degree-40 GSM design)** — see the D1–D4 items below and
+  `duplexer::tests::full_iteration_*`.
 
 ### Work items (ordered)
 
@@ -339,8 +341,8 @@ Macchiarella–Tamiazzo iteration loop shared by duplexer and multiplexer.
    unitary-check test — for lossless inputs the (N+1)×(N+1) S-matrix is
    power-conserving to 1e-9 at sampled frequencies.
 2. **B2 — Generalize the full spectral path to N channels.** Port
-   `duplexer.rs`'s full-path helpers (`compute_n_polynomial` et al.) into a
-   shared module (candidate: `src/synthesis/macchiarella.rs`) so the
+   `duplexer.rs`'s full-path helpers (`solve_scaling_constants`, `compute_s_product`,
+   etc.) into a shared module (candidate: `src/synthesis/macchiarella.rs`) so the
    N=2 duplexer and the N-channel multiplexer share one iteration loop.
    This subsumes the todo.md item "Fold the duplexer synthesis into the
    multiplexer (N=2)". Must happen *after* D3 — porting a non-convergent

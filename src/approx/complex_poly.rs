@@ -773,7 +773,7 @@ impl ComplexRootSolver for FaerRootSolver {
         // Failing here lets `AdaptiveRootSolver` fall through to the iterative
         // methods instead of silently shipping bad roots.
         let max_backward = max_backward_residual(&normalized, &roots);
-        if roots_contain_non_finite(&roots) || max_backward > FAER_BACKWARD_RESIDUAL_TOL {
+        if !faer_gate_accepts(&roots, max_backward) {
             return Err(MfsError::NumericalFailure(format!(
                 "faer companion-matrix eigenvalues failed the backward-residual \
                  check for degree {degree} (max backward residual: {max_backward:.2e})"
@@ -782,6 +782,13 @@ impl ComplexRootSolver for FaerRootSolver {
 
         Ok(roots)
     }
+}
+
+/// The backward-residual gate's accept predicate, isolated so its wiring can
+/// be unit-tested without constructing an input that defeats balancing.
+/// Accepts a finite root set whose backward residual clears the threshold.
+fn faer_gate_accepts(roots: &[ComplexCoefficient], max_backward: f64) -> bool {
+    !roots_contain_non_finite(roots) && max_backward <= FAER_BACKWARD_RESIDUAL_TOL
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1307,6 +1314,26 @@ mod tests {
             bad > good * 1e6,
             "garbage residual {bad:.3e} should exceed good residual {good:.3e} by orders of magnitude"
         );
+    }
+
+    /// The gate's accept predicate, tested directly. This locks the wiring
+    /// that turns a bad solve (non-finite roots, or backward residual over
+    /// the threshold) into a rejection, without depending on any particular
+    /// input defeating the companion-matrix balancing.
+    #[test]
+    fn faer_gate_accepts_predicate() {
+        let finite: Vec<ComplexCoefficient> =
+            vec![ComplexCoefficient::new(1.0, 0.0), ComplexCoefficient::new(-2.0, 0.0)];
+        let non_finite: Vec<ComplexCoefficient> =
+            vec![ComplexCoefficient::new(f64::NAN, 0.0), ComplexCoefficient::new(-2.0, 0.0)];
+        // Finite roots with a residual at or under the threshold → accept.
+        assert!(faer_gate_accepts(&finite, FAER_BACKWARD_RESIDUAL_TOL * 0.5));
+        assert!(faer_gate_accepts(&finite, FAER_BACKWARD_RESIDUAL_TOL));
+        // Finite roots with a residual over the threshold → reject (garbage
+        // eigenvalues, the silent corruption the gate exists to catch).
+        assert!(!faer_gate_accepts(&finite, FAER_BACKWARD_RESIDUAL_TOL * 2.0));
+        // A non-finite root set → reject even with a perfect residual.
+        assert!(!faer_gate_accepts(&non_finite, 0.0));
     }
 
     /// Wide-root-spread regression: roots spanning 21 decades (1e-10..1e10)
