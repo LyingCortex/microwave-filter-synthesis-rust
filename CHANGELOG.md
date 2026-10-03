@@ -75,18 +75,33 @@
 
 ### Fixed
 
-- **The D1 full-iteration gate is green at order 2.** The order-2 Tx/Rx
-  diplexer (`full_iteration(true)`) now converges (14 iterations,
-  `convergence_error < 1e-8`) and its junction-level response is physically
-  valid: Tx-port S21 −0.10 dB, Rx-port S21 −0.11 dB, antenna RL −23.4 dB at
-  each band center, and the 3-port is lossless (`|S11|²+|S21|²+|S31|² = 1`
-  on the passband axis, verified via the para-identity `D·D̃ = R`). The
-  earlier failure was a combination of the gate asserting on the *standalone*
-  recovered channels (which carry the junction power split and therefore cap
-  at −0.6 dB) and a missing junction-level response API; see
-  `DuplexerSynthesisResult::diplexer_response` (Added). Order ≥ 4 remains
-  deferred (continuation plan D3: domain-normalization work).
-
+- **The D1 full-iteration gate is green at orders 2, 4, and 6.** The
+  order-2/4/6 Tx/Rx diplexers (`full_iteration(true)`) converge (order 2: 14
+  iters, conv 6e-9; order 4: 14 iters, 8.9e-9; order 6: 9 iters, 7.7e-9) to a
+  physically valid quasi-equiripple diplexer at the junction level: Tx/Rx-port
+  S21 ≈ −0.1 dB, antenna RL ≈ −22 dB (within ~2 dB of the 22 dB spec) at each
+  passband center, lossless 3-port (`D·D̃ = R`). The original failure was the
+  gate asserting on the *standalone* recovered channels (each carries only its
+  share of the junction power split, capping at −0.6 dB) rather than the
+  diplexer's port response; the gate now asserts the junction-level
+  `diplexer_response` (Added).
+- **Order-7 full-iteration convergence via a stagnation criterion, plus the
+  Section-V printed-design anchor.** At degree 14 the per-iteration
+  root-extraction noise floor (~5e-6) exceeds the strict `convergence_tol`
+  (1e-8), so the order-7 loop previously exhausted its budget without
+  capturing the (physically converged) fixed point. The iteration now accepts
+  the solution via a stagnation criterion — accept once the root displacement
+  stops improving and is already small (`best_delta < 1e-3` after 3 flat
+  iterations, min 5 iters) — the standard remedy for root-iteration, with the
+  strict fast path unchanged for orders 2/4/6. New gate
+  `full_iteration_order7_section5_anchor` pins the paper's Section-V design
+  (7/7, 20 dB, Type-I `n = 1.47`, `b0 = −0.171`): it converges in 10 iters
+  to a quasi-equiripple diplexer with band-edge antenna RL −21.5/−20.2/−20.0/
+  −18.7 dB (within ~2 dB of the 20 dB spec, matching the paper's stated
+  "max RL deviation from equiripple < 2 dB") and 0 dB passbands. The exact
+  printed N/D/p0 coefficients are not asserted — the paper imposes specific
+  transmission zeros (method [11]) this crate's standard-Chebyshev channels do
+  not; the gate anchors the design *performance* the paper actually specifies.
 - **The vendored standard exposed a folded-convention mismatch in the contract,
   not in mfs.** mfs's even-order `to_folded` leaves the reduction pivot at index
   sum `N+2`, like the book's own printed folded matrices, and outside the

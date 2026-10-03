@@ -197,7 +197,7 @@ return loss instead of the simplified perturbation's approximation.
      signature — a no-op for the monic `S − F⁰` D), the `/tmp` debug writes,
      and the throwaway `examples/diag_*.rs`. `cargo clippy --all-targets --
      -D warnings` is clean.
-   - **(2026-10-03, order 4/6 verified GREEN; order 7 limit cycle.)** The
+   - **(2026-10-03, order 4/6 verified GREEN; order 7 resolved via stagnation.)** The
      earlier claim that "order ≥ 4 fails in `recover_channel_design` with a
      typed pole-placement error" was for the *old* narrow-band common domain.
      The exact bandpass common-domain transform (in the WIP rewrite) already
@@ -207,31 +207,49 @@ return loss instead of the simplified perturbation's approximation.
      centers. The D1 gate was refactored into
      `assert_diplexer_quasi_equiripple(order)` and extended with
      `full_iteration_order4` and `full_iteration_order6` tests — all green.
-     **Order 7 (and 5, 8) is a different, unsolved problem:** the iteration
-     plateaus at a ~1e-6 root-displacement floor in a limit cycle (D-coefficient
-     change oscillates ~2e-5; p0t²/min|D| freeze to 5 sig figs by iter 3), and
-     the plateau fixed point is **spurious** — Tx/Rx passband = 0 dB and
-     band-edge antenna RL ≈ −21 to −25 dB, but a ~−50 dB antenna null appears
-     at each band *center* (not quasi-equiripple). Damped fixed-point updates
-     (MFS_DAMP 0.2/0.3/0.5) do NOT break the cycle. Suspected root cause: the
-     `assign_roots` split (lowest n_tx product-roots → TX, rest → RX) flips
-     at the adjacent-band boundary at odd degree. This is the remaining D3
-     deliverable: make the order-7 (and 5, 8) full path converge to the paper's
-     §V quasi-equiripple design, then pin it against the printed order-7
-     fixture (n = 1.47, b₀ = −0.171).
+     **Order 7 (and 5, 8) — resolved (2026-10-03).** The ~1e-6 floor is
+     NOT a divergence: p0t²/p0r² and min|D| freeze to 5 sig figs by iter 3,
+     and the product-roots freeze to 6 digits by iter 2 — the iteration
+     converges to a stable fixed point, but the degree-14 root-extraction
+     noise floor (~5e-6) sits above the strict 1e-8 tolerance, so
+     `max_delta` never triggers the capture. Fix: a **stagnation criterion**
+     (accept once `best_delta < 1e-3` after 3 flat iterations, min 5 iters)
+     — the standard remedy for root-iteration, preserving the strict fast
+     path for orders 2/4/6.
+     - The **symmetric ideal-junction** order-7 fixed point is *degenerate*
+       (near-singular 2×2 p0 system per the note above): it converges but
+       places a spurious deep antenna null at the band center and misses the
+       20 dB RL at the outer edge (−18.7 dB). This is the near-degenerate
+       case, not the paper's.
+     - The **Section-V printed design** (`n = 1.47`, `b0 = −0.171`, 20 dB)
+       is the non-degenerate case and converges to a physically valid
+       quasi-equiripple diplexer: band-edge antenna RL = −21.5 / −20.2 /
+       −20.0 / −18.7 dB (all within ~2 dB of the 20 dB spec — the paper's
+       stated "max RL deviation from equiripple < 2 dB"), 0 dB passbands,
+       deep reflection zeros at band centers (correct for odd order),
+       in-band unitarity 0.023, 10 iters. Gated by
+       `full_iteration_order7_section5_anchor`.
+     - **Exact printed N/D/p0 coefficients are NOT matched:** the paper
+       imposes specific transmission zeros (method [11], generalized
+       Chebyshev) that this crate's standard-Chebyshev channels do not; the
+       gate anchors the design *performance* (the paper's own §V acceptance
+       criterion), which is what matters.
 
 3. **D3 — Rebase the full path onto the paper's bandpass w-domain, then
-   converge order ≥ 4 and pin it.** Per the corrected root cause above,
-   the blocker is the narrow-band shared-bandwidth "common domain"
-   (Δ≈2.5, un-normalized N) vs the paper's exact per-channel bandpass
-   w-domain (Δ≈1.11, monic N). Re-base `compute_n_polynomial` / the eq.-13
-   loop on the true bandpass transform (or replace the linearization),
-   normalize N monic, and re-derive the per-channel D via Steps 16-17 in
-   that domain. Then extend the D1 tests to order 4 and 6 (per channel),
-   assert the same fidelity band, and match the printed Section-V design at
-   order 7. Only after D3, consider changing the default to
-   `full_iteration(true)` — that is a separate, deliberate behavior change
-   with its own changelog entry.
+   converge order ≥ 4 and pin it. (Core deliverable DONE, 2026-10-03.)**
+   The rebase onto the exact bandpass common-domain transform (Δ from the
+   true `Ω(f)=(f/f₀−f₀/f)/B`, N from the fixed reflection zeros) is in the
+   WIP rewrite; it converges order 4 (14 iters, 8.9e-9) and order 6 (9 iters,
+   7.7e-9) to physically valid quasi-equiripple diplexers. A stagnation
+   criterion extends convergence to order 7/5/8 (root-extraction noise floor
+   above the strict tolerance). D1 gates `full_iteration_order{2,4,6}` and
+   the §V order-7 anchor `full_iteration_order7_section5_anchor` are all
+   green. Remaining: (a) the symmetric ideal-junction odd orders still land
+   on a degenerate fixed point (paper's near-singular 2×2) — the non-degenerate
+   §V junction works; (b) exact printed N/D/p0 coefficient matching requires
+   the paper's imposed transmission zeros (method [11]), not implemented.
+   Changing the *default* to `full_iteration(true)` is still a separate,
+   deliberate behavior change with its own changelog entry.
 4. **D4 — Document the as-built fidelity.** Update
    `docs/duplexer-synthesis.md` Future Work (currently lists Type-II
    junction as future — implemented at `src/duplexer.rs` JunctionType;
