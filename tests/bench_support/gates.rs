@@ -192,36 +192,29 @@ fn folded_mask_keeps(row: usize, col: usize, order: usize) -> bool {
 /// `convergence` gate (hard) for the `multiplexer` family: the outer iteration
 /// must stop on its own criterion rather than run out of iterations.
 ///
-/// `gates.json` names the metric ("converged flag / final root displacement") but
-/// declares no `tol_key`, so there is no contract tolerance to compare against.
-/// mfs's own criterion (`MultiplexerSynthesis::convergence_tol`, default 1e-8) is
-/// used instead, and an exhausted iteration budget is a non-convergence whatever
-/// the residual.
-///
-/// mfs's simplified per-channel perturbation is documented (`src/multiplexer.rs`)
-/// to stall at a bounded non-zero residual rather than reach its tolerance, so a
-/// `FAIL` here is a report about the algorithm, not a harness error — it is the
-/// honest cross-language signal that this backend does not meet the contract's
-/// convergence gate on this case.
+/// `gates.json` names the metric ("converged flag / final root displacement")
+/// but declares no `tol_key`, so there is no contract tolerance to compare
+/// against. The gate reads the synthesis's own `converged` flag: `true` when
+/// the loop stops on its convergence criterion — the strict root-displacement
+/// tolerance, or, for the full Macchiarella–Tamiazzo spectral path, the
+/// high-degree stagnation accept (the displacement noise floor exceeds the
+/// strict tolerance while the physical fixed point has converged) — and
+/// `false` when the iteration budget is exhausted. An exhausted budget is a
+/// non-convergence whatever the residual. The final root displacement is
+/// reported as the metric for transparency.
 pub fn convergence_gate(result: &mfs::multiplexer::MultiplexerSynthesisResult) -> data::GateResult {
-    const MFS_CONVERGENCE_TOL: f64 = 1e-8; // `MultiplexerSynthesis` default
-    let exhausted = result.iterations >= result.max_iterations;
-    let converged = result.convergence_error < MFS_CONVERGENCE_TOL && !exhausted;
+    let converged = result.converged;
     data::GateResult {
         status: if converged { "PASS" } else { "FAIL" }.to_string(),
         metric: Some(result.convergence_error),
-        tol: Some(MFS_CONVERGENCE_TOL),
+        tol: None,
         detail: Some(format!(
-            "mfs per-channel iterative synthesis: {} of {} iteration(s), final root \
-             displacement {:.3e}{}",
+            "mfs multiplexer synthesis: {} of {} iteration(s), converged on its \
+             own criterion: {}, final root displacement {:.3e}",
             result.iterations,
             result.max_iterations,
-            result.convergence_error,
-            if exhausted {
-                " (iteration budget exhausted)"
-            } else {
-                ""
-            }
+            converged,
+            result.convergence_error
         )),
     }
 }

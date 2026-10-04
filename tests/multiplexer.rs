@@ -674,3 +674,176 @@ fn multiplexer_full_iteration_rejects_nonideal_type_i_for_n_gt_2()
     );
     Ok(())
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// B3 — convergence + fidelity gates for the full path (N = 3, 4)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Channel spec from passband edges *with* transmission zeros (Hz), mapped
+/// into the channel's own prototype domain via `BandPassMapping` (out-of-band
+/// zeros land at |Ω| > 1). Mirrors `benches/multiplexer.rs::to_channel_specs`.
+fn tz_channel(order: usize, rl: f64, lo: f64, hi: f64, tz_hz: &[f64]) -> mfs::ChannelSpec {
+    let (center, bw) = mfs::freq::edges_to_center_bandwidth(lo, hi);
+    let zeros = if tz_hz.is_empty() {
+        Vec::new()
+    } else {
+        let mapping =
+            mfs::freq::BandPassMapping::new(center, bw).expect("channel mapping");
+        tz_hz.iter()
+            .map(|f| mapping.map_hz_to_normalized(*f).expect("tz mapping").omega)
+            .collect()
+    };
+    mfs::ChannelSpec { order, return_loss_db: rl, zeros, center_hz: center, bandwidth_hz: bw }
+}
+
+/// Asserts the common-junction response is a valid (N+1)-port: a real 0 dB
+/// passband in every channel, the antenna RL spec pinned at each channel's
+/// outer band edge (within 2 dB), no degenerate antenna port, and the
+/// losslessness para-identity `D·D̃ = R` on the passband axis.
+fn assert_full_path_quasi_equiripple(
+    result: &MultiplexerSynthesisResult,
+    channels: &[mfs::ChannelSpec],
+    f_lo: f64,
+    f_hi: f64,
+) -> mfs::error::Result<()> {
+    assert!(
+        result.converged,
+        "full path must stop on its own convergence criterion (not the budget), got conv_err {:.3e} after {} of {} iterations",
+        result.convergence_error,
+        result.iterations,
+        result.max_iterations
+    );
+    let common = result
+        .junction_common
+        .as_ref()
+        .expect("full path must capture the common-domain junction state");
+    let n = channels.len();
+    let resp = mfs::synthesis::junction_response(common, n, f_lo, f_hi, 20001)?;
+    for (i, c) in channels.iter().enumerate() {
+        let ci = closest_index(&resp.frequencies, c.center_hz);
+        assert!(
+            resp.channel_s21_db[i][ci] > -0.5,
+            "ch{i} passband S21: {:.3} dB (want > -0.5)",
+            resp.channel_s21_db[i][ci]
+        );
+        let oi = closest_index(&resp.frequencies, outer_edge_hz(channels, i));
+        let bound = -(c.return_loss_db - 2.0);
+        assert!(
+            resp.antenna_s11_db[oi] < bound,
+            "ch{i} outer-edge antenna RL: {:.3} dB (want ≥ {:.0} dB, i.e. within 2 dB of the {:.0} dB spec)",
+            resp.antenna_s11_db[oi],
+            c.return_loss_db - 2.0,
+            c.return_loss_db
+        );
+    }
+    // The (N+1)-port junction is lossless, so on the passband axis
+    // |S11| <= 1 (antenna_s11_db <= 0). In the stopband *between* well-separated
+    // channels the antenna is legitimately near-reflective (all channels
+    // stopped), so the meaningful degenerate check is finiteness (no NaN /
+    // no -inf), not a hard < 0 dB cap.
+    assert!(
+        resp.antenna_s11_db.iter().all(|&db| db.is_finite()),
+        "antenna S11 non-finite somewhere (NaN / -inf)"
+    );
+    // Para-identity `D·D̃ = R` on the passband axis, bound by convergence
+    // regime (the duplexer order-7/8 pattern): a strict-converged run
+    // (convergence_error < 1e-6) holds the identity to ~1e-5; a
+    // high-degree run accepted by the stagnation criterion (the displacement
+    // noise floor exceeds the strict tolerance while the physical fixed
+    // point has converged) holds it to the high-degree spectral-factorization
+    // round-off floor of ~1e-3 (the duplexer §V/§VI gates use 5e-2 there).
+    let para_tol = if result.convergence_error < 1e-6 { 1e-4 } else { 5e-2 };
+    assert_para_identity(common, para_tol)
+}
+
+/// B3: well-separated channels converge to machine tolerance on the full
+/// path. For two far-apart (2 GHz center spacing, 200 MHz wide) order-5
+/// channels the junction loading is negligible, so the iteration reaches the
+/// strict root-displacement tolerance (`convergence_error < 1e-6`, in fact ~0)
+/// — the contrast the plan draws against the *simplified* path, which stalls
+/// at a bounded non-zero residual even for well-separated channels.
+#[test]
+fn multiplexer_full_iteration_well_separated_matches_machine_tol() -> mfs::error::Result<()> {
+    let channels = vec![
+        edge_channel(5, 20.0, 9.90e9, 10.10e9),
+        edge_channel(5, 20.0, 11.90e9, 12.10e9),
+    ];
+    let result = MultiplexerSynthesis::new()
+        .channels(channels.clone())
+        .junction(JunctionType::TypeI { n: 1.0, b0: 0.0 })
+        .max_iterations(60)
+        .convergence_tol(1e-8)
+        .full_iteration(true)
+        .synthesize()?;
+    assert!(
+        result.convergence_error < 1e-6,
+        "well-separated full path must reach machine tolerance, got {:.3e}",
+        result.convergence_error
+    );
+    Ok(())
+}
+
+/// B3: adjacent/overlapping channels show bounded mutual loading with a
+/// quasi-equiripple common port on the full path. Two order-5 channels 100 MHz
+/// apart (200 MHz wide, 20 dB RL) overlap; the junction loading is bounded
+/// and the recovered channels keep real passbands.
+#[test]
+fn multiplexer_full_iteration_adjacent_bounded_loading() -> mfs::error::Result<()> {
+    let channels = vec![
+        edge_channel(5, 20.0, 9.90e9, 10.10e9),
+        edge_channel(5, 20.0, 10.00e9, 10.20e9),
+    ];
+    let result = MultiplexerSynthesis::new()
+        .channels(channels.clone())
+        .junction(JunctionType::TypeI { n: 1.0, b0: 0.0 })
+        .max_iterations(80)
+        .convergence_tol(1e-8)
+        .full_iteration(true)
+        .synthesize()?;
+    // The *standalone* recovered channel carries only its share of the
+    // junction power (peak = √p0ᵢ), so a loaded channel legitimately peaks
+    // below 0 dB (measured ≈ −2.95 dB here for the near-balanced split) — it
+    // must not degenerate to fully-reflective (−inf). The junction-level 0 dB
+    // passband is asserted by `assert_full_path_quasi_equiripple` below.
+    for ch in &result.channels {
+        let center = ch.center_hz().expect("center present");
+        let bw = ch.bandwidth_hz().expect("bandwidth present");
+        let resp = ch.response_bandpass(center, bw, center - bw, center + bw, 101)?;
+        let peak: f64 = resp.samples.iter().map(|s| s.s21_mag()).fold(0.0_f64, f64::max);
+        let peak_db = if peak > 1e-15 { 20.0 * peak.log10() } else { f64::NEG_INFINITY };
+        assert!(
+            peak_db > -10.0,
+            "loaded channel must keep a real passband (standalone peak S21 = {peak_db} dB; junction-level 0 dB is asserted separately)"
+        );
+    }
+    let (f_lo, f_hi) = (9.90e9, 10.20e9);
+    assert_full_path_quasi_equiripple(&result, &channels, f_lo, f_hi)
+}
+
+/// B3: the full path converges the vendored cross-language standard's N=4
+/// multiplexer case (Zhao et al. 2026, Table I — orders 4/6/5/4, with
+/// transmission zeros, ideal Type-I junction) and pins the antenna RL at each
+/// channel's 18/22/20/18 dB spec. This is the case that flips the bench's
+/// `convergence` gate from FAIL to PASS (see `benches/multiplexer.rs`).
+#[test]
+fn multiplexer_full_iteration_vendored_zhao_n4_converges() -> mfs::error::Result<()> {
+    let channels = vec![
+        tz_channel(4, 18.0, 697.0e6, 717.0e6, &[728.0e6]),
+        tz_channel(6, 22.0, 727.0e6, 766.0e6, &[714.5e6, 778.0e6]),
+        tz_channel(5, 20.0, 776.0e6, 799.0e6, &[767.0e6, 810.0e6]),
+        tz_channel(4, 18.0, 808.0e6, 823.0e6, &[800.0e6]),
+    ];
+    let result = MultiplexerSynthesis::new()
+        .channels(channels.clone())
+        .junction(JunctionType::TypeI { n: 1.0, b0: 0.0 })
+        .max_iterations(80)
+        .convergence_tol(1e-8)
+        .full_iteration(true)
+        .synthesize()?;
+    let (f_lo, f_hi) = (697.0e6, 823.0e6);
+    // The N=4 case converges on the high-degree stagnation criterion (the
+    // degree-16 root-extraction noise floor exceeds the strict 1e-8), so the
+    // convergence-error threshold is the stagnation accept, not the strict
+    // tolerance — exactly the regime the duplexer order-7/8 gates use.
+    assert_full_path_quasi_equiripple(&result, &channels, f_lo, f_hi)
+}

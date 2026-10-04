@@ -36,6 +36,11 @@ pub struct MultiplexerSynthesisResult {
     pub iterations: usize,
     /// Final convergence error (max root displacement across all channels).
     pub convergence_error: f64,
+    /// `true` when the iteration stopped on its own convergence criterion
+    /// (strict tolerance, or the high-degree stagnation accept for the full
+    /// spectral path) rather than exhausting the iteration budget. An
+    /// exhausted budget is a non-convergence whatever the residual.
+    pub converged: bool,
     /// The junction parameters used.
     pub junction: JunctionType,
     /// Per-channel S-polynomial roots (auxiliary polynomial).
@@ -187,6 +192,7 @@ impl MultiplexerSynthesis {
                 channels,
                 iterations: state.iterations,
                 convergence_error: state.convergence_error,
+                converged: state.converged,
                 junction: self.junction,
                 s_roots: state.s_roots,
                 max_iterations: self.max_iterations,
@@ -245,6 +251,7 @@ impl MultiplexerSynthesis {
 
         let mut iterations = 0;
         let mut convergence_error = f64::INFINITY;
+        let mut converged = false;
 
         // (d) Iterate: simplified perturbation, N-channel version. The loading
         // correction for channel i accumulates contributions from every other
@@ -315,6 +322,7 @@ impl MultiplexerSynthesis {
             s_roots = new_roots;
             convergence_error = max_delta;
             if max_delta < self.convergence_tol {
+                converged = true;
                 break;
             }
         }
@@ -338,6 +346,7 @@ impl MultiplexerSynthesis {
             channels,
             iterations,
             convergence_error,
+            converged,
             junction: self.junction,
             s_roots,
             max_iterations: self.max_iterations,

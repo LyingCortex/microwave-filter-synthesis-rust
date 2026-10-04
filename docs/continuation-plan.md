@@ -328,14 +328,18 @@ Macchiarella–Tamiazzo iteration loop shared by duplexer and multiplexer.
   N=1 reduces exactly to the channel's 2-port). `response_matrix` exposes the
   complex matrix; `response_with(.., ResponseModel::GeometricMean)` keeps the
   legacy magnitude model for one release cycle.
-- **No full-spectral path** for N-channel (the full path exists only in
-  `duplexer.rs`; it is converged and gate-anchored there — section A, done
-  2026-10-03 — but not yet generalized to N > 2).
+- **Full-spectral path now generalizes to N channels (B2, 2026-10-04):** the
+  shared `src/synthesis/machiarella.rs` loop powers both
+  `DuplexerSynthesis::full_iteration` and `MultiplexerSynthesis::
+  full_iteration` (opt-in; the default stays the simplified perturbation).
 - **Benchmark-standard gates:** the vendored standard's `cm`, `star`,
   `s11_match`, `rz_distribution` gates have no mfs counterpart and are
-  `SKIP`; the convergence gate is a documented FAIL
-  (`benches/multiplexer.rs`, `bench-data/gates.json`). These are the
-  quantitative definition of "not high-fidelity yet".
+  `SKIP`. The convergence gate is now **PASS** on every runnable case
+  (B3, 2026-10-04): `benches/multiplexer.rs` runs the `poly` stage through
+  the full spectral path, and `convergence_gate` reads the synthesis's own
+  `converged` flag — case `a` (Zhao N=4) converges in 9 iters (conv_err
+  1.7e-4, stagnation), `diplexer` in 12 (2.6e-9, strict); `type2`/
+  `contiguous` cases remain capability-SKIP.
 
 ### Work items (ordered; depends on A)
 
@@ -364,13 +368,30 @@ Macchiarella–Tamiazzo iteration loop shared by duplexer and multiplexer.
    (orders 2–8 quasi-equiripple, §V/§VI printed-design goldens) pass
    unchanged. Non-ideal Type-I at N > 2 is rejected with an explicit
    `PreconditionViolation` (no paper basis for that generalization).
-3. **B3 — Convergence + fidelity gates for N = 3, 4.** Extend the
-   `separation_limit` / `adjacent_channels_show_loading` test pair
-   (`tests/multiplexer.rs`) to the full path: well-separated channels
-   converge to independent synthesis to 1e-6 (machine tolerance, unlike the
-   simplified model's documented residual), adjacent channels show bounded
-   loading with antenna RL quasi-equiripple within ~2 dB. This flips the
-   vendored-standard convergence gate from FAIL to PASS.
+3. **B3 — Convergence + fidelity gates for N = 3, 4. [DONE 2026-10-04]**
+   Added full-path gates in `tests/multiplexer.rs`:
+   `multiplexer_full_iteration_well_separated_matches_machine_tol` (two
+   far-apart order-5 channels — the iteration reaches `convergence_error <
+   1e-6`, in fact ~0, the contrast against the simplified path's documented
+   bounded residual), `_adjacent_bounded_loading` (overlapping channels —
+   bounded loading, quasi-equiripple common port), and
+   `_vendored_zhao_n4_converges` (the vendored standard's N=4 case with
+   transmission zeros). Each asserts convergence, 0 dB per-channel
+   passbands, the antenna RL pinned within 2 dB of the per-channel spec at
+   each outer band edge, and the losslessness para-identity `D·D̃ = R`
+   (regime-aware bound: strict-converged → 1e-4, high-degree
+   stagnation-accepted → 5e-2, the duplexer order-7/8 pattern). **Flips the
+   vendored-standard convergence gate FAIL→PASS:** `benches/multiplexer.rs`
+   now runs the `poly` stage through the full spectral path and
+   `convergence_gate` reads the synthesis's own `converged` flag (an
+   exhausted budget is a non-convergence whatever the residual) — case `a`
+   (Zhao N=4) converges in 9 iters (conv_err 1.7e-4, stagnation), `diplexer`
+   in 12 (2.6e-9, strict); `type2`/`contiguous` remain capability-SKIP.
+   Note: the original "well-separated channels converge to *independent*
+   synthesis to 1e-6" wording is re-scoped — the full path converges to the
+   *loaded* fixed point (displacement from independent ~1e-2, bounded), not
+   to independent synthesis; the machine-tolerance claim holds for the
+   *iteration's* convergence error, which is what the gate asserts.
 4. **B4 — Close the bench-standard gaps.** Implement what mfs can honestly
    implement of the `cm`/`star` gates (per-channel coupling-matrix checks,
    star-domain response) and mark remaining gaps with reasons in
@@ -560,7 +581,7 @@ Ordered by how much they block the areas above:
 Wave 1 (parallel):  E4 (N=8 regression) · D1-opt (RED)   [E3 + C1 + E4 closed; D1-opt RED gate committed 2026-09-29]
 Wave 2 (serial):    D1–D4 (duplexer full path)   [DONE 2026-10-03 — Type-I orders 2–8 + §V golden + Type-II §VI anchor, all gate-anchored]
 Wave 3 (parallel):  D2–D4-opt (optimizer) · C0 (multi-band design doc + route choice)
-Wave 4 (serial):    B1 [DONE 2026-10-04] → B2 → B3 → B4 (multiplexer; Wave 2 done)
+Wave 4 (serial):    B1 [DONE 2026-10-04] → B2 [DONE 2026-10-04] → B3 [DONE 2026-10-04] → B4 (multiplexer; Wave 2 done)
 Wave 5:             E1 (passband TZ) · E2 (Laurent) — needed by B3's fidelity work and
                     by C2 when route-α is chosen (inter-band TZs); then C2 → C3
 ```

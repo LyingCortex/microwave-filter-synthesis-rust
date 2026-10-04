@@ -142,6 +142,7 @@ pub struct MultiplexerSynthesis {
     junction: JunctionType,
     max_iterations: usize,
     convergence_tol: f64,
+    full_iteration: bool,   // default false (simplified perturbation)
 }
 impl MultiplexerSynthesis {
     pub fn new() -> Self;
@@ -150,6 +151,7 @@ impl MultiplexerSynthesis {
     pub fn junction(mut self, j: JunctionType) -> Self;
     pub fn max_iterations(mut self, n: usize) -> Self;
     pub fn convergence_tol(mut self, tol: f64) -> Self;
+    pub fn full_iteration(mut self, enabled: bool) -> Self; // B2: shared spectral path
     pub fn synthesize(&self) -> Result<MultiplexerSynthesisResult>;
 }
 
@@ -157,8 +159,11 @@ pub struct MultiplexerSynthesisResult {
     pub channels: Vec<FilterDesign>,
     pub iterations: usize,
     pub convergence_error: f64,
+    pub converged: bool,             // B3: stopped on own criterion, not the budget
     pub junction: JunctionType,
     pub s_roots: Vec<Vec<Complex64>>,   // per-channel S-polynomial roots
+    pub max_iterations: usize,
+    pub junction_common: Option<JunctionCommon>, // B2: full-path common-domain N/D/Pt/p0²
 }
 ```
 
@@ -320,11 +325,14 @@ not asserted (approximate model / tolerance).
    returns the full complex (N+1)×(N+1) S-matrix; it is unitary and
    reciprocal for lossless channel filters and reduces exactly to the channel's
    own 2-port S-matrix at N=1 (gate tests in `src/multiplexer.rs`).
-5. ⚠️ **Convergence**: iteration count finite/bounded; under-relaxation prevents
-   divergence for well-separated channels (triplexer/quadruplexer converge).
-   The `s_roots` iteration converges, and (as of 0.5.0, P1) the reconstructed
-   E/F from it is consumed by the output matrices; the simplified model's
-   residual is not asserted below machine tolerance (see deviation item 5).
+5. ✅ **Convergence (full path, B3)**: the `full_iteration(true)` path stops
+   on its own criterion for well-separated, adjacent, and the vendored
+   standard's N=4 case — asserted by `multiplexer_full_iteration_*` gates
+   (machine-tolerance `convergence_error` for well-separated channels;
+   quasi-equiripple common port for adjacent). The *default* simplified path
+   still documents its bounded-residual caveat (deviation item 5). The
+   vendored-standard `convergence` gate is now **PASS** on every runnable case
+   (`benches/multiplexer.rs` runs the `poly` stage through the full path).
 6. ✅ **No regression**: `cargo test --no-fail-fast` passes across all
    integration suites, lib tests, and doctests (the lib suite is fully green as
    of 2026-09-28; the "3 pre-existing lib failures" noted at review time are

@@ -131,6 +131,30 @@
   `_quadruplexer_converges` (convergence, 0 dB per-channel passbands,
   antenna RL at the 22 dB spec at each outer band edge, para-identity
   D·D̃ = R) and `_rejects_nonideal_type_i_for_n_gt_2`.
+- **Convergence + fidelity gates for the full path; vendored convergence gate
+  flips FAIL→PASS (B3).** `MultiplexerSynthesisResult` gains a `converged`
+  flag — `true` when the iteration stops on its own convergence criterion
+  (strict root-displacement tolerance, or the high-degree stagnation accept
+  for the full spectral path) rather than exhausting the budget. New
+  `tests/multiplexer.rs` gates assert, on the full path:
+  `multiplexer_full_iteration_well_separated_matches_machine_tol` (far-apart
+  channels reach `convergence_error < 1e-6`, in fact ~0 — the contrast against
+  the simplified path's documented bounded residual),
+  `_adjacent_bounded_loading` (overlapping channels show bounded loading with
+  a quasi-equiripple common port), and `_vendored_zhao_n4_converges` (the
+  vendored cross-language standard's N=4 case, with transmission zeros). Each
+  asserts convergence, 0 dB per-channel passbands, the antenna RL pinned
+  within 2 dB of the per-channel spec at each outer band edge, and the
+  losslessness para-identity D·D̃ = R (regime-aware bound: strict → 1e-4,
+  high-degree stagnation → 5e-2, the duplexer order-7/8 pattern). The
+  `benches/multiplexer.rs` `poly` stage now runs the full spectral path and
+  `convergence_gate` reads the `converged` flag (an exhausted budget is a
+  non-convergence whatever the residual), so the vendored-standard
+  `convergence` gate is **PASS** on every runnable case: `multiplexer_a`
+  (Zhao N=4, 9 iters, conv_err 1.7e-4 via stagnation) and
+  `multiplexer_diplexer` (12 iters, 2.6e-9 strict); `type2`/`contiguous`
+  cases remain capability-SKIP.
+
 
 
 ### Fixed

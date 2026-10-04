@@ -122,6 +122,10 @@ pub struct FullIterationState {
     /// Max root displacement at capture (strict tolerance or stagnation
     /// accept); `INFINITY` when no capture happened.
     pub convergence_error: f64,
+    /// `true` when the loop stopped on its own convergence criterion (strict
+    /// tolerance or the high-degree stagnation accept) rather than exhausting
+    /// the iteration budget.
+    pub converged: bool,
     /// Per-channel converged S roots (prototype domain), in channel order.
     pub s_roots: Vec<Vec<Complex64>>,
     /// Junction polynomials (present when the iteration was captured).
@@ -575,6 +579,7 @@ pub fn run_full_iteration(
         }
     }
 
+    let converged = conv.is_some();
     let common = conv.map(
         |(n_poly_, d_poly_, pts_, p0_sq_)| JunctionCommon {
             n: n_poly_,
@@ -588,6 +593,7 @@ pub fn run_full_iteration(
     Ok(FullIterationState {
         iterations,
         convergence_error,
+        converged,
         s_roots,
         common,
     })

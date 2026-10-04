@@ -252,14 +252,18 @@ fn bench_multiplexer(c: &mut Criterion) {
         let harness = data::harness(&case.qualid);
         let (start_hz, stop_hz) = response_span_hz(case);
 
-        // `poly` analogue: mfs's per-channel iterative synthesis. The contract's
+        // `poly` analogue: mfs's per-channel iterative synthesis, run through
+        // the FULL Macchiarella–Tamiazzo spectral path (B2/B3). The contract's
         // `poly` is fuqtgui's rational-function iteration, so this is the same
-        // phase of the flow reached by a different algorithm - the timing is
-        // comparable only across mfs backends, and the report says so.
+        // phase of the flow reached by a different algorithm — the timing is
+        // comparable only across mfs backends, and the report says so. The
+        // full path is what actually reaches the contract's convergence gate
+        // (the simplified perturbation stalls at a bounded residual by design).
         let specs = to_channel_specs(case);
         let mut synthesis = MultiplexerSynthesis::new()
             .channels(specs.clone())
-            .junction(junction(case));
+            .junction(junction(case))
+            .full_iteration(true);
         if let Some(max_iter) = harness.max_iter {
             synthesis = synthesis.max_iterations(max_iter);
         }
