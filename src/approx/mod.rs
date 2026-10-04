@@ -16,9 +16,9 @@ mod generalized_ops;
 mod polynomial;
 
 pub use complex_poly::{
-    compute_root_displacement, multiply_by_s, pad_polynomial, AberthRootSolver, AdaptiveRootSolver,
-    CompanionMatrixRootSolver, ComplexCoefficient, ComplexPolynomial, ComplexRootSolver,
-    DurandKernerRootSolver, FaerRootSolver,
+    compose_affine, compute_root_displacement, multiply_by_s, pad_polynomial, AberthRootSolver,
+    AdaptiveRootSolver, CompanionMatrixRootSolver, ComplexCoefficient, ComplexPolynomial,
+    ComplexRootSolver, DurandKernerRootSolver, FaerRootSolver,
 };
 pub use generalized_chebyshev::generalized_chebyshev_polynomials;
 pub use polynomial::{

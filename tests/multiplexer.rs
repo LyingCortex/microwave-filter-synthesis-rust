@@ -444,3 +444,233 @@ fn multiplexer_channel_isolation() -> mfs::error::Result<()> {
     }
     Ok(())
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Full Macchiarella–Tamiazzo spectral path (N ≥ 3)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Calibrated channel spec from passband edges (geometric-mean center).
+fn edge_channel(order: usize, rl: f64, lo: f64, hi: f64) -> mfs::ChannelSpec {
+    let (center, bw) = mfs::freq::edges_to_center_bandwidth(lo, hi);
+    mfs::ChannelSpec {
+        order,
+        return_loss_db: rl,
+        zeros: Vec::new(),
+        center_hz: center,
+        bandwidth_hz: bw,
+    }
+}
+
+/// The channel's *outer* band edge in Hz (the edge farthest from the other
+/// channels' centers; the same rule the shared `machiarella` module uses to
+/// impose the return-loss condition). The antenna RL spec is pinned there.
+fn outer_edge_hz(channels: &[mfs::ChannelSpec], i: usize) -> f64 {
+    let c = &channels[i];
+    let lo = c.center_hz - 0.5 * c.bandwidth_hz;
+    let hi = c.center_hz + 0.5 * c.bandwidth_hz;
+    let mut mlo = 0.0_f64;
+    let mut mhi = 0.0_f64;
+    for (j, o) in channels.iter().enumerate() {
+        if j == i {
+            continue;
+        }
+        mlo = mlo.max((o.center_hz - lo).abs());
+        mhi = mhi.max((o.center_hz - hi).abs());
+    }
+    if mhi > mlo {
+        hi
+    } else {
+        lo
+    }
+}
+
+/// Losslessness invariant for the full path: the junction spectral factor D
+/// must satisfy the para-identity `D(s)·D̃(−s) = R(s)` with
+/// `R = N·Ñ + Σᵢ |p0ᵢ|²·Ptᵢ·Pt̃ᵢ` on the passband axis `s = jΩ`. This is the
+/// exact (N+1)-port power-conservation condition, independent of coefficient
+/// magnitude; a large violation is the signature of an invalid high-degree
+/// spectral factorization (mirrors the duplexer §V/§VI anchors).
+fn assert_para_identity(
+    common: &mfs::synthesis::JunctionCommon,
+    tol: f64,
+) -> mfs::error::Result<()> {
+    use mfs::approx::ComplexCoefficient;
+    let d_tilde = common.d.alternating_conjugate()?;
+    let n_tilde = common.n.alternating_conjugate()?;
+    let mut r_poly = common.n.clone().multiply(&n_tilde)?;
+    for (pt, sc) in common.pt.iter().zip(common.p0_sq.iter()) {
+        let pt_conj = pt.alternating_conjugate()?;
+        let ptpt = pt.multiply(&pt_conj)?;
+        r_poly = r_poly.add(&ptpt.scale(ComplexCoefficient::new(*sc, 0.0))?)?;
+    }
+    let dd = common.d.clone().multiply(&d_tilde)?;
+    let mut para_max = 0.0_f64;
+    for k in 0..257 {
+        let w = -1.5 + 3.0 * k as f64 / 256.0;
+        let s = ComplexCoefficient::new(0.0, w);
+        let rv = r_poly.evaluate(s);
+        let dv = dd.evaluate(s);
+        let rel = if rv.norm() > 1e-30 {
+            (dv - rv).norm() / rv.norm()
+        } else {
+            dv.norm()
+        };
+        para_max = para_max.max(rel);
+    }
+    assert!(
+        para_max < tol,
+        "para-identity D·D̃ = R violated on-axis: max rel err {para_max:.2e}",
+    );
+    Ok(())
+}
+
+/// N=3 full spectral path: three adjacent 100 MHz bands, order 4, 22 dB RL.
+/// The shared Macchiarella–Tamiazzo loop must converge to the tolerance and
+/// yield a quasi-equiripple common port: 0 dB per-channel passbands and the
+/// 22 dB antenna RL pinned at each channel's outer band edge.
+#[test]
+fn multiplexer_full_iteration_triplexer_converges() -> mfs::error::Result<()> {
+    let channels = [
+        edge_channel(4, 22.0, 14.90e9, 15.00e9),
+        edge_channel(4, 22.0, 15.10e9, 15.20e9),
+        edge_channel(4, 22.0, 15.30e9, 15.40e9),
+    ];
+    let result = MultiplexerSynthesis::new()
+        .channels(channels.clone())
+        .junction(JunctionType::TypeI { n: 1.0, b0: 0.0 })
+        .max_iterations(60)
+        .convergence_tol(1e-8)
+        .full_iteration(true)
+        .synthesize()?;
+
+    assert_eq!(result.channels.len(), 3);
+    assert!(
+        result.convergence_error < 1e-8,
+        "full path must reach the strict tolerance, got {:.3e} after {} iterations",
+        result.convergence_error,
+        result.iterations
+    );
+    let common = result
+        .junction_common
+        .as_ref()
+        .expect("N=3 full path must capture the common-domain junction state");
+
+    let (f_lo, f_hi) = (
+        channels
+            .iter()
+            .map(|c| c.center_hz - 0.5 * c.bandwidth_hz)
+            .fold(f64::INFINITY, f64::min),
+        channels
+            .iter()
+            .map(|c| c.center_hz + 0.5 * c.bandwidth_hz)
+            .fold(f64::NEG_INFINITY, f64::max),
+    );
+    let resp =
+        mfs::synthesis::junction_response(common, 3, f_lo, f_hi, 20001)?;
+
+    for (i, c) in channels.iter().enumerate() {
+        let ci = closest_index(&resp.frequencies, c.center_hz);
+        assert!(
+            resp.channel_s21_db[i][ci] > -0.5,
+            "ch{i} passband S21: {:.3} dB (want > -0.5)",
+            resp.channel_s21_db[i][ci]
+        );
+        let oi = closest_index(&resp.frequencies, outer_edge_hz(&channels, i));
+        assert!(
+            resp.antenna_s11_db[oi] < -20.0,
+            "ch{i} outer-edge antenna RL: {:.3} dB (want ≤ -20, i.e. ≥20 dB within 2 dB of the 22 dB spec)",
+            resp.antenna_s11_db[oi]
+        );
+    }
+    assert!(
+        resp.antenna_s11_db
+            .iter()
+            .all(|&db| db.is_finite() && db < 0.0 && db > -300.0),
+        "antenna S11 degenerate somewhere"
+    );
+    assert_para_identity(common, 1e-6)
+}
+
+/// N=4 full spectral path: four adjacent 100 MHz bands, order 4, 22 dB RL.
+/// Same quasi-equiripple contract as the triplexer, with the LU-solved 4×4
+/// p₀² system (N ≥ 3 branch) and 4-block root assignment.
+#[test]
+fn multiplexer_full_iteration_quadruplexer_converges() -> mfs::error::Result<()> {
+    let channels = [
+        edge_channel(4, 22.0, 14.90e9, 15.00e9),
+        edge_channel(4, 22.0, 15.10e9, 15.20e9),
+        edge_channel(4, 22.0, 15.30e9, 15.40e9),
+        edge_channel(4, 22.0, 15.50e9, 15.60e9),
+    ];
+    let result = MultiplexerSynthesis::new()
+        .channels(channels.clone())
+        .junction(JunctionType::TypeI { n: 1.0, b0: 0.0 })
+        .max_iterations(60)
+        .convergence_tol(1e-8)
+        .full_iteration(true)
+        .synthesize()?;
+
+    assert_eq!(result.channels.len(), 4);
+    assert!(
+        result.convergence_error < 1e-8,
+        "full path must reach the strict tolerance, got {:.3e} after {} iterations",
+        result.convergence_error,
+        result.iterations
+    );
+    let common = result
+        .junction_common
+        .as_ref()
+        .expect("N=4 full path must capture the common-domain junction state");
+
+    let (f_lo, f_hi) = (
+        channels
+            .iter()
+            .map(|c| c.center_hz - 0.5 * c.bandwidth_hz)
+            .fold(f64::INFINITY, f64::min),
+        channels
+            .iter()
+            .map(|c| c.center_hz + 0.5 * c.bandwidth_hz)
+            .fold(f64::NEG_INFINITY, f64::max),
+    );
+    let resp =
+        mfs::synthesis::junction_response(common, 4, f_lo, f_hi, 20001)?;
+
+    for (i, c) in channels.iter().enumerate() {
+        let ci = closest_index(&resp.frequencies, c.center_hz);
+        assert!(
+            resp.channel_s21_db[i][ci] > -0.5,
+            "ch{i} passband S21: {:.3} dB (want > -0.5)",
+            resp.channel_s21_db[i][ci]
+        );
+        let oi = closest_index(&resp.frequencies, outer_edge_hz(&channels, i));
+        assert!(
+            resp.antenna_s11_db[oi] < -20.0,
+            "ch{i} outer-edge antenna RL: {:.3} dB (want ≤ -20, i.e. ≥20 dB within 2 dB of the 22 dB spec)",
+            resp.antenna_s11_db[oi]
+        );
+    }
+    assert_para_identity(common, 1e-6)
+}
+
+/// N ≥ 3 full path must reject a non-ideal Type-I junction (n ≠ 1 or b0 ≠ 0):
+/// the shared module implements only the ideal Type-I and Type-II for more
+/// than two channels, and errors explicitly rather than inventing math.
+#[test]
+fn multiplexer_full_iteration_rejects_nonideal_type_i_for_n_gt_2()
+-> mfs::error::Result<()> {
+    let channels = [
+        edge_channel(4, 22.0, 14.90e9, 15.00e9),
+        edge_channel(4, 22.0, 15.10e9, 15.20e9),
+        edge_channel(4, 22.0, 15.30e9, 15.40e9),
+    ];
+    let result = MultiplexerSynthesis::new()
+        .channels(channels)
+        .junction(JunctionType::TypeI { n: 1.47, b0: -0.171 })
+        .full_iteration(true)
+        .synthesize();
+    assert!(
+        result.is_err(),
+        "non-ideal Type-I at N=3 must be rejected with an explicit error"
+    );
+    Ok(())
+}

@@ -3,9 +3,15 @@
 //! Generalizes the 2-channel Macchiarella-Tamiazzo iterative diplexer synthesis
 //! (`crate::duplexer`) to an arbitrary number `N` of channels sharing a single
 //! common (antenna) junction. Each channel is synthesized independently, then
-//! an iterative perturbation loop accounts for the mutual loading of **all**
-//! other channels through the junction, following the simplified perturbation
-//! path used by the diplexer.
+//! one of two iteration paths accounts for the mutual loading of **all** other
+//! channels through the junction:
+//!
+//! * default (simplified): a frequency-offset perturbation loop — lightweight,
+//!   adequate for well-separated bands (the original path, kept as the default);
+//! * `full_iteration(true)`: the exact common-domain Macchiarella–Tamiazzo
+//!   spectral loop shared with the diplexer (`crate::synthesis::machiarella`) —
+//!   a quasi-equiripple (N+1)-port junction; for N > 2 only the ideal Type-I
+//!   junction (`n = 1`, `b0 = 0`) and Type-II are supported.
 
 use crate::approx::{
     compute_root_displacement, generalized_chebyshev_polynomials, ComplexPolynomial,
@@ -37,6 +43,9 @@ pub struct MultiplexerSynthesisResult {
     /// The iteration budget in force, so a caller can distinguish "converged"
     /// from "ran out of iterations" without holding the builder.
     pub max_iterations: usize,
+    /// Common-domain junction polynomials (full spectral path only): present
+    /// when `full_iteration(true)` was set and the iteration converged.
+    pub junction_common: Option<crate::synthesis::JunctionCommon>,
 }
 
 /// Builder for iterative N-channel multiplexer synthesis.
@@ -51,6 +60,7 @@ pub struct MultiplexerSynthesis {
     junction: JunctionType,
     max_iterations: usize,
     convergence_tol: f64,
+    full_iteration: bool,
 }
 
 impl MultiplexerSynthesis {
@@ -61,6 +71,7 @@ impl MultiplexerSynthesis {
             junction: JunctionType::default(),
             max_iterations: 40,
             convergence_tol: 1e-8,
+            full_iteration: false,
         }
     }
 
@@ -91,6 +102,17 @@ impl MultiplexerSynthesis {
     /// Sets convergence tolerance (default: 1e-8).
     pub fn convergence_tol(mut self, tol: f64) -> Self {
         self.convergence_tol = tol;
+        self
+    }
+
+    /// Enables the full Macchiarella–Tamiazzo spectral iteration (default:
+    /// the simplified frequency-offset perturbation). The full path
+    /// converges to a quasi-equiripple (N+1)-port common junction and is
+    /// heavier (spectral factorization per iteration); for more than two
+    /// channels only the ideal Type-I junction (`n = 1`, `b0 = 0`) and
+    /// Type-II are supported.
+    pub fn full_iteration(mut self, enabled: bool) -> Self {
+        self.full_iteration = enabled;
         self
     }
 
@@ -125,6 +147,51 @@ impl MultiplexerSynthesis {
                     "channel {i} must have a positive bandwidth"
                 )));
             }
+        }
+
+        // Full Macchiarella–Tamiazzo spectral iteration, shared with the
+        // duplexer (`crate::synthesis::machiarella`): the exact common-domain
+        // bandpass transform, per-iteration spectral factorization, and the
+        // N×N p₀² system (LU for N ≥ 3, the historical Cramer 2×2 for N = 2).
+        // Only the ideal Type-I junction (n = 1, b0 = 0) and Type-II are
+        // supported for N > 2 (the shared module rejects the rest).
+        if self.full_iteration {
+            let (prepared, state) = crate::synthesis::synthesize_full(
+                &self.channels,
+                self.junction,
+                self.max_iterations,
+                self.convergence_tol,
+            )?;
+            // Recover each channel's design from its converged S roots. In
+            // the full iteration the per-channel D polynomials are
+            // D_i = S_i − F_i with the channel's *fixed* reflection zeros
+            // (normalization-independent, mirroring the duplexer's full-path
+            // recovery).
+            let mut channels = Vec::with_capacity(n);
+            for i in 0..n {
+                let ch = &self.channels[i];
+                let s_proto = ComplexPolynomial::from_complex_roots(&state.s_roots[i])?;
+                let d_recover = s_proto.sub(&prepared.polys[i].f)?;
+                let design = crate::synthesis::recover_channel_design(
+                    &state.s_roots[i],
+                    &d_recover,
+                    &prepared.polys[i],
+                    ch.order,
+                    ch.return_loss_db,
+                    ch.center_hz,
+                    ch.bandwidth_hz,
+                )?;
+                channels.push(design);
+            }
+            return Ok(MultiplexerSynthesisResult {
+                channels,
+                iterations: state.iterations,
+                convergence_error: state.convergence_error,
+                junction: self.junction,
+                s_roots: state.s_roots,
+                max_iterations: self.max_iterations,
+                junction_common: state.common,
+            });
         }
 
         // (b) Synthesize each channel independently and extract auxiliary
@@ -274,6 +341,7 @@ impl MultiplexerSynthesis {
             junction: self.junction,
             s_roots,
             max_iterations: self.max_iterations,
+            junction_common: None,
         })
     }
 

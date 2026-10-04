@@ -153,50 +153,10 @@ impl Duplexer {
 // Macchiarella-Tamiazzo Iterative Duplexer Synthesis
 // ═══════════════════════════════════════════════════════════════════════════════
 
-use crate::approx::{
-    compute_root_displacement, generalized_chebyshev_polynomials, ComplexCoefficient,
-    ComplexPolynomial,
-};
+use crate::approx::{compute_root_displacement, generalized_chebyshev_polynomials, ComplexPolynomial};
 use crate::spec::FilterSpec;
 use crate::synthesis::build_filter_spec;
 use num_complex::Complex64;
-
-/// Composes polynomial `P` with the affine map `z ↦ (z − β)/α`, i.e. returns
-/// the coefficients of `P((z − β)/α) = Q(z)`.
-///
-/// This maps a channel's prototype polynomial into the diplexer common
-/// variable. Both variables are *bandpass* `s`-domain variables whose passband
-/// is the imaginary axis: the low-pass prototype's reflection zeros sit on the
-/// imaginary axis (`F` roots `±j·0.707` for a 2-pole Chebyshev), and the common
-/// band spans `[−j, +j]` (paper Fig. 4's `Ω` is the imaginary coordinate). A
-/// channel occupying common sub-band `[Ω_lo, Ω_hi]` therefore maps its own
-/// prototype frequency `Ω_p ∈ [−1, 1]` by `Ω_c = α·Ω_p + β` with
-/// `α = (Ω_hi − Ω_lo)/2`, `β = (Ω_hi + Ω_lo)/2`, i.e. in the imaginary
-/// variables `s_c = j·Ω_c = α·(j·Ω_p) + j·β = α·s_p + j·β`. The shift is thus
-/// **purely imaginary** — passing a real `β` would move the channel off the
-/// passband axis. `beta` is therefore taken as a complex shift (the caller
-/// passes `j·β`).
-///
-/// Implemented as `P((z − β)/α) = P(u + c)/α^n` with `u = z/α`, `c = −β/α`:
-/// shift by `c`, then scale the argument by `1/α`.
-fn compose_affine(poly: &ComplexPolynomial, alpha: f64, beta: Complex64) -> Result<ComplexPolynomial> {
-    if alpha == 0.0 || !alpha.is_finite() || !beta.re.is_finite() || !beta.im.is_finite() {
-        return Err(MfsError::NumericalFailure(
-            "affine channel-domain transform requires a finite non-zero scale".into(),
-        ));
-    }
-    // u = z/α, c = −β/α  ⇒  P((z−β)/α) = P(u + c); substitute u = z/α.
-    let shifted = poly.shift(-beta / alpha)?;
-    // Substitute u = z/α: coefficient of z^k becomes coeff_k / α^k.
-    let mut coefficients = shifted.coefficients.clone();
-    let mut inv_alpha_pow = Complex64::new(1.0, 0.0);
-    let inv_alpha = Complex64::new(1.0 / alpha, 0.0);
-    for coefficient in coefficients.iter_mut() {
-        *coefficient *= inv_alpha_pow;
-        inv_alpha_pow *= inv_alpha;
-    }
-    ComplexPolynomial::new(coefficients)
-}
 
 /// Junction type for the diplexer T-junction.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -584,111 +544,17 @@ impl DuplexerSynthesis {
         let s_rx_init = rx_polys.e.add(&rx_polys.f)?.scale(half)?;
         let d_rx = rx_polys.e.sub(&rx_polys.f)?.scale(half)?;
 
-        let p_tx = &tx_polys.p;
-        let p_rx = &rx_polys.p;
-
-        let n_tx = self.tx_order;
-        let n_rx = self.rx_order;
-
-        // ── Common-domain (Macchiarella) setup ────────────────────────────────
-        // The diplexer polynomials N, D, Pt, Pr are defined in ONE shared
-        // normalized low-pass variable Ω over the *whole* diplexer band
-        // (paper Fig. 4, §IV.C), not in one channel's prototype variable.
-        // With f_L/f_H the outer bandpass limits, f₀ = √(f_L·f_H) and
-        // B = (f_H − f_L)/f₀, the bandpass transform is
-        //     Ω(f) = (f/f₀ − f₀/f)/B.
-        // By construction the TX band maps to [−1, Ω_tx_hi] and the RX band to
-        // [Ω_rx_lo, +1]: the combined band's two extreme edges sit exactly at
-        // Ω = ±1. This is the *exact* bandpass transform the paper uses; the
-        // previous narrow-band linearization (Tx prototype as "common" with a
-        // shift of 2·Δcenter/avg_bw) stretched the domain by ≈2.25× and left
-        // N un-normalized, which is why the eq.-13 loop diverged (D3).
-        //
-        // The prototype→common map is Ω_c = A_i·Ω_p + B_i with
-        //     A_i = (Ω_i_hi − Ω_i_lo)/2,  B_i = (Ω_i_hi + Ω_i_lo)/2,
-        // so the channel's prototype band [−1,+1] maps onto its common
-        // sub-band [Ω_i_lo, Ω_i_hi]. Substituting this into a prototype
-        // polynomial is `compose_affine(P, A_i, B_i)` in both directions:
-        //   prototype→common:  P_c(Ω) = P_p(A_i·Ω + B_i)
-        //   common→prototype:  P_p(Ω) = P_c(A_i·Ω + B_i)
-        // (the same expression, since `compose_affine(P,a,b)` returns
-        // P(a·z + b)). Roots map forward `r_c = A_i·r_p + B_i` and backward
-        // `r_p = (r_c − B_i)/A_i`.
-        let f_lo = (self.tx_center - 0.5 * self.tx_bw).min(self.rx_center - 0.5 * self.rx_bw);
-        let f_hi = (self.tx_center + 0.5 * self.tx_bw).max(self.rx_center + 0.5 * self.rx_bw);
-        let f0_common = (f_lo * f_hi).sqrt();
-        let b_common = (f_hi - f_lo) / f0_common;
-        let omega = |f: f64| (f / f0_common - f0_common / f) / b_common;
-        let omega_tx_lo = omega(self.tx_center - 0.5 * self.tx_bw);
-        let omega_tx_hi = omega(self.tx_center + 0.5 * self.tx_bw);
-        let omega_rx_lo = omega(self.rx_center - 0.5 * self.rx_bw);
-        let omega_rx_hi = omega(self.rx_center + 0.5 * self.rx_bw);
-        let a_tx = (omega_tx_hi - omega_tx_lo) / 2.0;
-        let b_tx = (omega_tx_hi + omega_tx_lo) / 2.0;
-        let a_rx = (omega_rx_hi - omega_rx_lo) / 2.0;
-        let b_rx = (omega_rx_hi + omega_rx_lo) / 2.0;
-        let tx_common = |p: &ComplexPolynomial| compose_affine(p, a_tx, Complex64::new(0.0, b_tx));
-        let rx_common = |p: &ComplexPolynomial| compose_affine(p, a_rx, Complex64::new(0.0, b_rx));
-
-        // The simplified (default) path keeps its own narrow-band separation
-        // convention; the full path uses the exact affine transform above.
-        let normalized_separation =
-            2.0 * (self.rx_center - self.tx_center) / ((self.tx_bw + self.rx_bw) / 2.0);
-
-        // Fixed diplexer reflection-zeros numerator N(Ω) (paper Step 1 and
-        // the note after eq. 12: "N(s)·N*(−s) depends only on the imposed
-        // reflection zeros"). Its roots are the *pure-imaginary* reflection
-        // zeros of the independently synthesized TX and RX filters, mapped
-        // into the common domain by Ω = b_i + a_i·ω_z (ω_z = the prototype
-        // reflection-zero frequency, i.e. the imaginary part of a root of
-        // F⁰_i). N does NOT change during the iteration: recomputing it from
-        // eq. (8) with the running S = (E+F)/2 places its roots at the
-        // complex roots of E+F, which straddle the jΩ axis and make the
-        // eq.-13 p₀ system infeasible (|N(+1)|²/|N(−1)|² ~ 10³ vs the
-        // feasibility window |P|² ratios span). N is therefore evaluated
-        // once, here, before the loop.
-        let channel_reflection_zeros =
-            |f: &ComplexPolynomial, a: f64, b: f64| -> Result<Vec<Complex64>> {
-                Ok(f.roots()?
-                    .into_iter()
-                    .map(|r| Complex64::new(0.0, b + a * r.im))
-                    .collect())
-            };
-        let mut n_roots = channel_reflection_zeros(&tx_polys.f, a_tx, b_tx)?;
-        n_roots.extend(channel_reflection_zeros(&rx_polys.f, a_rx, b_rx)?);
-        // Type-II junction (paper §III-B / §IV Step 1): the shunt resonating
-        // node contributes one *further* reflection zero, which is pure real
-        // ("a good choice has proven to be 1.5 … this condition determines
-        // the value of c0"). From y_in = c0·s + D_TX/S_TX + D_RX/S_RX with
-        // S11 = (1 − y_in)/(1 + y_in), the decoupled limit y_in ≈ c0·s gives
-        // S11 = (1 − c0·s)/(1 + c0·s), i.e. the real zero at s = +1/c0 in the
-        // common domain. N is built once, so the zero (fixed by c0) is fixed
-        // too; n0 = −1 has |n0| = 1, so S11 = n0·N/D = −N/D needs no extra
-        // phase in the response.
-        if let JunctionType::TypeII { c0 } = self.junction {
-            // c0 > 0 is guaranteed by the precondition check in synthesize().
-            n_roots.push(Complex64::new(1.0 / c0, 0.0));
-        }
-        let n_poly_fixed = ComplexPolynomial::from_complex_roots(&n_roots)?;
-
         // State is kept in each channel's prototype domain (shared with the
         // simplified path and `recover_channel_design`); the full loop
         // translates to the common domain at the boundaries.
         let mut s_tx_roots = s_tx_init.roots()?;
         let mut s_rx_roots = s_rx_init.roots()?;
 
-        // Return-loss edges (paper Step 3, eq. 13) in the common domain. The
-        // two *outer* edges of the combined band sit at s = ±j by construction
-        // of the bandpass transform (f_L ↦ −j, f_H ↦ +j): the *lower* channel's
-        // return loss is imposed at s = −j and the *upper* channel's at s = +j.
-        // The caller may specify the TX filter above or below the RX filter,
-        // so the edges follow band position, not name.
-        let tx_is_lower = self.tx_center < self.rx_center;
-        let (tx_edge, rx_edge) = if tx_is_lower {
-            (Complex64::new(0.0, -1.0), Complex64::new(0.0, 1.0))
-        } else {
-            (Complex64::new(0.0, 1.0), Complex64::new(0.0, -1.0))
-        };
+        // The simplified (default) path keeps its own narrow-band separation
+        // convention; the full path uses the exact affine transform inside
+        // `crate::synthesis::machiarella`.
+        let normalized_separation =
+            2.0 * (self.rx_center - self.tx_center) / ((self.tx_bw + self.rx_bw) / 2.0);
 
         let mut iterations = 0;
         let mut convergence_error = f64::INFINITY;
@@ -696,175 +562,52 @@ impl DuplexerSynthesis {
         // Convergence-time common-domain diplexer state, captured from the
         // final iteration (full path only) so the result can report the
         // junction-level 3-port response.
-        let mut conv_n: Option<ComplexPolynomial> = None;
-        let mut conv_d: Option<ComplexPolynomial> = None;
-        let mut conv_pt: Option<ComplexPolynomial> = None;
-        let mut conv_pr: Option<ComplexPolynomial> = None;
-        let mut conv_p0t2: Option<f64> = None;
-        let mut conv_p0r2: Option<f64> = None;
-        let f0_common_val = f0_common;
-        let b_common_val = b_common;
+        let mut conv_common: Option<crate::synthesis::JunctionCommon> = None;
 
         // Full Macchiarella spectral iteration is opt-in via `.full_iteration(true)`
         // (default: the simplified frequency-offset perturbation).
         if self.full_iteration {
-            // Paper Step 1: the initial S_TX / S_RX are the channel
-            // characteristic polynomials S = (E + F)/2 (eq. 5) — the *left*
-            // half-plane roots, which carry the passband. They are NOT the
-            // reflection zeros: those are the (imaginary) roots of F, and they
-            // build the diplexer numerator N (eq. 8's note). Initialising S
-            // from F's roots puts the starting +1/ω₀ terms on the jω axis and
-            // drives the loop to a non-physical fixed point.
-            let channel_s = |e: &ComplexPolynomial, f: &ComplexPolynomial| -> Result<ComplexPolynomial> {
-                let padded = crate::approx::pad_polynomial(f, e.coefficients.len())?;
-                e.add(&padded)?.scale(Complex64::new(0.5, 0.0))
-            };
-            s_tx_roots = channel_s(&tx_polys.e, &tx_polys.f)?.roots()?;
-            s_rx_roots = channel_s(&rx_polys.e, &rx_polys.f)?.roots()?;
-            // Stagnation tracking for high-degree orders: at order >= 7 the
-            // per-iteration root-extraction noise floor (~1e-5 to 1e-6 for a
-            // degree-14 S_TX*S_RX product) sits *above* the strict
-            // `convergence_tol` (1e-8), so `max_delta` plateaus and never
-            // triggers the fast path — even though the physical fixed point
-            // (p0^2, |D|) has converged. The standard remedy for
-            // root-iterative methods is to accept the solution once the
-            // displacement stops improving and is already small.
-            let mut best_delta = f64::INFINITY;
-            let mut stagnant = 0usize;
-            const STAGNATION_ACCEPT: f64 = 1e-3;
-            const STAGNATION_WINDOW: usize = 3;
-            const STAGNATION_MIN_ITER: usize = 5;
-            for iter in 0..self.max_iterations {
-                iterations = iter + 1;
-
-                // ── State (prototype domain) → common domain ────────────────
-                // r_c = A_i·r_p + B_i (prototype root → common root), and the
-                // polynomial composition S_common(Ω) = S_proto(A_i·Ω + B_i).
-                let s_tx_common_roots: Vec<Complex64> = s_tx_roots
-                    .iter()
-                    .map(|&r| a_tx * r + Complex64::new(0.0, b_tx))
-                    .collect();
-                let s_rx_common_roots: Vec<Complex64> = s_rx_roots
-                    .iter()
-                    .map(|&r| a_rx * r + Complex64::new(0.0, b_rx))
-                    .collect();
-
-                let s_tx_common = ComplexPolynomial::from_complex_roots(&s_tx_common_roots)?;
-                let s_rx_common = ComplexPolynomial::from_complex_roots(&s_rx_common_roots)?;
-                let p_tx_common = tx_common(p_tx)?;
-                let p_rx_common = rx_common(p_rx)?;
-
-                // Diplexer transmission polynomials, all in the common domain:
-                //   Pt(Ω) = P_TXn(Ω) · S_RX(Ω),  Pr(Ω) = P_RXn(Ω) · S_TX(Ω)
-                let pt = p_tx_common.multiply(&s_rx_common)?;
-                let pr = p_rx_common.multiply(&s_tx_common)?;
-                // Antenna-reflection numerator N(v): fixed reflection zeros
-                // (built once above); see the note after eq. (12).
-                let n_poly = &n_poly_fixed;
-                let (p0t_sq, p0r_sq) =
-                    self.solve_scaling_constants(n_poly, &pt, &pr, &tx_edge, &rx_edge)?;
-                let n_conj = n_poly.alternating_conjugate()?;
-                let nn = n_poly.multiply(&n_conj)?;
-                let pt_conj = pt.alternating_conjugate()?;
-                let ptpt = pt.multiply(&pt_conj)?;
-                let pr_conj = pr.alternating_conjugate()?;
-                let prpr = pr.multiply(&pr_conj)?;
-
-                let r_poly = nn
-                    .add(&ptpt.scale(Complex64::new(p0t_sq, 0.0))?)?
-                    .add(&prpr.scale(Complex64::new(p0r_sq, 0.0))?)?;
-
-                // Spectral factorization: cepstrum with the adaptive
-                // (faer-gated) companion-matrix fallback. D must carry the same
-                // degree as N so the para-identity D·D̃ = N·Ñ + |p0t|²Pt·Pt̃
-                // + |p0r|²Pr·Pr̃ matches at its leading term. Type-I: deg N =
-                // n_tx + n_rx. Type-II: the resonating node adds one (real)
-                // reflection zero, so deg N = deg D = n_tx + n_rx + 1 — using
-                // n_poly.degree() captures both without a special case.
-                let d_poly = crate::spectral::spectral_factor(&r_poly, n_poly.degree())?;
-
-                // New S_TX · S_RX product (common domain)
-                let product_poly = self.compute_s_product(n_poly, &d_poly)?;
-
-                // Find roots and assign in the common domain: the paper's
-                // Step 4 sorts by increasing imaginary part — the lower set
-                // goes to the *lower* band, the upper set to the *upper* band.
-                // With the caller free to place TX above or below RX, map the
-                // lower/upper groups onto the named channels afterwards.
-                let product_roots = product_poly.roots()?;
-                let (n_lower, n_upper) = if tx_is_lower {
-                    (n_tx, n_rx)
-                } else {
-                    (n_rx, n_tx)
-                };
-                let (raw_lower_common, raw_upper_common) =
-                    Self::assign_roots(&product_roots, n_lower, n_upper)?;
-                let (raw_tx_common, raw_rx_common) = if tx_is_lower {
-                    (raw_lower_common, raw_upper_common)
-                } else {
-                    (raw_upper_common, raw_lower_common)
-                };
-
-                // ── Common domain → state (prototype domain) ────────────────
-                // Pure fixed-point update (Macchiarella-Tamiazzo step 4/5):
-                // adopt the newly computed S_TX/S_RX roots directly. The
-                // paper converges in 5–10 iterations; no relaxation ramp is
-                // needed (a ramp that *increases* the step size over time
-                // destabilizes the fixed point and causes a limit cycle).
-                let new_s_tx_roots: Vec<Complex64> = raw_tx_common
-                    .iter()
-                    .map(|&r| (r - Complex64::new(0.0, b_tx)) / a_tx)
-                    .filter(|r| r.re.is_finite() && r.im.is_finite() && r.norm() < 50.0)
-                    .collect();
-                let new_s_rx_roots: Vec<Complex64> = raw_rx_common
-                    .iter()
-                    .map(|&r| (r - Complex64::new(0.0, b_rx)) / a_rx)
-                    .filter(|r| r.re.is_finite() && r.im.is_finite() && r.norm() < 50.0)
-                    .collect();
-
-                if new_s_tx_roots.len() != n_tx || new_s_rx_roots.len() != n_rx {
-                    return Err(MfsError::NumericalFailure(
-                        "Full iteration produced a non-finite root set".into(),
-                    ));
-                }
-
-                let max_delta = compute_root_displacement(&s_tx_roots, &new_s_tx_roots)
-                    .max(compute_root_displacement(&s_rx_roots, &new_s_rx_roots));
-
-                s_tx_roots = new_s_tx_roots;
-                s_rx_roots = new_s_rx_roots;
-                convergence_error = max_delta;
-
-                // Fast path: strict convergence (orders 2/4/6 reach this).
-                // Stagnation path: at high order the root-displacement noise
-                // floor exceeds the tolerance, but the physical fixed point
-                // (p0^2, |D|) has converged — accept once displacement stops
-                // improving and is already small (standard for root
-                // iteration). This recovers order >= 7 without loosening the
-                // strict path used by lower orders.
-                if max_delta < self.convergence_tol
-                    || (iter + 1) >= STAGNATION_MIN_ITER
-                        && stagnant >= STAGNATION_WINDOW
-                        && best_delta < STAGNATION_ACCEPT
-                {
-                    conv_n = Some(n_poly.clone());
-                    conv_d = Some(d_poly.clone());
-                    conv_pt = Some(pt.clone());
-                    conv_pr = Some(pr.clone());
-                    conv_p0t2 = Some(p0t_sq);
-                    conv_p0r2 = Some(p0r_sq);
-                    break;
-                }
-
-                // Stagnation bookkeeping: reset if this iteration improved on
-                // the best seen, else count as flat (root-noise oscillation).
-                if max_delta < best_delta * 0.99 {
-                    best_delta = max_delta;
-                    stagnant = 0;
-                } else {
-                    stagnant += 1;
-                }
-            }
+            // Full Macchiarella–Tamiazzo spectral iteration, shared with the
+            // N-channel multiplexer (`crate::synthesis::machiarella`). The
+            // module's 2-channel branch reproduces this historical loop with
+            // bit-identical operation order (Cramer's-rule 2×2 p₀ solve,
+            // ±j edge selection by band position, lower/upper block
+            // assignment, prototype-domain root state), so the gate-anchored
+            // results (quasi-equiripple orders 2–8, §V/§VI printed-design
+            // goldens) are unchanged.
+            let prepared = crate::synthesis::prepare(
+                &[
+                    ChannelSpec {
+                        order: self.tx_order,
+                        return_loss_db: self.tx_rl,
+                        zeros: self.tx_zeros.clone(),
+                        center_hz: self.tx_center,
+                        bandwidth_hz: self.tx_bw,
+                    },
+                    ChannelSpec {
+                        order: self.rx_order,
+                        return_loss_db: self.rx_rl,
+                        zeros: self.rx_zeros.clone(),
+                        center_hz: self.rx_center,
+                        bandwidth_hz: self.rx_bw,
+                    },
+                ],
+                self.junction,
+            )?;
+            let state = crate::synthesis::run_full_iteration(
+                prepared.states,
+                &prepared.n_poly,
+                self.junction,
+                prepared.f0,
+                prepared.b,
+                self.max_iterations,
+                self.convergence_tol,
+            )?;
+            s_tx_roots = state.s_roots[0].clone();
+            s_rx_roots = state.s_roots[1].clone();
+            iterations = state.iterations;
+            convergence_error = state.convergence_error;
+            conv_common = state.common;
         } else {
             // Fallback: simplified perturbation (frequency-offset aware)
             for iter in 0..self.max_iterations {
@@ -963,25 +706,16 @@ impl DuplexerSynthesis {
         } else {
             (d_tx.clone(), d_rx.clone())
         };
-        let diplexer_common = if self.full_iteration {
-            match (conv_n, conv_d, conv_pt, conv_pr, conv_p0t2, conv_p0r2) {
-                (Some(n), Some(d), Some(pt), Some(pr), Some(p0t_sq), Some(p0r_sq)) => {
-                    Some(DiplexerCommon {
-                        n,
-                        d,
-                        pt,
-                        pr,
-                        p0t_sq,
-                        p0r_sq,
-                        f0: f0_common_val,
-                        b: b_common_val,
-                    })
-                }
-                _ => None,
-            }
-        } else {
-            None
-        };
+        let diplexer_common = conv_common.map(|common| DiplexerCommon {
+            n: common.n,
+            d: common.d,
+            pt: common.pt[0].clone(),
+            pr: common.pt[1].clone(),
+            p0t_sq: common.p0_sq[0],
+            p0r_sq: common.p0_sq[1],
+            f0: common.f0,
+            b: common.b,
+        });
 
         let tx_design = crate::synthesis::recover_channel_design(
             &s_tx_roots,
@@ -1014,141 +748,9 @@ impl DuplexerSynthesis {
         })
     }
 
-    // ─── Full Macchiarella spectral-path helpers ────────────────────────────
-    // These methods implement the spectral factorization iteration used by
-    // `full_iteration(true)` (both Type-I and Type-II junctions).
-
+    // ─── Spec construction ─────────────────────────────────────────────────
     fn build_spec(&self, order: usize, rl: f64, zeros: &[f64]) -> Result<FilterSpec> {
         build_filter_spec(order, rl, zeros, None)
-    }
-
-    /// Solves for |p₀t|² and |p₀r|² from the return-loss conditions.
-    ///
-    /// In the *common* (Tx-prototype) domain the combined band spans
-    /// [-j, +j(Δ+1)], so the two return-loss conditions (eq. 13) are imposed
-    /// at the two *outer* passband edges: `tx_edge` = -j (Tx lower edge) and
-    /// `rx_edge` = +j(Δ+1) (Rx upper edge). Each condition is evaluated at
-    /// the point where that channel's own |P| term is O(1) and the other
-    /// channel's is small, keeping the 2×2 p₀ system well-conditioned for
-    /// adjacent bands.
-    ///
-    /// At an edge `e`: `|S11|² = |N|²/|D|² = ε`, and unitarity gives
-    /// `|D|² = |N|² + |p₀t|²|Pt|² + |p₀r|²|Pr|²`, so
-    /// `|N|²(1−ε)/ε = |p₀t|²|Pt|² + |p₀r|²|Pr|²`.
-    fn solve_scaling_constants(
-        &self,
-        n_poly: &ComplexPolynomial,
-        pt: &ComplexPolynomial,
-        pr: &ComplexPolynomial,
-        tx_edge: &ComplexCoefficient,
-        rx_edge: &ComplexCoefficient,
-    ) -> Result<(f64, f64)> {
-        let epsilon_tx = 10.0_f64.powf(-self.tx_rl / 10.0);
-        let epsilon_rx = 10.0_f64.powf(-self.rx_rl / 10.0);
-
-        let n_tx = n_poly.evaluate(*tx_edge).norm_sqr();
-        let pt_tx = pt.evaluate(*tx_edge).norm_sqr();
-        let pr_tx = pr.evaluate(*tx_edge).norm_sqr();
-
-        let n_rx = n_poly.evaluate(*rx_edge).norm_sqr();
-        let pt_rx = pt.evaluate(*rx_edge).norm_sqr();
-        let pr_rx = pr.evaluate(*rx_edge).norm_sqr();
-
-        // System of equations (rows: Tx edge, Rx edge):
-        //   pt_tx * p0t² + pr_tx * p0r² = n_tx * (1 - eps_tx) / eps_tx
-        //   pt_rx * p0t² + pr_rx * p0r² = n_rx * (1 - eps_rx) / eps_rx
-        let rhs1 = n_tx * (1.0 - epsilon_tx) / epsilon_tx;
-        let rhs2 = n_rx * (1.0 - epsilon_rx) / epsilon_rx;
-
-        // 2×2 linear system:  [pt_tx  pr_tx] [p0t²]   [rhs1]
-        //                      [pt_rx  pr_rx] [p0r²] = [rhs2]
-        let det = pt_tx * pr_rx - pt_rx * pr_tx;
-
-        if det.abs() < 1e-30 {
-            // Degenerate case: use equal scaling
-            let p0_sq = (rhs1 + rhs2) / (pt_tx + pr_tx + pt_rx + pr_rx);
-            return Ok((p0_sq.max(1e-15), p0_sq.max(1e-15)));
-        }
-
-        let p0t_sq = (rhs1 * pr_rx - rhs2 * pr_tx) / det;
-        let p0r_sq = (pt_tx * rhs2 - pt_rx * rhs1) / det;
-
-        // Clamp to positive values (numerical safety)
-        let (p0t_sq, p0r_sq) = (p0t_sq.max(1e-15), p0r_sq.max(1e-15));
-        Ok((p0t_sq, p0r_sq))
-    }
-
-    /// Computes the S_TX × S_RX product polynomial from N(s) and D(s).
-    fn compute_s_product(
-        &self,
-        n_poly: &ComplexPolynomial,
-        d_poly: &ComplexPolynomial,
-    ) -> Result<ComplexPolynomial> {
-        match self.junction {
-            JunctionType::TypeI { n, b0 } => {
-                // S_TX * S_RX = (a*N + b*D) / 2
-                // where a = 1 - j*n²*b₀,  b = 1 + j*n²*b₀
-                let n_sq_b0 = n * n * b0;
-                let a = Complex64::new(1.0, -n_sq_b0);
-                let b = Complex64::new(1.0, n_sq_b0);
-                let half = Complex64::new(0.5, 0.0);
-
-                let a_n = n_poly.scale(a)?;
-                let b_d = d_poly.scale(b)?;
-                let sum = a_n.add(&b_d)?;
-                sum.scale(half)
-            }
-            JunctionType::TypeII { c0 } => {
-                // Paper eq. (11), monic/n0-factored form. With
-                //   N = P·(s − 1/c0) + (1/c0)·cross,
-                //   D = P·(s + 1/c0) + (1/c0)·cross,
-                // where P = S_TX·S_RX and cross = D_TX·S_RX + S_TX·D_RX, the
-                // degree-(n_tx+n_rx+1) leading terms and the cross term cancel
-                // in D − N:
-                //   D − N = (2/c0)·P   ⇒   P = S_TX·S_RX = (c0/2)·(D − N).
-                // N is built exactly monic, but `spectral_factor` returns D
-                // with its leading coefficient phase-rotated to real-positive
-                // (≈ 1 + O(ε)) — not magnitude-normalized. D − N would then
-                // keep a spurious O(ε)·s^(m+1) term whose root runs to ~1/ε
-                // (the "1e11" phantom root). Normalize D to exactly monic so
-                // the leading terms cancel to machine precision, leaving the
-                // clean degree n_tx+n_rx product (no s-removal step needed).
-                let d_lead = d_poly.leading_coefficient();
-                let d_monic = d_poly.scale(Complex64::new(1.0, 0.0) / d_lead)?;
-                let diff = d_monic.sub(n_poly)?;
-                diff.scale(Complex64::new(c0 / 2.0, 0.0))
-            }
-        }
-    }
-
-    /// Assigns the S_TX·S_RX product roots to S_TX and S_RX by the
-    /// paper's Step 4: sort by increasing imaginary part, then take the
-    /// lower set for the lower band (TX in the common domain) and the
-    /// upper set for the upper band (RX). This is deterministic and
-    /// avoids the assignment flips of proximity matching.
-    fn assign_roots(
-        product_roots: &[Complex64],
-        n_tx: usize,
-        n_rx: usize,
-    ) -> Result<(Vec<Complex64>, Vec<Complex64>)> {
-        if product_roots.len() < n_tx + n_rx {
-            return Err(MfsError::NumericalFailure(format!(
-                "S_TX·S_RX product has {} roots, expected {}",
-                product_roots.len(),
-                n_tx + n_rx
-            )));
-        }
-
-        let mut sorted = product_roots.to_vec();
-        sorted.sort_by(|a, b| {
-            a.im.partial_cmp(&b.im).unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.re.partial_cmp(&b.re).unwrap_or(std::cmp::Ordering::Equal))
-        });
-
-        let raw_tx_common = sorted[..n_tx].to_vec();
-        let raw_rx_common = sorted[n_tx..n_tx + n_rx].to_vec();
-
-        Ok((raw_tx_common, raw_rx_common))
     }
 
 }

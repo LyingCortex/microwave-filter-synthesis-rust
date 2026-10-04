@@ -108,6 +108,30 @@
   `MultiplexerResponse` field semantics are unchanged in shape; the dB
   values are now the true (N+1)-port S-magnitudes
   (`isolation[i][j]` = |Sᵢ₊₁,ⱼ₊₁|, channel j driven).
+- **Shared Macchiarella–Tamiazzo full spectral path for N channels (B2).**
+  The 2-channel full-spectral iteration is now in
+  `src/synthesis/machiarella.rs` and is called by both
+  `DuplexerSynthesis::full_iteration(true)` and the new
+  `MultiplexerSynthesis::full_iteration(true)`, so the N = 2 and N ≥ 3
+  multiplexer/diplexer full paths run the same loop. The N ≥ 3
+  generalization implements the N×N p₀² system (`nalgebra` LU with partial
+  pivoting), per-channel outer-band return-loss edge selection, and
+  contiguous N-block root assignment; the N = 2 branch keeps the
+  historical Cramer's-rule 2×2 and ±j edge selection with
+  bit-identical operation order (the 10 gate-anchored duplexer tests,
+  including the paper §V/§VI printed-design goldens, pass unchanged).
+  `MultiplexerSynthesisResult` gains `junction_common` (common-domain N, D,
+  Ptᵢ, p0ᵢ², band constants) when the full path converges;
+  `mfs::synthesis::junction_response` evaluates the (N+1)-port junction
+  response `S_ant = N/D`, `Sᵢ = √p0ᵢ·Ptᵢ/D`. For N > 2 only the ideal
+  Type-I junction (n = 1, b0 = 0) and Type-II are supported — a
+  non-ideal Type-I is rejected with `PreconditionViolation` (no paper
+  basis for that generalization). New gates:
+  `multiplexer_full_iteration_triplexer_converges` /
+  `_quadruplexer_converges` (convergence, 0 dB per-channel passbands,
+  antenna RL at the 22 dB spec at each outer band edge, para-identity
+  D·D̃ = R) and `_rejects_nonideal_type_i_for_n_gt_2`.
+
 
 ### Fixed
 

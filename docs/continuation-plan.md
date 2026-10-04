@@ -21,7 +21,7 @@ carries *what to do next and how to know it is done*.
 |---|---|---|
 | Two-port synthesis | Full generalized-Chebyshev pipeline, orders 2–8 fixture-anchored, 10–30 numerically stable | High (publication-anchored) |
 | Duplexer | Simplified frequency-offset perturbation (default); full Macchiarella–Tamiazzo spectral path behind `DuplexerSynthesis::full_iteration(true)` **converges at Type-I orders 2–8 and Type-II (incl. the §VI degree-40 GSM design), all gate-anchored** (2026-10-03) | High (publication-anchored, full path) / Medium (simplified default) |
-| Multiplexer (N-channel) | Independent per-channel synthesis + under-relaxed perturbation; shared `synthesis::recover_channel_design`; response is a **geometric-mean magnitude model**, not an (N+1)-port solve | Medium (channels are valid passband filters; isolation/antenna values are model approximations) |
+| Multiplexer (N-channel) | Independent per-channel synthesis + simplified perturbation (default); **full Macchiarella–Tamiazzo spectral path for N channels behind `MultiplexerSynthesis::full_iteration(true)`** (shared with the duplexer, `src/synthesis/machiarella.rs`; B2, 2026-10-04) converges at N = 3/4 order-4 (gate-anchored); response is the **true (N+1)-port admittance model** (B1) | High (publication-anchored, full path) / Medium (simplified default) |
 | Multi-band | **Mapping layer in place** — `freq` supports all four prototype families plus `MultiBandMapping` (E3/C1, 2026-09-29); no design doc, no multi-band approximation, no synthesis path | — |
 | Optimization | LM `tune_matrix` / `extract_matrix` (hand-rolled Gaussian elimination, fixed 1e-7 FD Jacobian, topology frozen to template); 3 lib unit tests at order 3–4 | Low (works on small well-posed cases; no integration coverage, no CLI/Python surface) |
 
@@ -32,10 +32,13 @@ Known limitations that gate the areas below (full list in
    rejects with `NotImplemented`.
 2. **Repeated poles** — `residues/expansion.rs` returns `NotImplemented`.
 3. ~~**HighPass / BandStop mappings**~~ — implemented in `freq` (E3, 2026-09-29: `HighPassMapping`, `BandStopMapping` with full forward + inverse and singular-point clamps).
-4. **N-channel mutual-loading fidelity** — the duplexer's full spectral path
-   converges (Type-I orders 2–8, Type-II, both gate-anchored; 2026-10-03), but
-   it is not yet generalized to N channels (multiplexer B2), and the
-   multiplexer's default still uses the simplified under-relaxed perturbation.
+4. **N-channel mutual-loading fidelity — RESOLVED for the full path (B2, 2026-10-04):**
+   the full spectral path is now generalized to N channels (shared
+   `src/synthesis/machiarella.rs`; N×N p₀² LU solve, per-channel outer-edge
+   return loss, N-block root assignment; N = 2 branch bit-identical to the
+   historical loop). The multiplexer's *default* still uses the simplified
+   under-relaxed perturbation; B3 adds the convergence/fidelity gates that
+   flip the vendored-standard convergence gate from FAIL to PASS.
 
 ---
 
@@ -349,13 +352,18 @@ Macchiarella–Tamiazzo iteration loop shared by duplexer and multiplexer.
    passband (geomean underestimates the common-port reflection by up to ~150
    dB) — the original "agree to ~0.1 dB where accurate" criterion only holds in
    the all-reflective stopband, which is what the gate test asserts.
-2. **B2 — Generalize the full spectral path to N channels.** Port
-   `duplexer.rs`'s full-path helpers (`solve_scaling_constants`, `compute_s_product`,
-   etc.) into a shared module (candidate: `src/synthesis/macchiarella.rs`) so the
-   N=2 duplexer and the N-channel multiplexer share one iteration loop.
-   This subsumes the todo.md item "Fold the duplexer synthesis into the
-   multiplexer (N=2)". Must happen *after* D3/D4 (done) — porting the now
-   converged path keeps the N > 2 debug surface tractable.
+2. **B2 — Generalize the full spectral path to N channels. [DONE 2026-10-04]**
+   Ported `duplexer.rs`'s full-path loop into `src/synthesis/machiarella.rs`
+   (shared by `DuplexerSynthesis::full_iteration` and
+   `MultiplexerSynthesis::full_iteration`), generalized to N channels: the
+   N×N p₀² system (Cramer 2×2 verbatim for N = 2, LU for N ≥ 3), per-channel
+   outer-edge return-loss selection (±j for N = 2 exactly as before; each
+   channel's own outer band edge mapped to the common axis for N ≥ 3), and
+   contiguous N-block root assignment in ascending channel-center order. The
+   N = 2 branch is bit-identical: all 10 gate-anchored duplexer tests
+   (orders 2–8 quasi-equiripple, §V/§VI printed-design goldens) pass
+   unchanged. Non-ideal Type-I at N > 2 is rejected with an explicit
+   `PreconditionViolation` (no paper basis for that generalization).
 3. **B3 — Convergence + fidelity gates for N = 3, 4.** Extend the
    `separation_limit` / `adjacent_channels_show_loading` test pair
    (`tests/multiplexer.rs`) to the full path: well-separated channels

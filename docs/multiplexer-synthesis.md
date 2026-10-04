@@ -228,13 +228,17 @@ the doc reflects reality, not aspiration.
    the other channels' stopband reactances load the common node).
 
    The `Duplexer::response` (N=2 diplexer) still uses its own geometric-mean
-   model and is unchanged; B2 will fold the duplexer into the shared
-   multiplexer path.
+   model and is unchanged.
 
-3. **p₀ N×N linear system not implemented.** The doc's §Unitary condition
-   (solving for `|p_{0i}|²` from a return-loss constraint per passband edge)
-   is replaced by the same simplified perturbation fallback the diplexer uses
-   (`multiplexer.rs` `synthesize`). No `nalgebra` N×N solve is performed.
+3. **p₀ N×N linear system — implemented in the full path (B2, 2026-10-04).**
+   The doc's §Unitary condition (solving for `|p_{0i}|²` from a
+   return-loss constraint per passband edge) is implemented in the shared
+   `src/synthesis/machiarella.rs` full-spectral loop (opt-in via
+   `MultiplexerSynthesis::full_iteration(true)`, also used by
+   `DuplexerSynthesis::full_iteration(true)`): N×N `nalgebra` LU solve with
+   partial pivoting for N ≥ 3 (the historical Cramer's-rule 2×2 is preserved
+   verbatim for N = 2). The default simplified perturbation path is unchanged
+   and performs no N×N solve.
 
 4. **`recover_filter_design` yields fully-reflective channels — RESOLVED.**
    This was previously reported as a KNOWN BUG. Investigation revealed the root
@@ -270,10 +274,26 @@ the doc reflects reality, not aspiration.
 The review findings and their resolutions are recorded in
 `docs/multiplexer-code-review.md`. As of 0.5.0 (P1) the mutual-loading
 perturbation **does** propagate into the returned channel matrices (deviation
-item 5's no-op is resolved); the path remains a simplified model (not the full
-N×N p₀ spectral solve) and does not reach machine tolerance for well-separated
-channels. The produced channel filters are valid passband filters, which is the
-verifiable contract the tests assert.
+item 5's no-op is resolved); the *default* simplified path remains a simplified
+model (not the full N×N p₀ spectral solve) and does not reach machine
+tolerance for well-separated channels. The produced channel filters are valid
+passband filters, which is the verifiable contract those tests assert.
+
+**B2 (2026-10-04): the full spectral path now reaches N channels.** The
+converged 2-channel Macchiarella–Tamiazzo loop is shared with the multiplexer
+via `src/synthesis/machiarella.rs` (`MultiplexerSynthesis::full_iteration(true)`
+and `DuplexerSynthesis::full_iteration(true)` call the same code). For
+N ≥ 3 it generalizes to the N×N p₀² solve (LU), per-channel outer-edge
+return-loss selection, and contiguous N-block root assignment. The N = 2
+branch is bit-identical to the historical loop, so the gate-anchored diplexer
+results are unchanged. Gated by
+`multiplexer_full_iteration_triplexer_converges` / `_quadruplexer_converges`
+(convergence, 0 dB per-channel passbands, 22 dB antenna RL at each outer edge,
+and the para-identity D·D̃ = R losslessness invariant) and
+`multiplexer_full_iteration_rejects_nonideal_type_i_for_n_gt_2` (explicit
+rejection of a non-ideal Type-I junction for N > 2). The full path is opt-in
+and heavier (spectral factorization per iteration); the lightweight simplified
+perturbation remains the default.
 
 ## Verification / Acceptance Criteria
 

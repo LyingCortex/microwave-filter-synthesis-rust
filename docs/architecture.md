@@ -353,9 +353,14 @@ Combines two band-pass `FilterDesign`s and computes the 3-port S-parameters
 ### `multiplexer` — N-Channel Multiplexer
 
 Generalizes the duplexer to an arbitrary number of channels over a common
-junction. `MultiplexerSynthesis` runs the iterative mutual-loading loop;
-`Multiplexer` provides (N+1)-port analysis (`response`, `channel`,
-`channel_folded`, `channel_matrices`). Built on `FilterDesign`.
+junction. `MultiplexerSynthesis` runs the iterative mutual-loading loop in
+two paths: the default simplified frequency-offset perturbation, and the
+full Macchiarella–Tamiazzo spectral path (`full_iteration(true)`) shared with
+the duplexer via `synthesis::machiarella` (B2, 2026-10-04) — the exact
+common-domain bandpass transform, the N×N p₀² solve (LU for N ≥ 3), and
+contiguous N-block root assignment. `Multiplexer` provides (N+1)-port
+analysis (`response`, `channel`, `channel_folded`, `channel_matrices`).
+Built on `FilterDesign`.
 
 ### `optimize` — Coupling-Matrix Optimization
 
@@ -539,18 +544,23 @@ let context = run_full_pipeline(request)?;
 2. **Repeated poles** in the residue expansion are not handled — Laurent expansion
    is not implemented.
 3. **Wheel topology** is deprecated and currently an alias of Arrow.
-4. **N-channel mutual loading fidelity** — the perturbation now propagates
-   into the output coupling matrices (P1 fixed, 0.5.0), but the simplified
-   frequency-offset perturbation has limited passband fidelity for adjacent
-   channels (it does not converge to machine tolerance for well-separated
-   bands, and the loaded channel loses some passband peak). The full
-   Macchiarella spectral path behind `DuplexerSynthesis::full_iteration(true)`
-   is **converged and gate-anchored** at Type-I orders 2–8 and at Type-II
-   (resonating node, incl. the §VI degree-40 GSM design) (2026-10-03, plan
-   D1–D4); it remains **opt-in** (default is the simplified path) and is not
-   yet generalized to N > 2 channels. See `docs/multiplexer-code-review.md`,
-   `docs/internal/architecture-review-2026-09-25.md`, and
-   `docs/continuation-plan.md` section A.
+4. **N-channel mutual loading fidelity** — the simplified frequency-offset
+   perturbation (the multiplexer's *default*) has limited passband fidelity
+   for adjacent channels (it does not converge to machine tolerance for
+   well-separated bands, and the loaded channel loses some passband peak).
+   The full Macchiarella spectral path behind
+   `DuplexerSynthesis::full_iteration(true)` is **converged and
+   gate-anchored** at Type-I orders 2–8 and at Type-II (resonating node,
+   incl. the §VI degree-40 GSM design) (2026-10-03, plan D1–D4) and is
+   **generalized to N channels** (B2, 2026-10-04, plan B2):
+   `MultiplexerSynthesis::full_iteration(true)` runs the same shared loop
+   (`src/synthesis/machiarella.rs`); the N = 2 branch is bit-identical to
+   the historical duplexer loop, and N = 3/4 order-4 triplexers/quadruplexers
+   are gate-anchored (convergence, 0 dB passbands, quasi-equiripple antenna
+   RL, para-identity D·D̃ = R). For N > 2 only the ideal Type-I junction
+   (n = 1, b0 = 0) and Type-II are supported. See
+   `docs/multiplexer-code-review.md`, `docs/internal/architecture-review-2026-09-25.md`,
+   and `docs/continuation-plan.md` sections A and B.
 
 ## Future Roadmap
 
@@ -561,7 +571,7 @@ Worked plan with sequencing and acceptance criteria:
 |-------|---------|----------|
 | Next | Passband transmission zeros | High |
 | Next | Repeated-pole residue expansion | High |
-| Next | Generalize the full spectral path to N-channel (multiplexer) mutual loading | High |
+| Done | Generalize the full spectral path to N-channel (multiplexer) mutual loading (B2, 2026-10-04) | — |
 | Done | Full Macchiarella spectral path converged for the duplexer (Type-I orders 2–8 + Type-II, gate-anchored, 2026-10-03) | — |
 | Later | Butterworth/Elliptic approximation families | Low |
 | Later | Multi-band synthesis (true multi-passband, scope-1) — design doc first | Medium |

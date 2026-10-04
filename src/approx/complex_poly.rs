@@ -914,6 +914,31 @@ pub fn pad_polynomial(poly: &ComplexPolynomial, target_len: usize) -> Result<Com
     ComplexPolynomial::new(padded)
 }
 
+/// Composes polynomial `P` with the affine map `z ↦ (z − β)/α`, i.e. returns
+/// the coefficients of `P((z − β)/α) = Q(z)`.
+///
+/// Shared by the Macchiarella–Tamiazzo diplexer and multiplexer full-spectral
+/// paths (`crate::synthesis::machiarella`), which map each channel's
+/// prototype polynomial into the common bandpass variable.
+pub fn compose_affine(poly: &ComplexPolynomial, alpha: f64, beta: Complex64) -> Result<ComplexPolynomial> {
+    if alpha == 0.0 || !alpha.is_finite() || !beta.re.is_finite() || !beta.im.is_finite() {
+        return Err(MfsError::NumericalFailure(
+            "affine channel-domain transform requires a finite non-zero scale".into(),
+        ));
+    }
+    // u = z/α, c = −β/α  ⇒  P((z−β)/α) = P(u + c); substitute u = z/α.
+    let shifted = poly.shift(-beta / alpha)?;
+    // Substitute u = z/α: coefficient of z^k becomes coeff_k / α^k.
+    let mut coefficients = shifted.coefficients.clone();
+    let mut inv_alpha_pow = Complex64::new(1.0, 0.0);
+    let inv_alpha = Complex64::new(1.0 / alpha, 0.0);
+    for coefficient in coefficients.iter_mut() {
+        *coefficient *= inv_alpha_pow;
+        inv_alpha_pow *= inv_alpha;
+    }
+    ComplexPolynomial::new(coefficients)
+}
+
 /// Computes the maximum displacement between two sets of roots (sorted by
 /// imaginary part). Returns [`f64::INFINITY`] if the two sets differ in size.
 ///

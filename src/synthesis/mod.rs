@@ -1,10 +1,15 @@
 mod engine;
+mod machiarella;
 mod orchestration;
 mod recovery;
 mod residues;
 mod sections;
 
 pub use engine::{MatrixSynthesisEngine, MatrixSynthesisMethod, MatrixSynthesisOutcome};
+pub use machiarella::{
+    junction_response, ChannelState, FullIterationState, JunctionCommon, JunctionResponse,
+    Prepared, prepare, run_full_iteration, synthesize_full,
+};
 pub use orchestration::{
     build_filter_spec, synthesize_and_evaluate_with_mapping, synthesize_generalized_chebyshev,
     ApproximationKind, EvaluationOutcome, SynthesisOutcome,
