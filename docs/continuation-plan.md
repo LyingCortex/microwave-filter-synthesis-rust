@@ -23,7 +23,7 @@ carries *what to do next and how to know it is done*.
 | Duplexer | Simplified frequency-offset perturbation (default); full Macchiarella–Tamiazzo spectral path behind `DuplexerSynthesis::full_iteration(true)` **converges at Type-I orders 2–8 and Type-II (incl. the §VI degree-40 GSM design), all gate-anchored** (2026-10-03) | High (publication-anchored, full path) / Medium (simplified default) |
 | Multiplexer (N-channel) | Independent per-channel synthesis + simplified perturbation (default); **full Macchiarella–Tamiazzo spectral path for N channels behind `MultiplexerSynthesis::full_iteration(true)`** (shared with the duplexer, `src/synthesis/machiarella.rs`; B2, 2026-10-04) converges at N = 3/4 order-4 (gate-anchored); response is the **true (N+1)-port admittance model** (B1) | High (publication-anchored, full path) / Medium (simplified default) |
 | Multi-band | **Mapping layer in place** — `freq` supports all four prototype families plus `MultiBandMapping` (E3/C1, 2026-09-29); no design doc, no multi-band approximation, no synthesis path | — |
-| Optimization | LM `tune_matrix` / `extract_matrix` (hand-rolled Gaussian elimination, **scale-aware FD Jacobian `δ = 1e-7·max(1,|x_i|)`** with halving retry, topology frozen to template; convergence on successive-iteration cost after accepted steps; singular trials rejected, not errors; **`extract_matrix` starts from a crude inline-chain guess**); 3 lib unit tests + **2 order-6 integration gates (synthesize→perturb→recover, extract-from-crude-guess) GREEN (D2-opt, 2026-10-04)** | Medium (order-6 extraction/recovery gate-anchored; no bench, no CLI/Python surface) |
+| Optimization | LM `tune_matrix` / `extract_matrix` (hand-rolled Gaussian elimination, **scale-aware FD Jacobian `δ = 1e-7·max(1,|x_i|)`** with halving retry, topology frozen to template; convergence on successive-iteration cost after accepted steps; singular trials rejected, not errors; **`extract_matrix` starts from a crude inline-chain guess**); 3 lib unit tests + **2 order-6 integration gates (synthesize→perturb→recover, extract-from-crude-guess) GREEN (D2-opt, 2026-10-04)** + **CLI `optimize`/`extract` subcommands and Python `extract`/`tune` (D3-opt, 2026-10-04), e2e-gated** | Medium (order-6 extraction/recovery gate-anchored; CLI/Python surface e2e-gated; no bench) |
 
 Known limitations that gate the areas below (full list in
 `docs/architecture.md` "Known Limitations"):
@@ -532,7 +532,7 @@ from the CLI/Python surfaces, with integration-level evidence.
 - 3 lib unit tests, all order 3–4, well-posed. **2 `tests/optimizer_integration.rs`
   gates now GREEN (D2-opt, 2026-10-04): order-6 folded perturb→recover (6 iters
   → ~3e-10 relative) and order-6 transversal extract-from-crude-guess (9 iters
-  → max|ΔS| ~5e-10).** No bench, not exposed in the CLI or Python bindings.
+  → max|ΔS| ~5e-10).** No bench, but **exposed in the CLI (`optimize`/`extract` subcommands, D3-opt, 2026-10-04) and Python (module-level `extract`, `tune` since D1-opt); both e2e-gated.**
 - Design/rationale: `docs/numerical-optimization-report.md` (the three
   numeric optimizations: O(n) Givens, selective linear solve, adaptive
   root finding — all shipped; that doc covers performance, not the LM
@@ -561,13 +561,30 @@ from the CLI/Python surfaces, with integration-level evidence.
    propagated out as an error instead of being a λ×2 rejection. Both gates
    are un-`#[ignore]`d and green; the hand-rolled elimination is kept (not a
    bottleneck — 2 gates in ~1 s of test time).
-3. **D3 (opt) — CLI + Python surface.** `mfs_cli.rs` `optimize`
-   subcommand (input matrix JSON/Touchstone + target response JSON or
-   Touchstone → optimized matrix, same `--format` conventions as the
-   existing subcommands) and a thin `PyFilterDesign.optimize(...)` /
-   module-level `extract` in `src/python.rs`. Both delegate to the same
-   `optimize_matrix` core (the `pipeline::context_from_request` pattern —
-   one canonical entry, thin wrappers).
+3. **D3 (opt) — CLI + Python surface — DONE (2026-10-04).** `mfs_cli.rs` gains
+   two subcommands, both delegating to the shared optimizer core (`one
+   canonical entry, thin wrappers`):
+   - **`optimize`** — input JSON `{order, topology, data, samples}` (the
+     matrix as a flat row-major `data`, the target as `samples` with
+     `frequency_hz`/`s11_re/im`/`s21_re/im`) or a Touchstone `.s2p` via
+     `--target` (the matrix must then still come from the JSON); knobs
+     `--order`, `--max-iterations`, `--tolerance`, `--lambda`, `--q`,
+     `--output`. Prints `{order, topology, matrix, data, cost, iterations,
+     converged, recovered:{samples}}` (or a table).
+   - **`extract`** — input JSON `{samples:[...]}` (or a `.s2p` via `--target`),
+     `--order`, `--output`; calls `extract_matrix` directly.
+   - `src/python.rs` gains a module-level **`extract(freqs, s21_re, s21_im,
+     s11_re, s11_im, order)`** returning `{matrix, cost, iterations,
+     converged}`; it delegates to `extract_matrix`. (`PyFilterDesign.tune`
+     already wrapped `optimize_matrix` — D1-opt — so no new tune surface was
+     needed.)
+   - End-to-end black-box regression in `tests/cli_integration.rs`
+     (`#[cfg(feature = "cli")]`): `test_optimize_subcommand_recovers_perturbed_matrix`
+     (order-4 folded, 3 couplings ×1.05 → recovered to < 1e-4 relative) and
+     `test_extract_subcommand_recovers_response` (order-4 transversal →
+     max|ΔS| < 1e-3), both asserting physical quantities, plus a `#[cfg(test)]`
+     `optimizer_tests` module in the bin covering the JSON parsers (flat +
+     nested) and the two optimizer cores.
 4. **D4 (opt) — Bench + regression.** Criterion bench (tune and extract at
    orders 4/6/8, measuring iterations and cost reduction); a regression
    entry in `tests/synthesis_regression.rs`-style file for an
@@ -619,7 +636,7 @@ Ordered by how much they block the areas above:
 ```
 Wave 1 (parallel):  E4 (N=8 regression) · D1-opt (RED)   [E3 + C1 + E4 closed; D1-opt RED gate committed 2026-09-29, GREEN 2026-10-04]
 Wave 2 (serial):    D1–D4 (duplexer full path)   [DONE 2026-10-03 — Type-I orders 2–8 + §V golden + Type-II §VI anchor, all gate-anchored]
-Wave 3 (parallel):  D2-opt [DONE 2026-10-04 — scale-δ + early-stop + chain-guess, both order-6 gates green] · D3–D4-opt (optimizer CLI/Python, bench) · C0 (multi-band design doc + route choice)
+Wave 3 (parallel):  D2-opt [DONE 2026-10-04 — scale-δ + early-stop + chain-guess, both order-6 gates green] · D3-opt [DONE 2026-10-04 — CLI optimize/extract + Python extract, e2e-gated] · D4-opt (optimizer bench) · C0 (multi-band design doc + route choice)
 Wave 4 (serial):    B1 [DONE 2026-10-04] → B2 [DONE 2026-10-04] → B3 [DONE 2026-10-04] → B4 [DONE 2026-10-04] (multiplexer; Wave 2 done — full wave complete)
 Wave 5:             E1 (passband TZ) · E2 (Laurent) — needed by B3's fidelity work and
                     by C2 when route-α is chosen (inter-band TZs); then C2 → C3

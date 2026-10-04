@@ -302,3 +302,200 @@ fn test_invalid_input_produces_structured_error_on_stderr() {
     let error_type = error_value["error_type"].as_str().unwrap_or("");
     assert!(!error_type.is_empty(), "error_type should not be empty");
 }
+
+// ---------------------------------------------------------------------------
+// Test: `optimize` subcommand — perturb → recover, end-to-end through the binary
+// ---------------------------------------------------------------------------
+
+/// Builds a JSON input string for the `optimize` subcommand: a perturbed
+/// order-4 folded matrix (flat `data`) plus its recorded target response
+/// (`samples`, re/im channels). Returns the perturbation factor applied.
+fn build_optimize_input_json() -> String {
+    let original = mfs::design::FilterDesign::prototype(4, 20.0)
+        .synthesize()
+        .expect("synthesize")
+        .to_folded()
+        .expect("fold");
+    let g = mfs::freq::FrequencyGrid::linspace(-2.0, 2.0, 41).expect("grid");
+    let target = mfs::response::ResponseSolver.evaluate_normalized(&original, &g).expect("target");
+
+    // Perturb 3 inter-resonator couplings by 5 %.
+    let side = original.side();
+    let order = original.order();
+    let mut data = original.as_slice().to_vec();
+    let mut done = 0;
+    'outer: for row in 1..=order {
+        for col in (row + 1)..=order {
+            let idx = row * side + col;
+            if data[idx].abs() > 1e-9 {
+                data[idx] *= 1.05;
+                data[col * side + row] *= 1.05;
+                done += 1;
+                if done == 3 {
+                    break 'outer;
+                }
+            }
+        }
+    }
+    let perturbed =
+        mfs::matrix::CouplingMatrix::new_with_topology(order, original.topology(), data)
+            .expect("perturbed");
+
+    let samples: Vec<serde_json::Value> = target
+        .samples
+        .iter()
+        .map(|s| {
+            serde_json::json!({
+                "frequency_hz": s.frequency_hz,
+                "s11_re": s.s11_re,
+                "s11_im": s.s11_im,
+                "s21_re": s.s21_re,
+                "s21_im": s.s21_im,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "order": order,
+        "topology": "folded",
+        "data": perturbed.as_slice(),
+        "samples": samples,
+    })
+    .to_string()
+}
+
+#[test]
+fn test_optimize_subcommand_recovers_perturbed_matrix() {
+    let bin = cli_bin();
+    if !bin.exists() {
+        eprintln!("Skipping test: binary not found at {}", bin.display());
+        return;
+    }
+
+    let original = mfs::design::FilterDesign::prototype(4, 20.0)
+        .synthesize()
+        .expect("synthesize")
+        .to_folded()
+        .expect("fold");
+    let input_file = std::env::temp_dir().join("mfs_cli_test_optimize_input.json");
+    std::fs::write(&input_file, build_optimize_input_json()).expect("write input");
+
+    let output = Command::new(&bin)
+        .arg("optimize")
+        .arg("--order")
+        .arg("4")
+        .arg("--max-iterations")
+        .arg("500")
+        .arg("--tolerance")
+        .arg("1e-10")
+        .arg("--lambda")
+        .arg("1e-2")
+        .arg("--input")
+        .arg(&input_file)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("execute optimize");
+    let _ = std::fs::remove_file(&input_file);
+
+    assert!(
+        output.status.success(),
+        "optimize exited with error. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout UTF-8");
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("stdout JSON");
+
+    // Physical assertions: the recovered matrix must match the original
+    // (the perturbed matrix was a good guess of it) within 1e-4 relative,
+    // and the optimizer must report convergence.
+    assert!(value["converged"].as_bool().unwrap_or(false), "optimizer must converge");
+    let side = original.side();
+    let recovered_rows: Vec<Vec<f64>> =
+        serde_json::from_value(value["matrix"].clone()).expect("matrix is nested rows");
+    let mut worst = 0.0_f64;
+    for i in 0..side {
+        for j in i..side {
+            let o = original.at(i, j).unwrap_or(0.0);
+            let r = recovered_rows[i][j];
+            if o.abs() > 1e-9 {
+                worst = worst.max((o - r).abs() / o.abs());
+            }
+        }
+    }
+    assert!(worst < 1e-4, "recovered matrix too far: worst_rel={worst}");
+    // The result must carry the re-evaluated response for inspection.
+    assert!(value["recovered"]["samples"].is_array(), "recovered samples present");
+}
+
+// ---------------------------------------------------------------------------
+// Test: `extract` subcommand — target → recovered response, end-to-end
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_extract_subcommand_recovers_response() {
+    let bin = cli_bin();
+    if !bin.exists() {
+        eprintln!("Skipping test: binary not found at {}", bin.display());
+        return;
+    }
+
+    let original = mfs::design::FilterDesign::prototype(4, 20.0)
+        .synthesize()
+        .expect("synthesize");
+    let g = mfs::freq::FrequencyGrid::linspace(-2.0, 2.0, 41).expect("grid");
+    let target = mfs::response::ResponseSolver.evaluate_normalized(original.matrix(), &g).expect("target");
+
+    let samples: Vec<serde_json::Value> = target
+        .samples
+        .iter()
+        .map(|s| {
+            serde_json::json!({
+                "frequency_hz": s.frequency_hz,
+                "s11_re": s.s11_re,
+                "s11_im": s.s11_im,
+                "s21_re": s.s21_re,
+                "s21_im": s.s21_im,
+            })
+        })
+        .collect();
+    let input_file = std::env::temp_dir().join("mfs_cli_test_extract_input.json");
+    std::fs::write(&input_file, serde_json::json!({ "samples": samples }).to_string()).expect("write input");
+
+    let output = Command::new(&bin)
+        .arg("extract")
+        .arg("--order")
+        .arg("4")
+        .arg("--input")
+        .arg(&input_file)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("execute extract");
+    let _ = std::fs::remove_file(&input_file);
+
+    assert!(
+        output.status.success(),
+        "extract exited with error. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout UTF-8");
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("stdout JSON");
+
+    // Physical assertion: the recovered matrix must reproduce the target
+    // response (all four S channels) within 1e-3 point-wise.
+    assert!(value["converged"].as_bool().unwrap_or(false), "extract must converge");
+    let rec_samples = &value["recovered"]["samples"];
+    assert!(rec_samples.is_array(), "recovered samples present");
+    let n = rec_samples.as_array().expect("samples array").len();
+    assert_eq!(n, target.samples.len(), "sample count matches");
+    let mut max_dev = 0.0_f64;
+    for (i, s) in rec_samples.as_array().unwrap().iter().enumerate() {
+        let t = &target.samples[i];
+        max_dev = max_dev
+            .max((s["s11_re"].as_f64().unwrap() - t.s11_re).abs())
+            .max((s["s11_im"].as_f64().unwrap() - t.s11_im).abs())
+            .max((s["s21_re"].as_f64().unwrap() - t.s21_re).abs())
+            .max((s["s21_im"].as_f64().unwrap() - t.s21_im).abs());
+    }
+    assert!(max_dev < 1e-3, "recovered response too far: max_dev={max_dev}");
+}

@@ -561,6 +561,90 @@ fn prototype(
     Ok(PyFilterDesign { inner })
 }
 
+/// Extracts a coupling matrix from a measured S-parameter response.
+///
+/// Builds a crude inline-chain initial guess for an `order`-resonator
+/// transversal filter and optimizes it against the measured response. The
+/// recovered matrix shares the inline-chain topology of the guess (the
+/// optimizer freezes the template's non-zero pattern), so this is the right
+/// entry point for transversal designs; a folded or arrow target is not
+/// representable from this start.
+///
+/// Args:
+///     freqs: List of sample frequencies (the values used as the normalized
+///         prototype grid the optimizer evaluates on).
+///     s21_re: Real parts of the measured S21 at each frequency.
+///     s21_im: Imaginary parts of the measured S21 at each frequency.
+///     s11_re: Real parts of the measured S11 at each frequency.
+///     s11_im: Imaginary parts of the measured S11 at each frequency.
+///     order: Filter order (number of resonators).
+///
+/// Returns:
+///     dict with keys: matrix (2D list), cost (float), iterations (int),
+///     converged (bool).
+#[pyfunction]
+#[pyo3(signature = (freqs, s21_re, s21_im, s11_re, s11_im, order))]
+fn extract(
+    py: Python<'_>,
+    freqs: Vec<f64>,
+    s21_re: Vec<f64>,
+    s21_im: Vec<f64>,
+    s11_re: Vec<f64>,
+    s11_im: Vec<f64>,
+    order: usize,
+) -> PyResult<PyObject> {
+    use crate::freq::FrequencyGrid;
+    use crate::optimize::extract_matrix;
+    use crate::response::{ResponseSample, SParameterResponse};
+    use pyo3::types::PyDict;
+
+    let n = freqs.len();
+    if n < 2 {
+        return Err(PyValueError::new_err("at least two frequency samples required"));
+    }
+    for (name, v) in [
+        ("s21_re", &s21_re),
+        ("s21_im", &s21_im),
+        ("s11_re", &s11_re),
+        ("s11_im", &s11_im),
+    ] {
+        if v.len() != n {
+            return Err(PyValueError::new_err(format!(
+                "{name} must have the same length as freqs ({n})"
+            )));
+        }
+    }
+
+    let target = SParameterResponse {
+        samples: freqs
+            .iter()
+            .enumerate()
+            .map(|(i, &f)| ResponseSample {
+                frequency_hz: f,
+                normalized_omega: f,
+                group_delay: None,
+                s11_re: s11_re[i],
+                s11_im: s11_im[i],
+                s21_re: s21_re[i],
+                s21_im: s21_im[i],
+            })
+            .collect(),
+    };
+
+    let grid = FrequencyGrid::linspace(freqs[0], *freqs.last().unwrap(), n)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+
+    let result = extract_matrix(&target, &grid, order)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let dict = PyDict::new(py);
+    dict.set_item("matrix", matrix_to_pylist(py, &result.matrix))
+        .unwrap();
+    dict.set_item("cost", result.cost).unwrap();
+    dict.set_item("iterations", result.iterations).unwrap();
+    dict.set_item("converged", result.converged).unwrap();
+    Ok(dict.into())
+}
+
 /// Python module definition.
 // ── Duplexer bindings ───────────────────────────────────────────────
 use crate::duplexer::Duplexer;
@@ -780,5 +864,6 @@ pub fn mfs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(prototype, m)?)?;
     m.add_function(wrap_pyfunction!(duplexer, m)?)?;
     m.add_function(wrap_pyfunction!(multiplexer, m)?)?;
+    m.add_function(wrap_pyfunction!(extract, m)?)?;
     Ok(())
 }

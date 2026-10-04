@@ -152,6 +152,61 @@ enum Command {
         #[arg(long, default_value = "401")]
         points: usize,
     },
+
+    /// Optimize a coupling matrix against a target response.
+    ///
+    /// The input matrix and the target response are both read from the JSON
+    /// file named by --input / stdin (matrix may be flat `data` or nested
+    /// rows; target may be a Touchstone .s2p file named by --target).
+    Optimize {
+        /// Filter order (number of resonators).
+        #[arg(short = 'n', long)]
+        order: usize,
+
+        /// Target response file (Touchstone .s2p). If omitted, the target
+        /// is read from the JSON input.
+        #[arg(long, value_name = "FILE")]
+        target: Option<PathBuf>,
+
+        /// Maximum number of Levenberg-Marquardt iterations.
+        #[arg(long, default_value = "200")]
+        max_iterations: usize,
+
+        /// Convergence tolerance on the cost change.
+        #[arg(long, default_value = "1e-8")]
+        tolerance: f64,
+
+        /// Initial Levenberg-Marquardt damping factor.
+        #[arg(long, default_value = "1e-3")]
+        lambda: f64,
+
+        /// Unloaded Q (finite = lossy, omit for lossless).
+        #[arg(long)]
+        q: Option<f64>,
+
+        /// Export the optimized matrix as Touchstone-free JSON to this path.
+        #[arg(long, value_name = "FILE")]
+        output: Option<PathBuf>,
+    },
+
+    /// Extract a coupling matrix from a measured response.
+    ///
+    /// Builds a crude inline-chain guess for the given order and optimizes
+    /// it against the measured response (Touchstone .s2p file or JSON input).
+    Extract {
+        /// Filter order (number of resonators).
+        #[arg(short = 'n', long)]
+        order: usize,
+
+        /// Measured response file (Touchstone .s2p or JSON). If omitted,
+        /// the response is read from the JSON input / stdin.
+        #[arg(long, value_name = "FILE")]
+        target: Option<PathBuf>,
+
+        /// Export the extracted matrix JSON to this path.
+        #[arg(long, value_name = "FILE")]
+        output: Option<PathBuf>,
+    },
 }
 
 /// Valid pipeline stage names for the --stage flag.
@@ -269,6 +324,31 @@ fn run(cli: &Cli) -> Result<(), CliRunError> {
             *points,
             &cli.format,
         );
+    }
+
+    if let Some(Command::Optimize {
+        order,
+        target,
+        max_iterations,
+        tolerance,
+        lambda,
+        q,
+        output,
+    }) = &cli.command
+    {
+        use mfs::optimize::OptimizeConfig;
+        let config = OptimizeConfig {
+            max_iterations: *max_iterations,
+            tolerance: *tolerance,
+            lambda: *lambda,
+            unloaded_q: q.filter(|q| q.is_finite() && *q > 0.0).unwrap_or(f64::INFINITY),
+            ..Default::default()
+        };
+        return run_optimize(cli, *order, target.as_deref(), &config, output.as_deref(), &cli.format);
+    }
+
+    if let Some(Command::Extract { order, target, output }) = &cli.command {
+        return run_extract(cli, *order, target.as_deref(), output.as_deref(), &cli.format);
     }
 
     // Determine execution mode based on flags
@@ -716,7 +796,351 @@ fn run_multiplexer(
 
     Ok(())
 }
+// ---------------------------------------------------------------------------
+// Optimizer subcommands (D3-opt): `optimize` and `extract`
+// ---------------------------------------------------------------------------
 
+/// Parses a measured / target S-parameter response from JSON.
+///
+/// Accepts `{"samples":[...]}` or a bare array, each sample carrying
+/// `frequency_hz` plus any of `s11_re/s11_im` and `s21_re/s21_im` (missing
+/// channels default to 0). Returns a `PreconditionViolation` on malformed
+/// input so the CLI reports it as a precondition error, not a crash.
+fn parse_response_json(json: &str) -> mfs::Result<mfs::response::SParameterResponse> {
+    use mfs::response::{ResponseSample, SParameterResponse};
+    let v: serde_json::Value = serde_json::from_str(json)
+        .map_err(|e| mfs::error::MfsError::PreconditionViolation(format!("invalid target JSON: {e}")))?;
+    let arr = v
+        .get("samples")
+        .and_then(|s| s.as_array())
+        .or_else(|| v.as_array())
+        .ok_or_else(|| {
+            mfs::error::MfsError::PreconditionViolation(
+                "target JSON must contain a `samples` array".into(),
+            )
+        })?;
+    let samples = arr
+        .iter()
+        .map(|s| {
+            let get = |k: &str| s.get(k).and_then(|x| x.as_f64()).unwrap_or(0.0);
+            Ok(ResponseSample {
+                frequency_hz: get("frequency_hz"),
+                normalized_omega: 0.0,
+                group_delay: None,
+                s11_re: get("s11_re"),
+                s11_im: get("s11_im"),
+                s21_re: get("s21_re"),
+                s21_im: get("s21_im"),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(SParameterResponse { samples })
+}
+
+/// Parses a coupling matrix from JSON.
+///
+/// Accepts `{"order": N, "data": [row-major]}` / `{"data": [[rows]]}` /
+/// `{"order": N, "matrix": [flat]}` / `{"matrix": [[rows]]}`. The topology is
+/// taken from the input if present (one of `transversal`/`folded`/`arrow`),
+/// else defaulted to transversal.
+fn parse_matrix_json(json: &str) -> mfs::Result<mfs::matrix::CouplingMatrix> {
+    use mfs::error::MfsError;
+    use mfs::matrix::{CouplingMatrix, MatrixTopology};
+    let v: serde_json::Value = serde_json::from_str(json)
+        .map_err(|e| MfsError::PreconditionViolation(format!("invalid matrix JSON: {e}")))?;
+
+    // Locate the raw matrix value: an object with "data"/"matrix", a bare
+    // object, or a bare array.
+    let (raw, order_hint, topo_hint) = if v.is_object() {
+        (
+            v.get("data")
+                .cloned()
+                .or_else(|| v.get("matrix").cloned()),
+            v.get("order").and_then(|x| x.as_u64()).map(|n| n as usize),
+            v.get("topology").and_then(|t| t.as_str()),
+        )
+    } else {
+        (Some(v.clone()), None, None)
+    };
+    let raw = raw.ok_or_else(|| {
+        MfsError::PreconditionViolation(
+            "matrix JSON must be {{order, data}} or an array (flat row-major or nested rows)"
+                .into(),
+        )
+    })?;
+
+    // Accept either a flat row-major vector or nested rows.
+    let rows: Vec<Vec<f64>> = if let Some(a) = raw.as_array() {
+        match a.first() {
+            Some(inner) if inner.is_array() => {
+                // Nested rows: array of arrays.
+                a.iter()
+                    .map(|r| {
+                        r.as_array().ok_or_else(|| {
+                            MfsError::PreconditionViolation("matrix rows must be arrays".into())
+                        })?
+                        .iter()
+                        .map(|x| x.as_f64())
+                        .collect::<Option<Vec<f64>>>()
+                        .ok_or_else(|| {
+                            MfsError::PreconditionViolation("matrix entries must be numbers".into())
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            }
+            _ => {
+                // Flat row-major vector: reshape into a square matrix.
+                let flat: Vec<f64> = a
+                    .iter()
+                    .map(|x| x.as_f64())
+                    .collect::<Option<Vec<f64>>>()
+                    .ok_or_else(|| {
+                        MfsError::PreconditionViolation(
+                            "matrix `data` must be a flat array of numbers".into(),
+                        )
+                    })?;
+                let side = (flat.len() as f64).sqrt().round() as usize;
+                if side * side != flat.len() || side < 3 {
+                    return Err(MfsError::DimensionMismatch {
+                        expected: side * side,
+                        actual: flat.len(),
+                    });
+                }
+                flat.chunks_exact(side).map(|c| c.to_vec()).collect()
+            }
+        }
+    } else {
+        return Err(MfsError::PreconditionViolation(
+            "matrix JSON must be an array or an object with `data`/`matrix`".into(),
+        ));
+    };
+
+    let side = rows.len();
+    for r in &rows {
+        if r.len() != side {
+            return Err(MfsError::DimensionMismatch {
+                expected: side,
+                actual: r.len(),
+            });
+        }
+    }
+    if side < 3 {
+        return Err(MfsError::PreconditionViolation(
+            "matrix side must be >= 3 (order >= 1)".into(),
+        ));
+    }
+
+    let order = match order_hint {
+        Some(o) => {
+            if o + 2 != side {
+                return Err(MfsError::DimensionMismatch {
+                    expected: (o + 2) * (o + 2),
+                    actual: side * side,
+                });
+            }
+            o
+        }
+        None => side - 2,
+    };
+    let topology = match topo_hint {
+        Some("folded") => MatrixTopology::Folded,
+        Some("arrow") => MatrixTopology::Arrow,
+        Some("transversal") | None => MatrixTopology::Transversal,
+        Some(other) => {
+            return Err(MfsError::PreconditionViolation(format!(
+                "unknown matrix topology '{other}' (expected transversal|folded|arrow)"
+            )));
+        }
+    };
+    CouplingMatrix::new_with_topology(order, topology, rows.into_iter().flatten().collect())
+}
+
+/// Loads a target response from a Touchstone file (`--target` pointing at a
+/// `.s2p`) or from the JSON string otherwise.
+fn load_target(
+    target: Option<&std::path::Path>,
+    json: &str,
+) -> Result<mfs::response::SParameterResponse, CliRunError> {
+    match target {
+        Some(path) if path.extension().and_then(|e| e.to_str()) == Some("s2p") => {
+            mfs::touchstone::read_touchstone(path).map_err(|e| CliRunError::Touchstone(e.to_string()))
+        }
+        Some(path) => Err(CliRunError::InputParse(format!(
+            "--target must be a Touchstone (.s2p) file, got '{}'",
+            path.display()
+        ))),
+        None => parse_response_json(json).map_err(CliRunError::Pipeline),
+    }
+}
+
+/// Re-evaluates a matrix on the grid defined by the target's frequency samples,
+/// for display next to the target.
+fn recovered_response(
+    matrix: &mfs::matrix::CouplingMatrix,
+    target: &mfs::response::SParameterResponse,
+) -> mfs::Result<mfs::response::SParameterResponse> {
+    use mfs::freq::FrequencyGrid;
+    use mfs::response::ResponseSolver;
+    let n = target.samples.len();
+    let first = target.samples.first().map(|s| s.frequency_hz).unwrap_or(-2.0);
+    let last = target.samples.last().map(|s| s.frequency_hz).unwrap_or(2.0);
+    let grid = FrequencyGrid::linspace(first, last, n.max(2))?;
+    ResponseSolver.evaluate_normalized(matrix, &grid)
+}
+
+/// Renders the optimized / extracted matrix as JSON.
+fn optimize_result_json(
+    order: usize,
+    result: &mfs::optimize::OptimizeResult,
+    target: &mfs::response::SParameterResponse,
+) -> Result<serde_json::Value, CliRunError> {
+    let side = result.matrix.side();
+    let rows: Vec<Vec<f64>> = (0..side)
+        .map(|r| (0..side).map(|c| result.matrix.at(r, c).unwrap_or(0.0)).collect())
+        .collect();
+    let mut value = serde_json::json!({
+        "order": order,
+        "topology": format!("{:?}", result.matrix.topology()),
+        "matrix": rows,
+        "data": rows.iter().flatten().copied().collect::<Vec<f64>>(),
+        "cost": result.cost,
+        "iterations": result.iterations,
+        "converged": result.converged,
+    });
+    if let Ok(rec) = recovered_response(&result.matrix, target) {
+        let samples: Vec<serde_json::Value> = rec
+            .samples
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "frequency_hz": s.frequency_hz,
+                    "s11_re": s.s11_re,
+                    "s11_im": s.s11_im,
+                    "s21_re": s.s21_re,
+                    "s21_im": s.s21_im,
+                })
+            })
+            .collect();
+        value["recovered"] = serde_json::json!({
+            "samples": samples,
+        });
+    }
+    Ok(value)
+}
+
+/// Runs the `optimize` subcommand.
+fn run_optimize(
+    cli: &Cli,
+    order: usize,
+    target: Option<&std::path::Path>,
+    config: &mfs::optimize::OptimizeConfig,
+    output: Option<&std::path::Path>,
+    format: &OutputFormat,
+) -> Result<(), CliRunError> {
+    use mfs::optimize::optimize_matrix;
+    let use_touchstone_target = target
+        .and_then(|p| p.extension().and_then(|e| e.to_str()))
+        == Some("s2p");
+    let json_input = if use_touchstone_target {
+        String::new()
+    } else {
+        read_input(cli)?
+    };
+    let target_resp = load_target(target, &json_input)?;
+    let matrix = parse_matrix_json(&json_input)?;
+    if matrix.order() != order {
+        return Err(CliRunError::InputParse(format!(
+            "--order {order} does not match the input matrix order {}",
+            matrix.order()
+        )));
+    }
+    let result = optimize_matrix(&matrix, &target_resp, &response_grid(&target_resp)?, config)
+        .map_err(CliRunError::Pipeline)?;
+    let value = optimize_result_json(order, &result, &target_resp)?;
+    if let Some(out) = output {
+        std::fs::write(out, serde_json::to_string_pretty(&value)?)
+            .map_err(|e| CliRunError::InputRead(format!("failed to write '{}': {e}", out.display())))?;
+        eprintln!("Optimized matrix written to: {}", out.display());
+    }
+    match format {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&value)?);
+        }
+        OutputFormat::Table => {
+            println!("── Optimized Matrix ──");
+            println!("  Order:     {order}");
+            println!("  Topology:  {:?}", result.matrix.topology());
+            println!("  Cost:      {:.3e}", result.cost);
+            println!("  Iters:     {}", result.iterations);
+            println!("  Converged: {}", result.converged);
+            let side = result.matrix.side();
+            if side <= 10 {
+                println!("  Matrix:");
+                for i in 0..side {
+                    let row: Vec<String> = (0..side)
+                        .map(|j| format!("{:>8.4}", result.matrix.at(i, j).unwrap_or(0.0)))
+                        .collect();
+                    println!("    [{}]", row.join(" "));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Builds the grid the optimizer evaluates on, from the target response.
+fn response_grid(target: &mfs::response::SParameterResponse) -> Result<mfs::freq::FrequencyGrid, CliRunError> {
+    use mfs::freq::FrequencyGrid;
+    let n = target.samples.len().max(2);
+    let first = target.samples.first().map(|s| s.frequency_hz).unwrap_or(-2.0);
+    let last = target.samples.last().map(|s| s.frequency_hz).unwrap_or(2.0);
+    FrequencyGrid::linspace(first, last, n).map_err(CliRunError::Pipeline)
+}
+
+/// Runs the `extract` subcommand.
+fn run_extract(
+    cli: &Cli,
+    order: usize,
+    target: Option<&std::path::Path>,
+    output: Option<&std::path::Path>,
+    format: &OutputFormat,
+) -> Result<(), CliRunError> {
+    use mfs::optimize::extract_matrix;
+    let json_input = read_input(cli)?;
+    let target_resp = load_target(target, &json_input)?;
+    let result = extract_matrix(&target_resp, &response_grid(&target_resp)?, order)
+        .map_err(CliRunError::Pipeline)?;
+    let value = optimize_result_json(order, &result, &target_resp)?;
+    if let Some(out) = output {
+        std::fs::write(out, serde_json::to_string_pretty(&value)?)
+            .map_err(|e| CliRunError::InputRead(format!("failed to write '{}': {e}", out.display())))?;
+        eprintln!("Extracted matrix written to: {}", out.display());
+    }
+    match format {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&value)?);
+        }
+        OutputFormat::Table => {
+            println!("── Extracted Matrix ──");
+            println!("  Order:     {order}");
+            println!("  Topology:  {:?}", result.matrix.topology());
+            println!("  Cost:      {:.3e}", result.cost);
+            println!("  Iters:     {}", result.iterations);
+            println!("  Converged: {}", result.converged);
+            let side = result.matrix.side();
+            if side <= 10 {
+                println!("  Matrix:");
+                for i in 0..side {
+                    let row: Vec<String> = (0..side)
+                        .map(|j| format!("{:>8.4}", result.matrix.at(i, j).unwrap_or(0.0)))
+                        .collect();
+                    println!("    [{}]", row.join(" "));
+                }
+            }
+        }
+    }
+    Ok(())
+}
 /// Chooses a response frequency range, defaulting to the outer channel bands.
 fn resolve_multiplexer_range(
     channels: &[mfs::design::FilterDesign],
@@ -1174,6 +1598,20 @@ enum CliRunError {
     Pipeline(mfs::MfsError),
     /// Serialization error.
     Serialization(String),
+    /// Touchstone file read error.
+    Touchstone(String),
+}
+
+impl From<serde_json::Error> for CliRunError {
+    fn from(e: serde_json::Error) -> Self {
+        Self::Serialization(e.to_string())
+    }
+}
+
+impl From<mfs::MfsError> for CliRunError {
+    fn from(e: mfs::MfsError) -> Self {
+        Self::Pipeline(e)
+    }
 }
 
 impl std::fmt::Display for CliRunError {
@@ -1183,6 +1621,7 @@ impl std::fmt::Display for CliRunError {
             Self::InputParse(msg) => write!(f, "invalid input JSON: {msg}"),
             Self::Pipeline(err) => write!(f, "{err}"),
             Self::Serialization(msg) => write!(f, "serialization error: {msg}"),
+            Self::Touchstone(msg) => write!(f, "touchstone error: {msg}"),
         }
     }
 }
@@ -1203,5 +1642,155 @@ fn error_type_name(err: &CliRunError) -> String {
             mfs::MfsError::PreconditionViolation(_) => "precondition_violation".to_string(),
         },
         CliRunError::Serialization(_) => "serialization_error".to_string(),
+        CliRunError::Touchstone(_) => "touchstone_error".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod optimizer_tests {
+    use super::*;
+    use mfs::design::FilterDesign;
+    use mfs::freq::FrequencyGrid;
+    use mfs::response::ResponseSolver;
+
+    /// Scales the first `count` non-zero inter-resonator couplings (upper
+    /// triangle, off-diagonal) of `matrix` by `factor`, mirroring the
+    /// integration-test perturbation helper.
+    fn perturb(matrix: &mfs::matrix::CouplingMatrix, count: usize, factor: f64) -> mfs::matrix::CouplingMatrix {
+        let side = matrix.side();
+        let order = matrix.order();
+        let mut data = matrix.as_slice().to_vec();
+        let mut done = 0;
+        for row in 1..=order {
+            for col in (row + 1)..=order {
+                let idx = row * side + col;
+                if data[idx].abs() > 1e-9 {
+                    data[idx] *= factor;
+                    data[col * side + row] *= factor;
+                    done += 1;
+                    if done == count {
+                        return mfs::matrix::CouplingMatrix::new_with_topology(
+                            order,
+                            matrix.topology(),
+                            data,
+                        )
+                        .expect("rebuild");
+                    }
+                }
+            }
+        }
+        mfs::matrix::CouplingMatrix::new_with_topology(order, matrix.topology(), data).expect("rebuild")
+    }
+
+    /// Worst relative deviation between two matrices over entries with |orig| > 1e-9.
+    fn worst_rel(a: &mfs::matrix::CouplingMatrix, b: &mfs::matrix::CouplingMatrix) -> f64 {
+        let side = a.side();
+        let mut w = 0.0_f64;
+        for i in 0..side {
+            for j in i..side {
+                let o = a.at(i, j).unwrap_or(0.0);
+                let r = b.at(i, j).unwrap_or(0.0);
+                if o.abs() > 1e-9 {
+                    w = w.max((o - r).abs() / o.abs());
+                }
+            }
+        }
+        w
+    }
+
+    #[test]
+    fn parse_matrix_json_flat_and_nested() {
+        // Flat row-major with order + topology.
+        let m = parse_matrix_json(r#"{"order":1,"data":[0,0.7,0.7,0,0.7,0,0,0,0]}"#).unwrap();
+        assert_eq!(m.order(), 1);
+        assert!((m.at(0, 1).unwrap() - 0.7).abs() < 1e-12);
+        assert_eq!(m.topology(), mfs::matrix::MatrixTopology::Transversal);
+
+        // Folded topology honored.
+        let m = parse_matrix_json(r#"{"order":1,"topology":"folded","data":[0,0.7,0.7,0,0.7,0,0,0,0]}"#)
+            .unwrap();
+        assert_eq!(m.topology(), mfs::matrix::MatrixTopology::Folded);
+
+        // Nested rows, order inferred (side 4 => order 2).
+        let m = parse_matrix_json(r#"[ [0,0,0,0],[0,1,1,0],[0,1,2,0],[0,0,0,0] ]"#).unwrap();
+        assert_eq!(m.order(), 2);
+        assert!((m.at(1, 2).unwrap() - 1.0).abs() < 1e-12);
+
+        // Order / side mismatch is a typed dimension error.
+        let err = parse_matrix_json(r#"{"order":2,"data":[0,0.7,0.7,0,0.7,0,0,0,0]}"#).unwrap_err();
+        assert!(matches!(err, mfs::error::MfsError::DimensionMismatch { .. }));
+    }
+
+    #[test]
+    fn parse_response_json_samples() {
+        let r = parse_response_json(
+            r#"{"samples":[
+               {"frequency_hz":-1.0,"s11_re":0.1,"s11_im":-0.2,"s21_re":0.9,"s21_im":0.0},
+               {"frequency_hz":1.0,"s11_re":0.1,"s11_im":0.2,"s21_re":0.9,"s21_im":0.0}
+            ]}"#,
+        )
+        .unwrap();
+        assert_eq!(r.samples.len(), 2);
+        assert!((r.samples[0].frequency_hz - (-1.0)).abs() < 1e-12);
+        assert!((r.samples[1].s21_im - 0.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn optimize_subcommand_recovers_perturbed_matrix() {
+        // Order-6 folded, perturb 4 couplings x1.07, recover via the CLI core.
+        let original = FilterDesign::prototype(6, 20.0)
+            .synthesize()
+            .unwrap()
+            .to_folded()
+            .unwrap();
+        let g = FrequencyGrid::linspace(-2.0, 2.0, 41).unwrap();
+        let target = ResponseSolver.evaluate_normalized(&original, &g).unwrap();
+        let perturbed = perturb(&original, 4, 1.07);
+
+        let config = mfs::optimize::OptimizeConfig {
+            max_iterations: 500,
+            tolerance: 1e-10,
+            lambda: 1e-2,
+            ..Default::default()
+        };
+        let result = mfs::optimize::optimize_matrix(&perturbed, &target, &g, &config).unwrap();
+        assert!(result.converged);
+        assert!(worst_rel(&original, &result.matrix) < 1e-4);
+
+        // The JSON round-trip through parse_matrix_json must preserve the
+        // perturbed matrix so a real CLI invocation sees the same start.
+        let side = perturbed.side();
+        let nested: Vec<Vec<f64>> = (0..side)
+            .map(|r| (0..side).map(|c| perturbed.at(r, c).unwrap_or(0.0)).collect())
+            .collect();
+        let json = format!(
+            r#"{{"order": 6, "topology": "folded", "data": {}}}"#,
+            serde_json::to_string(&nested).unwrap()
+        );
+        let parsed = parse_matrix_json(&json).unwrap();
+        assert_eq!(parsed.topology(), mfs::matrix::MatrixTopology::Folded);
+        assert!(worst_rel(&perturbed, &parsed) < 1e-12);
+
+    }
+
+    #[test]
+    fn extract_subcommand_recovers_transversal() {
+        // Order-6 transversal target; extract from a crude guess via the CLI core.
+        let original = FilterDesign::prototype(6, 20.0).synthesize().unwrap().matrix().clone();
+        let g = FrequencyGrid::linspace(-2.0, 2.0, 41).unwrap();
+        let target = ResponseSolver.evaluate_normalized(&original, &g).unwrap();
+        let result = mfs::optimize::extract_matrix(&target, &g, 6).unwrap();
+        assert!(result.converged);
+
+        let rec = ResponseSolver.evaluate_normalized(&result.matrix, &g).unwrap();
+        let mut max_dev = 0.0_f64;
+        for (a, b) in rec.samples.iter().zip(target.samples.iter()) {
+            max_dev = max_dev
+                .max((a.s11_re - b.s11_re).abs())
+                .max((a.s11_im - b.s11_im).abs())
+                .max((a.s21_re - b.s21_re).abs())
+                .max((a.s21_im - b.s21_im).abs());
+        }
+        assert!(max_dev < 1e-3);
     }
 }

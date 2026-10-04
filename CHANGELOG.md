@@ -4,6 +4,29 @@
 
 ### Added
 
+- **Optimizer is now reachable from the CLI and Python (D3-opt).**
+  `mfs_cli` gains two subcommands, both thin wrappers over the shared
+  `optimize_matrix` core:
+  - `optimize` — input JSON `{order, topology, data, samples}` (the matrix as a
+    flat row-major `data`, the target response as `samples` with
+    `frequency_hz`/`s11_re`/`s11_im`/`s21_re`/`s21_im`; a Touchstone `.s2p`
+    target is also accepted via `--target`). Knobs: `--order`,
+    `--max-iterations`, `--tolerance`, `--lambda`, `--q`, `--output`.
+  - `extract` — input JSON `{samples:[...]}` (or `--target` `.s2p`) + `--order`,
+    calls `extract_matrix` directly; `--output` optional.
+  Both print `{order, topology, matrix, data, cost, iterations, converged,
+  recovered:{samples}}` (or a `--format table` view).
+  `src/python.rs` gains a module-level `extract(freqs, s21_re, s21_im,
+  s11_re, s11_im, order) -> {matrix, cost, iterations, converged}` (a
+  `PyFilterDesign.tune` already wrapped `optimize_matrix` since D1-opt).
+  Two end-to-end black-box regression tests in `tests/cli_integration.rs`
+  (gated `#[cfg(feature = "cli")]`) drive the real binary and assert physical
+  quantities: `test_optimize_subcommand_recovers_perturbed_matrix` (order-4
+  folded, 3 couplings ×1.05 → recovered to < 1e-4 relative) and
+  `test_extract_subcommand_recovers_response` (order-4 transversal → max|ΔS|
+  < 1e-3). The bin also gains a `#[cfg(test)] optimizer_tests` module covering
+  the flat/nested matrix-JSON and response-JSON parsers.
+
 - **Benchmarks are now driven by the cross-language benchmark standard.**
   `benches/synthesis.rs` no longer hardcodes its case matrix: cases come from
   `filter-bench/data/cases/twoport.json`, timing policy from `harness.json`, and
