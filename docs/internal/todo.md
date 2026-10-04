@@ -51,12 +51,14 @@ section should be released as the next version tag when the maintainer cuts it.
 
 ### Medium priority (engineering quality)
 
-- **Multi-band synthesis (scope-1, decided 2026-09-29)** — true
+- **Multi-band synthesis (scope-1, decided 2026-09-29)** - true
   multi-passband synthesis, not per-band composition. Mapping layer done
   (`MultiBandMapping` in `freq`, 2026-09-29); **C0 design doc done
   2026-10-05** (`docs/internal/multi-band-synthesis-design.md`, route-α
-  committed); next is **E1 (passband TZs — hard blocker)** then C2/C3.
-  Sequencing and acceptance in `docs/continuation-plan.md` section C.
+  committed); **E1 investigated 2026-10-05 and is NOT a blocker** (gap TZs
+  are ordinary stopband zeros — the C0 doc's "passband" claim was wrong,
+  corrected); next is **C2a/C2b/C2c** then C3. Sequencing and acceptance in
+  `docs/continuation-plan.md` section C.
 - **Fold the duplexer synthesis into the multiplexer (N=2)** — the
   duplicated `recover_filter_design` path is now a single
   `synthesis::recover_channel_design` (closed), but `DuplexerSynthesis`

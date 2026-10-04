@@ -22,14 +22,16 @@ carries *what to do next and how to know it is done*.
 | Two-port synthesis | Full generalized-Chebyshev pipeline, orders 2–8 fixture-anchored, 10–30 numerically stable | High (publication-anchored) |
 | Duplexer | Simplified frequency-offset perturbation (default); full Macchiarella–Tamiazzo spectral path behind `DuplexerSynthesis::full_iteration(true)` **converges at Type-I orders 2–8 and Type-II (incl. the §VI degree-40 GSM design), all gate-anchored** (2026-10-03) | High (publication-anchored, full path) / Medium (simplified default) |
 | Multiplexer (N-channel) | Independent per-channel synthesis + simplified perturbation (default); **full Macchiarella–Tamiazzo spectral path for N channels behind `MultiplexerSynthesis::full_iteration(true)`** (shared with the duplexer, `src/synthesis/machiarella.rs`; B2, 2026-10-04) converges at N = 3/4 order-4 (gate-anchored); response is the **true (N+1)-port admittance model** (B1) | High (publication-anchored, full path) / Medium (simplified default) |
-| Multi-band | **Mapping layer in place** — `freq` supports all four prototype families plus `MultiBandMapping` (E3/C1, 2026-09-29); **C0 design doc done (2026-10-05), route-α committed** (`docs/internal/multi-band-synthesis-design.md`: math, `MultiBandSpec`, TZ law, topology, Fig. 25 fixture); no approximation/synthesis code yet (C2 blocked on E1) | — |
+| Multi-band | **Mapping layer in place** — `freq` supports all four prototype families plus `MultiBandMapping` (E3/C1, 2026-09-29); **C0 design doc done (2026-10-05), route-α committed** (`docs/internal/multi-band-synthesis-design.md`: math, `MultiBandSpec`, TZ law, topology, Fig. 25 fixture); no approximation/synthesis code yet (**C2 unblocked — E1 investigated 2026-10-05: gap TZs are stopband, not passband**) | — |
 | Optimization | LM `tune_matrix` / `extract_matrix` (hand-rolled Gaussian elimination, **scale-aware FD Jacobian `δ = 1e-7·max(1,|x_i|)`** with halving retry, topology frozen to template; convergence on successive-iteration cost after accepted steps; singular trials rejected, not errors; **`extract_matrix` starts from a crude inline-chain guess**); 3 lib unit tests + **2 order-6 integration gates (synthesize→perturb→recover, extract-from-crude-guess) GREEN (D2-opt, 2026-10-04)** + **CLI `optimize`/`extract` subcommands and Python `extract`/`tune` (D3-opt, 2026-10-04), e2e-gated** + **`benches/optimizer.rs` & 0.1 dB-noise extraction regression (D4-opt, 2026-10-04)** | Medium (order ≤ 6 extraction/recovery gate-anchored; CLI/Python e2e-gated; benched; order-8 cold-start extraction and topology-bound recovery documented as limits, report §6) |
 
 Known limitations that gate the areas below (full list in
 `docs/architecture.md` "Known Limitations"):
 
-1. **Passband transmission zeros** (`|zero| < 1`) — `generalized_ops.rs`
-   rejects with `NotImplemented`.
+1. **Passband transmission zeros** (`|zero| < 1`) — rejected with a typed
+   `MfsError::InvalidTransmissionZero` at the `approx` entry point; E1's
+   2026-10-05 investigation showed the single-function prototype cannot
+   realize them (Feldtkeller violation) — see §E item 1.
 2. **Repeated poles** — `residues/expansion.rs` returns `NotImplemented`.
 3. ~~**HighPass / BandStop mappings**~~ — implemented in `freq` (E3, 2026-09-29: `HighPassMapping`, `BandStopMapping` with full forward + inverse and singular-point clamps).
 4. **N-channel mutual-loading fidelity — RESOLVED for the full path (B2, 2026-10-04):**
@@ -446,8 +448,10 @@ roadmap line — and the one that most needs new mathematics.
 - **C0 design doc done (2026-10-05):** route committed (**C-route-α**),
   math/spec/TZ-law/topology/fixture fixed in
   `docs/internal/multi-band-synthesis-design.md`.
-- No multi-band approximation, no multi-band synthesis path (C2/C3 open;
-  C2 blocked on **E1**, passband TZs — see the doc and §E item 1).
+- No multi-band approximation, no multi-band synthesis path (C2/C3 open —
+  **not blocked on E1**: E1's investigation (2026-10-05, §E item 1) showed
+  inter-band TZs are ordinary stopband zeros, so route-α needs no passband-TZ
+  support; C2 is unblocked and gated only on its own implementation).
 - The vendored benchmark standard has **no** multi-band case family —
   there is no external gate; the acceptance bar is the in-repo literature
   fixture `Cameron2011_10_5_dual_band_symmetric` (Cameron 2011 Fig. 25).
@@ -467,11 +471,12 @@ C0 must decide between them before any code):
   Cameron-style transversal ladder: each stopband gap contributes
   transmission zeros, so a 2-band filter already carries inter-band TZs.
   Pro: reuses `MatrixSynthesisEngine` if the output is expressed as a
-  `PolynomialSet`; consistent with the crate's model. Con: the
-  inter-band TZs are *passband* zeros relative to the per-band
-  prototypes — this is the direct, large-scale application of E1
-  (passband TZ handling), which must therefore be designed together
-  with C, not after it.
+  `PolynomialSet`; consistent with the crate's model. The inter-band TZs
+  are physical gap stopband zeros; relative to each band's prototype they
+  map to `|Ω| ≥ 1` (E1's 2026-10-05 investigation corrected the earlier
+  "passband zeros" claim), so route-α does **not** need passband-TZ
+  support. (The C0 design doc's "E1 must be designed together with C"
+  premise is withdrawn.)
 - **C-route-β — step-impedance-resonator / comb-line ladder.** Classical
   multi-band topology; per-band impedance levels set by the band
   Chebyshev ladder; response is a rational function with known zeros.
@@ -492,10 +497,11 @@ C0 must decide between them before any code):
    The doc fixes: the characteristic function (product of per-band
    band-Chebyshev factors on the `MultiBandMapping` transform), the
    `MultiBandSpec`/`BandSpec`/`RejectionSpec` surface (invariants inherited
-   from `MultiBandMapping`), the **TZ placement law** (outer zeros are
-   stopband; inter-band zeros are **passband** relative to a band's
-   prototype → **E1 is a hard prerequisite**, with the exact code to relax:
-   `safe_sqrt_term`, `src/approx/generalized_ops.rs:96-105`), the target
+   `MultiBandMapping`), the **TZ placement law** (outer zeros are
+   stopband — and, as E1's investigation established, so are inter-band
+   zeros: every gap frequency maps to `|Ω| ≥ 1` on both adjacent bands,
+   so route-α does **not** require passband TZs; the C0 doc's original
+   "inter-band TZs are passband zeros" claim was wrong), the target
    topology ($N+2$ transversal; inter-band TZs become
    trisection/extracted-zero sections — no new `MatrixTopology`), and the
    **first acceptance fixture: `Cameron2011_10_5_dual_band_symmetric`
@@ -636,16 +642,36 @@ Python entry points covered by `tests/cli_integration.rs`
 
 Ordered by how much they block the areas above:
 
-1. **Passband transmission zeros (`|zero| < 1`).** Blocks high-fidelity
-   duplexer/multiplexer designs where TZs land in-band after the N-channel
-   perturbation shifts the roots — and is a hard dependency of multi-band
-   route-α (section C), whose inter-band TZs are passband zeros relative to
-   the per-band prototypes. Work: complex-zero handling in
-   `generalized_ops.rs` (relax `safe_sqrt_term`), plus the spec-layer
-   decision — today `FilterSpec` *accepts* `|z| < 1` (see
-   `spec/types.rs` test storing 0.75) and the rejection is deferred to the
-   approximation layer; the plan is to keep spec permissive and fail at
-   `approx` with a typed error, then extend.
+1. **Passband transmission zeros (`|zero| < 1`) — investigated 2026-10-05;
+   the planned work item is mathematically impossible as specified.**
+   The plan's route ("relax `safe_sqrt_term`" +
+   `generalized_ops.rs:96-105`) was checked end-to-end and fails:
+   - `P(w) = ∏(w − z_k)` always has **real** roots, so a zero at `|z| < 1`
+     *does* impose a finite real-frequency null (`|S21| = 0` at `w = z`).
+     That part of the premise is fine.
+   - But the literal relaxation — making `√(1 − 1/z²)` imaginary — makes
+     `F(s)` complex **non-Hermitian** (`F(jω) ∈ ℂ`), whereas the physical
+     characteristic function `K(jω) = F/P` must be **real** for the
+     Feldtkeller identity `|E|² = |F|² + |P|²/ε²` to hold. Measured
+     (order-4, RL 20 dB, `z = 0.5` versus `z = 1.5`): the identity
+     residual is O(1) at every ω for `|z| < 1`, versus ≤ 1e-13 for
+     `|z| ≥ 1`. The relaxed recurrence is not a valid prototype.
+   - The design doc's claim that inter-band gap frequencies are `|Ω| < 1`
+     per band is **false**. For adjacent passbands `[f1,f2]`, `[f3,f4]`, a
+     band's `|Ω| = 1` boundary *is* its own edge, so every gap frequency
+     maps to `|Ω| ≥ 1` on both bands: for 10–11 GHz / 12–13 GHz, the
+     11–12 GHz gap maps to `Ω ∈ [+1.00, +2.83]` on the lower band and
+     `[−3.18, −1.00]` on the upper — ordinary **stopband** zeros.
+   **Consequence:** an equiripple prototype with an in-band null requires
+   the *multifunction* characteristic (a ∏-form `K(s)` whose in-band
+   extrema are not the roots of `F`), not the single-function generalized
+   Chebyshev `F/P`. That is genuine new approximation research, not a
+   helper relaxation, and it is **not** the mechanism multi-band route-α
+   needs (gap zeros are ordinary stopband zeros). Spec-layer decision:
+   `FilterSpec` stays permissive, and `approx` now rejects `|zero| < 1`
+   with a typed error (`MfsError::InvalidTransmissionZero`) at the
+   entry point instead of leaking `NotImplemented` from a helper.
+   `|zero| = 1` (imaginary-axis ripple zero) is likewise rejected.
 2. **Repeated-pole residue expansion (Laurent).** Blocks any design whose
    perturbed root set degenerates — a realistic risk once the full
    spectral path actually moves roots (A/B). Work in
@@ -671,8 +697,8 @@ Wave 1 (parallel):  E4 (N=8 regression) · D1-opt (RED)   [E3 + C1 + E4 closed; 
 Wave 2 (serial):    D1–D4 (duplexer full path)   [DONE 2026-10-03 — Type-I orders 2–8 + §V golden + Type-II §VI anchor, all gate-anchored]
 Wave 3 (parallel):  D2-opt [DONE 2026-10-04 — scale-δ + early-stop + chain-guess, both order-6 gates green] · D3-opt [DONE 2026-10-04 — CLI optimize/extract + Python extract, e2e-gated] · D4-opt [DONE 2026-10-04 — `benches/optimizer.rs` + noise regression + report §6] · C0 [DONE 2026-10-05 — design doc, route-α committed]
 Wave 4 (serial):    B1 [DONE 2026-10-04] → B2 [DONE 2026-10-04] → B3 [DONE 2026-10-04] → B4 [DONE 2026-10-04] (multiplexer; Wave 2 done — full wave complete)
-Wave 5:             E1 (passband TZ — **hard blocker for C2, route-α committed**) · E2 (Laurent) — needed by B3's fidelity work and
-                    by C2 (inter-band TZs); then C2 → C3
+Wave 5:             E1 [INVESTIGATED 2026-10-05 — refuted: no valid passband-TZ prototype in the single-function form; approx now rejects |z|<1 typed; route-α does NOT need it] · E2 (Laurent) — needed by B3's fidelity work and
+                    by C2 (inter-band TZs); then C2 [UNBLOCKED] → C3
 ```
 
 Rationale: the duplexer full path (Wave 2) was the only item on the critical

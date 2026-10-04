@@ -12,13 +12,12 @@
   IEEE TMTT 53(11) 2005 (DOI `10.1109/TMTT.2005.855749`); route-β deferred
   with rationale. The doc specifies the characteristic function, the
   `MultiBandSpec`/`BandSpec`/`RejectionSpec` surface, the transmission-zero
-  placement law (outer zeros stopband; **inter-band zeros passband** →
-  **E1 is a hard prerequisite**, exact code named:
-  `safe_sqrt_term`, `src/approx/generalized_ops.rs`), the target $N+2$
+  placement law (outer zeros stopband; **inter-band zeros also stopband** —
+  corrected 2026-10-05, see the Fixed entry below), the target $N+2$
   transversal topology (inter-band TZs become trisection/extracted-zero
   sections), and the first acceptance fixture
   `Cameron2011_10_5_dual_band_symmetric` (Cameron 2011 Fig. 25), already
-  in-repo. No code yet — C2/C3 are gated on E1.
+  in-repo. No code yet — C2 unblocked (route-α does not need passband TZs).
 
 - **`benches/optimizer.rs` — a Criterion bench for the LM optimizer (D4-opt).**
   Times `optimize_matrix` (`tune` scenario: order-4/6/8 folded, 4 inter-resonator
@@ -232,6 +231,33 @@
 
 
 ### Fixed
+
+- **E1 (passband transmission zeros) — investigated, refuted, and the
+  design-doc premise corrected.** The plan (`docs/continuation-plan.md` §E
+  item 1) and the C0 design doc claimed (a) that relaxing `safe_sqrt_term`
+  (`src/approx/generalized_ops.rs`) would enable in-band transmission zeros
+  and (b) that multi-band route-α's inter-band zeros are passband zeros that
+  make E1 a hard prerequisite for C2. Both are wrong:
+  - A literal relaxation (imaginary `√(1 − 1/z²)`) produces a complex
+    **non-Hermitian** `F(s)` (`F(jω) ∈ ℂ`), so the Feldtkeller identity
+    `|E|² = |F|² + |P|²/ε²` fails at O(1) for `|z| < 1` (measured: residual
+    ~1e-1…1e1), versus ≤ 1e-13 for `|z| ≥ 1`. The relaxed recurrence is not a
+    valid prototype; a physical in-band null needs the *multifunction*
+    characteristic, which is new approximation research, not a helper change.
+  - A `BandPassMapping`'s `|Ω| = 1` boundary *is* the band's own edge, so
+    inter-band gap frequencies map to `|Ω| ≥ 1` on **both** adjacent bands
+    (worked example, bands 10–11/12–13 GHz: the 11–12 GHz gap is
+    `Ω ∈ [+1.00, +2.83]` on the lower band and `[−3.18, −1.00]` on the upper).
+    Route-α's gap zeros are ordinary stopband zeros → **E1 is not a blocker
+    for C2**.
+  - `generalized_chebyshev_polynomials` now rejects `|zero| ≤ 1` at the
+    **entry point** with a typed `MfsError::InvalidTransmissionZero` (was an
+    untyped `NotImplemented` leaking from the helper); `safe_sqrt_term` keeps
+    its guard, reworded. The spec layer stays permissive.
+  - New integration test `tests/passband_tz.rs` pins the typed rejection, the
+    unchanged stopband path, and the corrected gap→stopband TZ law.
+  - Docs corrected: plan §E item 1, §C status/route-α rationale/table/Wave 5
+    line, and the C0 design doc (TZ law, acceptance criteria, risks).
 
 - **The LM optimizer (`src/optimize.rs`) — four correctness fixes; the two
   order-6 integration gates go RED→GREEN (D2-opt).**

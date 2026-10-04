@@ -13,6 +13,26 @@ pub fn generalized_chebyshev_polynomials(spec: &FilterSpec) -> Result<Polynomial
         .copied()
         .filter(|zero| zero.is_finite())
         .collect::<Vec<_>>();
+    // Reject passband and on-edge transmission zeros at the entry point with a
+    // typed error. The generalized Chebyshev characteristic `K(s) = F(s)/P(s)`
+    // must be real on the imaginary axis (`K(jw) in R`) for the Feldtkeller
+    // identity `|E|^2 = |F|^2 + |P|^2/eps^2` to hold; a finite zero with
+    // `|zero| < 1` makes the Cameron recurrence's `sqrt(1 - 1/zero^2)`
+    // imaginary, which produces a non-Hermitian `F(s)` and breaks that
+    // identity at O(1). `|zero| = 1` makes it zero, so `F(j) = 0` and the
+    // ripple parameter `eps` is undefined. See `docs/continuation-plan.md`
+    // section E item 1.
+    for &zero in &finite_zeros {
+        if zero.abs() <= 1.0 {
+            return Err(MfsError::InvalidTransmissionZero(format!(
+                "passband/on-edge transmission zeros (|zero| <= 1) are not \
+                 supported by generalized Chebyshev synthesis: a purely \
+                 imaginary-axis zero at or inside the passband edge yields a \
+                 complex non-Hermitian F(s) and violates the Feldtkeller \
+                 identity; got {zero}"
+            )));
+        }
+    }
     let generalized =
         synthesize_generalized_chebyshev_data(spec.order, &finite_zeros, spec.return_loss_db())?;
     let e = generalized.e_s.clone().ok_or_else(|| {
@@ -87,6 +107,27 @@ mod tests {
         assert!(polys.generalized.is_some());
         assert!(polys.eps > 0.0);
         assert!(polys.eps_r > 0.0);
+        Ok(())
+    }
+
+    #[test]
+    fn approximation_rejects_passband_transmission_zeros_with_typed_error() -> Result<()> {
+        // |zero| < 1 makes the Cameron sqrt term imaginary; the resulting F(s)
+        // is non-Hermitian and breaks the Feldtkeller identity, so the entry
+        // point must reject it as a typed error (not a helper NotImplemented).
+        for zero in [0.75_f64, 0.5, -0.9] {
+            let spec = FilterSpec::new(4, 20.0)?
+                .with_transmission_zeros(vec![crate::spec::TransmissionZero::normalized(zero)]);
+            match generalized_chebyshev_polynomials(&spec) {
+                Err(MfsError::InvalidTransmissionZero(message)) => {
+                    assert!(
+                        message.contains("passband"),
+                        "unexpected message: {message}"
+                    );
+                }
+                other => panic!("zero {zero}: expected InvalidTransmissionZero, got {other:?}"),
+            }
+        }
         Ok(())
     }
 

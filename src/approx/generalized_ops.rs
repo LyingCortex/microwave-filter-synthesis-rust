@@ -99,9 +99,14 @@ pub(crate) fn safe_sqrt_term(value: f64) -> Result<f64> {
     }
     let term = 1.0 - 1.0 / value.powi(2);
     if term < 0.0 {
-        return Err(MfsError::NotImplemented(
-            "current generalized Chebyshev helper only supports |zero| >= 1 real zeros".to_string(),
-        ));
+        // A |value| < 1 zero would make this sqrt imaginary, which produces a
+        // non-Hermitian F(s) and breaks the Feldtkeller identity; the public
+        // entry point (`generalized_chebyshev_polynomials`) rejects such zeros
+        // with a typed `InvalidTransmissionZero` before reaching here. This
+        // remains a defensive guard for direct helper callers.
+        return Err(MfsError::InvalidTransmissionZero(format!(
+            "generalized Chebyshev helpers require |zero| >= 1 real zeros, got {value}"
+        )));
     }
     Ok(term.sqrt())
 }

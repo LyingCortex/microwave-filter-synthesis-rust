@@ -175,9 +175,12 @@ Captures engineering intent with validation at construction time.
 - Order ≥ 1
 - Return loss > 0 dB
 - Transmission zeros are finite or infinite; passband zeros (`|zero| < 1`)
-  are accepted by `spec` but rejected with a typed error at the
-  approximation layer (`generalized_ops::safe_sqrt_term`), which currently
-  supports stopband-only zeros
+  are accepted by `spec` but rejected with a typed
+  `MfsError::InvalidTransmissionZero` at the approximation entry point
+  (`approx::generalized_chebyshev_polynomials`). E1's 2026-10-05 investigation
+  showed a single-function generalized-Chebyshev prototype cannot realize an
+  in-band null (it breaks the Feldtkeller identity) — see
+  `docs/continuation-plan.md` §E item 1.
 
 ### `freq` — Frequency Mapping
 
@@ -192,8 +195,8 @@ Separates physical frequency handling from normalized prototype math.
 - `MultiBandMapping` — disjoint, center-sorted passbands; piecewise forward
   map (nearest band by prototype-transform distance), band-local inverse.
   The multi-band **synthesis** route is designed in
-  `docs/internal/multi-band-synthesis-design.md` (C0, route-α; implementation
-  blocked on E1 passband TZs)
+  `docs/internal/multi-band-synthesis-design.md` (C0, route-α; E1
+  investigated 2026-10-05 and is **not** a blocker — gap TZs are stopband)
 - `FrequencyGrid` — uniform or custom frequency point sets
 
 ### `approx` — Polynomial Approximation
@@ -537,7 +540,7 @@ let context = run_full_pipeline(request)?;
 | Symmetric TZ pairs | ✅ Fully supported |
 | Asymmetric TZ placement | ✅ Fully supported |
 | Complex-residue configurations | ✅ Fixed (conjugate pairing) |
-| Passband TZs (\|zero\| < 1) | ❌ Not yet supported |
+| Passband TZs (\|zero\| < 1) | ❌ Not supported — and shown unrealizable by the single-function generalized-Chebyshev prototype (breaks the Feldtkeller identity, E1 2026-10-05); would need the multifunction characteristic |
 | Repeated poles | ❌ Not yet supported |
 
 ## Known Limitations
@@ -577,7 +580,7 @@ Worked plan with sequencing and acceptance criteria:
 | Done | Generalize the full spectral path to N-channel (multiplexer) mutual loading (B2, 2026-10-04) | — |
 | Done | Full Macchiarella spectral path converged for the duplexer (Type-I orders 2–8 + Type-II, gate-anchored, 2026-10-03) | — |
 | Later | Butterworth/Elliptic approximation families | Low |
-| Later | Multi-band synthesis (true multi-passband, scope-1) — **C0 design doc done 2026-10-05, route-α committed** (`docs/internal/multi-band-synthesis-design.md`); implementation blocked on passband TZs (E1) | Medium |
+| Later | Multi-band synthesis (true multi-passband, scope-1) — **C0 design doc done 2026-10-05, route-α committed** (`docs/internal/multi-band-synthesis-design.md`); **unblocked** (E1 investigated 2026-10-05: gap TZs are stopband, so route-α needs no passband-TZ support) | Medium |
 
 > Touchstone export, Python bindings, and criterion benchmarks are already
 > implemented (see `src/touchstone.rs`, `src/python.rs`, `benches/`).

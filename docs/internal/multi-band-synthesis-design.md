@@ -45,14 +45,16 @@ What already exists (2026-10-05, before any C2 code):
 - `MatrixSynthesisEngine::synthesize(&PolynomialSet) -> Result<CouplingMatrix>`
   (`src/synthesis/engine.rs:69`) — the residue-expansion path that turns a
   `PolynomialSet` into an $N+2$ transversal coupling matrix.
-- **E1 is not done.** The recurrence helper `safe_sqrt_term`
-  (`src/approx/generalized_ops.rs:96-105`) rejects any zero with $|z| < 1$ with
-  `MfsError::NotImplemented("...only supports |zero| >= 1 real zeros")`. The
-  spec layer is *permissive*: `validated_transmission_zero`
-  (`src/freq.rs:47`) only rejects NaN, and `FilterSpec` stores a passband zero
-  ($0.75$) in its own test (`src/spec/types.rs:256`). So a passband TZ flows
-  through `FilterSpec`/`validated_transmission_zeros` and fails **later**, at
-  `approx`, as an untyped-ish `NotImplemented`.
+- **E1 investigated 2026-10-05; the original plan is refuted.** The
+  recurrence helper `safe_sqrt_term` (`src/approx/generalized_ops.rs:96-105`)
+  rejects any zero with $|z| < 1$. A literal relaxation to an imaginary
+  $\sqrt{1 - 1/z^2}$ was implemented and measured: it makes `F(s)` complex
+  non-Hermitian, so the Feldtkeller identity fails at O(1) for $|z| < 1$
+  (versus machine precision for $|z| \ge 1$). A physical in-band null needs
+  the *multifunction* characteristic, not this helper. `safe_sqrt_term`'s
+  rejection is **kept**, now surfaced as a typed
+  `MfsError::InvalidTransmissionZero` at the `approx` entry point. Full
+  result: `docs/continuation-plan.md` §E item 1.
 - No multi-band approximation, no multi-band synthesis, no multi-band API.
 
 ---
@@ -158,8 +160,8 @@ existing spectral-factorization / `E(s)` normalization path applies.
 
 $(E,F,P)$ is a `PolynomialSet`; `MatrixSynthesisEngine::synthesize` returns the
 $N+2$ transversal matrix, exactly as for a single-band finite-TZ design. No new
-synthesis machinery in the well-posed case — **provided E1 is solved** (see
-§Zeros).
+synthesis machinery is needed: all the design's TZs are stopband (§Transmission-
+Zero Placement Law), so the existing path applies directly.
 
 ---
 
@@ -202,42 +204,57 @@ placement law below is *specified*, not guessed.
 
 ## Transmission-Zero Placement Law
 
-This is the part that couples multi-band to **E1**, and the reason C0 must be
-explicit.
+> **Corrected 2026-10-05 (E1 investigation).** The original text of this
+> section claimed inter-band zeros are *passband* zeros relative to the
+> per-band prototypes and that route-α therefore hard-requires passband-TZ
+> (E1) support. **That claim is false.** A `BandPassMapping`'s `|Ω| = 1`
+> boundary *is* that band's own passband edge, so on **either** adjacent band
+> every inter-band gap frequency maps to `|Ω| ≥ 1`. Worked example, bands
+> 10–11 GHz and 12–13 GHz (gap 11–12 GHz): the gap maps to
+> `Ω ∈ [+1.00, +2.83]` on the lower band and `Ω ∈ [−3.18, −1.00]` on the
+> upper band — ordinary **stopband** zeros, already supported. So route-α
+> does **not** need E1, and C2 is unblocked. The rest of this section is the
+> corrected law; see `docs/continuation-plan.md` §E item 1 for the broader
+> (and negative) E1 result.
 
 For $K$ bands there are $K-1$ inter-band gaps and two outer regions. The
 characteristic polynomial's zeros (transmission zeros) are placed:
 
 1. **Outer regions (2 zones):** one or more finite zeros in each, or zeros at
-   infinity (all-pole) if no outer rejection is required. As in single-band
-   designs, a finite outer zero at $\Omega_z$ with $|\Omega_z| > 1$ is
-   **stopband** relative to the nearest band prototype — already supported.
-2. **Inter-band gaps ($K-1$ zones):** these zeros sit **between** two passband
-   prototypes. Relative to the per-band prototype of the *nearer* band they
-   fall **inside the passband** ($|\Omega_z| < 1$) — the asymmetry of the
-   `BandPassMapping` on the far side of a band's edge means the same physical
-   frequency is $|\Omega| > 1$ for one band and $|\Omega| < 1$ for the other.
+   infinity (all-pole) if no outer rejection is required. A finite outer zero
+   at $\Omega_z$ with $|\Omega_z| > 1$ is **stopband** relative to the nearest
+   band prototype — already supported.
+2. **Inter-band gaps ($K-1$ zones):** these zeros sit in the rejection band
+   between two passbands. Relative to **each** adjacent band's prototype they
+   map to $|\Omega_z| \ge 1$ (the band's own edge is its $|\Omega| = 1$
+   boundary), i.e. they are ordinary **stopband** zeros. The earlier
+   "asymmetry makes one side $|\Omega| < 1$" reasoning was wrong: below a
+   band's lower edge the transform is monotonically negative and already
+   $\le -1$ at that edge.
 
-**Consequence:** route-α *requires* passband transmission zeros. This is
-exactly the plan's stated coupling: "the inter-band TZs are *passband* zeros
-relative to the per-band prototypes — this is the direct, large-scale
-application of E1 (passband TZ handling), which must therefore be designed
-together with C, not after it" (`docs/continuation-plan.md:466-470`).
+**Consequence:** route-α needs **no** passband-TZ support. Its characteristic
+polynomial is the standard single-function generalized Chebyshev `F/P` in
+each band with all zeros stopband, so the existing `MatrixSynthesisEngine`
+path applies directly. (E1-style in-band nulls are a separate research
+question — see `docs/continuation-plan.md` §E item 1.)
 
-**E1 work (blocks C2):**
+**E1 status (does not block C2):**
 
-- `src/approx/generalized_ops.rs:96-105` — `safe_sqrt_term` must accept
-  $|\Omega|<1$ (the term $1 - 1/\Omega^2$ is then *positive* if we write the
-  square in the right variable; today the guard rejects it). Relaxing the guard
-  is the mechanical part.
-- The spec layer should stay permissive and the **approximation layer** should
-  produce a typed error for genuinely unsupported cases, not
-  `NotImplemented` from a helper. (Plan §E item 1.)
-- **Verification:** a passband TZ must yield a real finite-frequency null in
-  the response. The first test is $K=2$ with one zero in the single gap.
+- `src/approx/generalized_ops.rs:96-105` — `safe_sqrt_term`'s rejection of
+  $|\Omega|<1$ is **kept**, now as a typed
+  `MfsError::InvalidTransmissionZero` at the `approx` entry point rather than
+  a helper-level `NotImplemented`.
+- A literal relaxation to an imaginary `√(1 − 1/Ω²)` was implemented and
+  measured: it makes `F(s)` complex non-Hermitian, so the Feldtkeller
+  identity `|E|² = |F|² + |P|²/ε²` fails at O(1) for $|\Omega|<1$ (versus
+  machine precision for $|\Omega| \ge 1$). A physical in-band null needs the
+  *multifunction* characteristic, not this helper. See §E item 1.
+- **Verification of the corrected law:** a $K=2$ design's single gap zero
+  must produce a finite-frequency null and must be accepted by the
+  *unmodified* approximation path (it is an ordinary stopband zero).
 
-The $K=2$ case has exactly **one** inter-band gap (one passband zero family)
-and two outer regions — the minimal case, and the first acceptance fixture.
+The $K=2$ case has exactly **one** inter-band gap and two outer regions — the
+minimal case, and the first acceptance fixture.
 
 ---
 
@@ -284,16 +301,13 @@ checks the synthesized response against the fixture's $N+2$ matrix.
 
 ---
 
-## Work Items (C2, C3 — sequenced after E1)
+## Work Items (C2, C3)
 
-1. **E1 (prerequisite).** Complex/passband transmission-zero handling in
-   `generalized_ops.rs` (relax `safe_sqrt_term`), a typed `approx` error for
-   truly unsupported cases, and a passband-null response test.
-2. **C2a — `MultiBandSpec` + builder** in `spec` (constraints of §Specification).
-3. **C2b — multi-band approximation** (candidate `src/approx/multi_band.rs`)
+1. **C2a — `MultiBandSpec` + builder** in `spec` (constraints of §Specification).
+2. **C2b — multi-band approximation** (candidate `src/approx/multi_band.rs`)
    producing a `PolynomialSet`; $K=2$ first, $K=3$ as the extension check.
-4. **C2c — synthesize** via `MatrixSynthesisEngine::synthesize` (no new engine).
-5. **C3 — verification surface:** per-band response equals each band's
+3. **C2c — synthesize** via `MatrixSynthesisEngine::synthesize` (no new engine).
+4. **C3 — verification surface:** per-band response equals each band's
    standalone equiripple spec within ripple tolerance; gap rejection asserted;
    an `examples/` rendering of the multi-band response; and the Fig. 25
    fixture as the RED→GREEN anchor.
@@ -310,21 +324,25 @@ asserted · ⛔ blocked.
 2. ✅ **Spec structure fixed** — `MultiBandSpec`/`BandSpec`/`RejectionSpec`
    above, with `MultiBandMapping`'s invariants.
 3. ✅ **TZ placement law stated** — outer zeros stopband, inter-band zeros
-   passband; E1 named as a hard prerequisite.
+   **also stopband** (corrected 2026-10-05; the original "passband" claim was
+   wrong — see the §Transmission-Zero Placement Law correction); E1 does
+   **not** block C2.
 4. ✅ **Topology fixed** — $N+2$ transversal, inter-band TZs as
    trisection/extracted-zero sections; no new `MatrixTopology` variant.
 5. ✅ **First fixture identified** — `Cameron2011_10_5_dual_band_symmetric`
    (Fig. 25), in-repo, printed matrix.
-6. ⛔ **2-band design reproduces the fixture** — C3, blocked on E1 + C2.
+6. ⛔ **2-band design reproduces the fixture** — C3, gated on C2 (not on E1).
 
 ---
 
 ## Risks & Mitigations
 
-- **E1 is a hard blocker.** Route-α is not implementable without passband TZs.
-  Mitigation: sequence E1 first; C0 deliberately commits to α *because* E1 is
-  already on the roadmap as a High-priority cross-cutting enabler (§E), so the
-  two are co-designed rather than serialized by accident.
+- **E1 — RESOLVED as a non-blocker (2026-10-05).** The original risk
+  ("route-α is not implementable without passband TZs") was based on a false
+  premise: inter-band gap zeros are ordinary stopband zeros (`|Ω| ≥ 1` on both
+  adjacent bands), and a literal passband-TZ relaxation was additionally shown
+  to break the Feldtkeller identity at O(1). C2 is unblocked; C3 is gated on
+  C2 only.
 - **Equiripple across $K$ bands is not automatic.** A product of per-band
   Chebyshev factors gives equiripple *per band* only if the band edges are the
   ripple extrema; the $K$-band edge equations must be solved jointly.
@@ -357,6 +375,6 @@ asserted · ⛔ blocked.
    filtering functions," IEEE TMTT, vol. 47, no. 4, pp. 433–442, Apr. 1999.
    DOI: `10.1109/22.754877`. *(The engine this route reuses.)*
 4. `docs/continuation-plan.md` section C (this plan, scope-1) and section E
-   item 1 (the E1 prerequisite).
+   item 1 (the E1 investigation — refuted; E1 does not block C2).
 5. `docs/cameron-coupling-matrix-algorithms.md` (the transversal → folded /
    arrow / trisection workflow the multi-band matrix flows through).
