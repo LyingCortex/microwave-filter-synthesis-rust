@@ -154,6 +154,22 @@
   (Zhao N=4, 9 iters, conv_err 1.7e-4 via stagnation) and
   `multiplexer_diplexer` (12 iters, 2.6e-9 strict); `type2`/`contiguous`
   cases remain capability-SKIP.
+- **Bench-standard `cm`/`star` gates reported per gate (B4).** The blanket
+  `SKIP` for the multiplexer's `cm`/`star`-requiring gates is replaced with
+  per-gate, reason-specific reporting. `unitarity` is now **PASS** (measured,
+  not skipped): mfs computes the full (N+1)×(N+1) common-junction S-matrix
+  directly at the node, so the contract's star-junction power-conservation
+  invariant `max|1 − |S11|² − Σᵢ|S1i|²|` is evaluated on that response
+  (`gates.rs::multiplexer_unitarity_residual` + `unitarity_tol`); measured at
+  machine precision (3.8e-15 / 1.3e-15 on the two runnable standard cases,
+  tol 1e-8). The runnable cases' aggregate status moves from SKIP to **PASS**.
+  `matrix_size`, `equiripple`, `s11_match`, and `rz_distribution` remain
+  `SKIP`, each with the specific quantity mfs's algorithm does not produce
+  (the single multiport star-junction CM, the per-channel determinants |Δᵢ|,
+  the multiport rational-function S11, and the rational-function pole/zero
+  set, respectively) — the quasi-equiripple antenna RL that `equiripple`
+  would assert is instead covered by the B2/B3 full-path fidelity gates.
+
 
 
 

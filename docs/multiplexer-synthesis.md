@@ -300,6 +300,36 @@ rejection of a non-ideal Type-I junction for N > 2). The full path is opt-in
 and heavier (spectral factorization per iteration); the lightweight simplified
 perturbation remains the default.
 
+**B3 (2026-10-04): convergence + fidelity gates for the full path.**
+`MultiplexerSynthesisResult` gains a `converged` flag (stopped on the
+iteration's own criterion vs. budget exhausted). New `tests/multiplexer.rs`
+gates assert, on the full path: well-separated channels reach
+machine-tolerance `convergence_error` (< 1e-6, in fact ~0 — the contrast with
+the simplified path's bounded residual); adjacent/overlapping channels show
+bounded loading with a quasi-equiripple common port; and the vendored
+standard's N=4 case (orders 4/6/5/4, with transmission zeros) converges.
+**This flips the vendored cross-language standard's `convergence` gate from
+FAIL to PASS** — `benches/multiplexer.rs` runs the `poly` stage through the
+full path and `convergence_gate` reads the `converged` flag (case `a`
+converges in 9 iters, conv_err 1.7e-4 via the high-degree stagnation accept;
+`diplexer` in 12, 2.6e-9 strict). Note the re-scope: the full path converges
+to the *loaded* fixed point (~1e-2 from independent synthesis), not to
+independent synthesis — the machine-tolerance claim holds for the
+iteration's own convergence error.
+
+**B4 (2026-10-04): the bench-standard `cm`/`star` gates are reported per
+gate with specific reasons instead of a blanket `SKIP`.** `unitarity` is now
+**PASS** (measured): mfs computes the full (N+1)×(N+1) common-junction
+S-matrix directly at the node, so the star-junction power-conservation
+invariant `|S11|² + Σᵢ|S1i|² = 1` is evaluated on that response
+(`gates::multiplexer_unitarity_residual`); measured at machine precision
+(3.8e-15 / 1.3e-15 on the two runnable standard cases). `matrix_size`,
+`equiripple`, `s11_match`, and `rz_distribution` remain `SKIP` with the
+specific quantity each needs that mfs's algorithm does not produce (the
+single multiport star-junction CM, the per-channel determinants |Δᵢ|, the
+multiport rational-function S11, the rational-function pole/zero set
+respectively). The case aggregate status moves from SKIP to **PASS**.
+
 ## Verification / Acceptance Criteria
 
 **Status legend:** ✅ met · ⚠️ met structurally but the *quantitative* value is

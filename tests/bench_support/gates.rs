@@ -125,6 +125,40 @@ pub fn response_invariance_tol() -> f64 {
         .unwrap_or(1e-10)
 }
 
+/// `gate("unitarity")` tolerance from the standard (`1e-8`).
+pub fn unitarity_tol() -> f64 {
+    data::gate_tols()
+        .get("unitarity")
+        .copied()
+        .unwrap_or(1e-8)
+}
+
+/// `unitarity` metric — the (N+1)-port common-junction S-matrix row power
+/// conservation `max|1 - |S11|² - Σᵢ|S1i|²|` over the antenna (common) port
+/// row, sampled at every response point. This is the star-junction
+/// analogue of the two-port Feldtkeller unitarity: the common node is where
+/// the N channels couple, and its power balance is the contract's
+/// multiplexer unitarity invariant.
+///
+/// mfs computes the full complex (N+1)×(N+1) S-matrix directly
+/// (`Multiplexer::response_matrix`, the wave-variable node equation on the
+/// lossless per-channel 2-ports), so this metric is evaluated on that
+/// response — not reconstructed from a star-topology coupling matrix, which
+/// mfs does not produce.
+pub fn multiplexer_unitarity_residual(smatrix: &mfs::multiplexer::MultiplexerSMatrix) -> f64 {
+    let n_ports = smatrix.num_ports;
+    let mut worst = 0.0_f64;
+    for row in &smatrix.s {
+        // Row 0 is the antenna/common port (S11, S12, …, S1,N+1).
+        let mut power = 0.0_f64;
+        for &entry in row.iter().take(n_ports) {
+            power += entry.norm_sqr();
+        }
+        worst = worst.max((1.0 - power).abs());
+    }
+    worst
+}
+
 /// `folded_mask` (hard, tol 0.0) — largest |M[i][j]| over the upper triangle
 /// outside the folded mask, using the contract's default `"either"` convention:
 /// the union of the source-end (`canonical`) and load-end (`mirrored`) masks.

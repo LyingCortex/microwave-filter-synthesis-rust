@@ -13,7 +13,7 @@
 //! algorithm — Macchiarella–Tamiazzo per-channel iterative perturbation
 //! (`src/multiplexer.rs`) followed by a direct per-channel response evaluation.
 //!
-//! Two of the four stages have an mfs counterpart and are reported:
+//! Two of the four stages have an mfs counterpart and are timed:
 //!
 //! * `poly` — the per-channel iterative synthesis (`MultiplexerSynthesis::
 //!   synthesize`, which produces each channel's S-polynomial roots and coupling
@@ -25,8 +25,18 @@
 //! `cm` and `star` (residue-matrix analytic CM; similarity transform to the
 //! star junction) are **not produced** by mfs and are omitted from the report
 //! entirely. Fabricating timings for them from the per-channel work would be a
-//! false claim about the algorithm; every gate that requires one of them is
-//! recorded as `SKIP`, never `PASS`.
+//! false claim about the algorithm. The gates are reported per gate:
+//!
+//! * `convergence` — `PASS` on the `poly` stage (B3: the full spectral path
+//!   stops on its own criterion).
+//! * `unitarity` — `PASS` on the `response` stage: the common-junction
+//!   (N+1)-port S-matrix is computed directly at the node, so its antenna-row
+//!   power conservation `|S11|² + Σᵢ|S1i|² = 1` (the star-junction unitarity
+//!   invariant) is measured without a `cm`/`star` stage.
+//! * `matrix_size`, `equiripple`, `s11_match`, `rz_distribution` — `SKIP` with
+//!   the specific reason each needs a quantity mfs's algorithm does not produce
+//!   (the single multiport star-junction CM, the per-channel determinants |Δᵢ|,
+//!   the multiport rational-function S11, the rational-function pole/zero set).
 //!
 //! A case is *capability-matched* when its tags contain `type1` or `synthetic`
 //! (non-resonant junction — what `JunctionType::TypeI` implements). Cases tagged
@@ -227,11 +237,17 @@ fn bench_multiplexer(c: &mut Criterion) {
             continue;
         }
 
-        // mfs has a `poly` analogue (the iterative per-channel synthesis), so
-        // `convergence` is evaluated on it; `rz_distribution` needs the contract's
-        // `poly` outputs (per-channel rational-function poles/zeros), which mfs's
-        // algorithm does not expose in that form. Gates needing `cm`/`star` stay
-        // SKIP - mfs produces neither.
+        // `convergence` is evaluated on the `poly` stage above (B3). The
+        // `unitarity` gate IS evaluable by mfs: the common-junction (N+1)-port
+        // S-matrix is computed directly (the `response` stage below), and its
+        // antenna-row power conservation `|S11|² + Σᵢ|S1i|² = 1` is the
+        // contract's unitarity invariant for a lossless junction. The
+        // remaining cm/star gates need the contract's multiport *coupling
+        // matrix* (a single (n_total + n_ports [+1]) star-junction CM) and the
+        // per-channel determinant |Δᵢ| / multiport rational S11 that mfs's
+        // algorithm does not produce — mfs synthesizes each channel to its own
+        // (nᵢ+2) CM and composes them at the node, so those gates are SKIP
+        // with the specific reason, not a blanket "no cm/star stage".
         row.set_gate(
             "rz_distribution",
             data::GateResult::skip(
@@ -239,15 +255,36 @@ fn bench_multiplexer(c: &mut Criterion) {
                  coupling matrices, not the contract's rational-function pole/zero set",
             ),
         );
-        for gate in ["matrix_size", "unitarity", "equiripple", "s11_match"] {
-            row.set_gate(
-                gate,
-                data::GateResult::skip(format!(
-                    "mfs has no {} stage",
-                    UNAVAILABLE_STAGES.join("/")
-                )),
-            );
-        }
+        row.set_gate(
+            "matrix_size",
+            data::GateResult::skip(
+                "mfs does not assemble the contract's single multiport coupling \
+                 matrix (n_total + n_ports [+1 if resonant]); it synthesizes each \
+                 channel to its own (nᵢ+2) matrix and composes them at the common \
+                 node, so `cm.shape == invariants.cm_size` has no mfs quantity to measure",
+            ),
+        );
+        row.set_gate(
+            "equiripple",
+            data::GateResult::skip(
+                "the contract's equiripple metric compares |S11| against the \
+                 per-channel determinants |Δᵢ| at band extrema; mfs does not expose \
+                 |Δᵢ| (it is a property of the multiport CM star transform), so the \
+                 relative-deviation metric cannot be formed. The quasi-equiripple \
+                 antenna RL is instead asserted by the full-path fidelity gates in \
+                 tests/multiplexer.rs (B2/B3).",
+            ),
+        );
+        row.set_gate(
+            "s11_match",
+            data::GateResult::skip(
+                "cross-checks the multiport CM response against the `poly`-stage \
+                 rational-function S11; mfs produces no multiport CM and no \
+                 rational-function S11 (its channels are coupling-matrix filters, \
+                 its common port is the node-composed (N+1)-port S-matrix), so there \
+                 is no second S11 to match",
+            ),
+        );
 
         let harness = data::harness(&case.qualid);
         let (start_hz, stop_hz) = response_span_hz(case);
@@ -322,6 +359,32 @@ fn bench_multiplexer(c: &mut Criterion) {
             timing.n.unwrap_or(0)
         );
         row.set_stage(MFS_MULTIPLEXER_STAGE, timing);
+        // `unitarity` (hard, tol 1e-8): the antenna/common-port row of the
+        // (N+1)-port S-matrix conserves power for a lossless junction,
+        // |S11|² + Σᵢ|S1i|² = 1. mfs computes the full S-matrix directly at the
+        // common node (wave-variable node equation on the lossless per-channel
+        // 2-ports), so this is measured on that response — the star-junction
+        // unitarity invariant, independent of any coupling-matrix stage.
+        let smatrix =
+            mux.response_matrix(start_hz, stop_hz, MULTIPLEXER_RESPONSE_POINTS)
+                .expect("unitarity: (N+1)-port S-matrix");
+        let residual = gates::multiplexer_unitarity_residual(&smatrix);
+        let tol = gates::unitarity_tol();
+        row.set_gate(
+            "unitarity",
+            data::GateResult {
+                status: if residual < tol { "PASS" } else { "FAIL" }.to_string(),
+                metric: Some(residual),
+                tol: Some(tol),
+                detail: Some(format!(
+                    "common-port row power conservation: max|1 - |S11|² - Σ|S1i|²| \
+                     = {:.2e} over {} points (tol {:.1e})",
+                    residual,
+                    MULTIPLEXER_RESPONSE_POINTS,
+                    tol
+                )),
+            },
+        );
         // `max_iter` from the harness is honoured by `synthesize_mux`; surface it
         // so a reader can tell which policy produced the timing.
         if let Some(max_iter) = harness.max_iter {

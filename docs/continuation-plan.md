@@ -392,10 +392,36 @@ Macchiarella–Tamiazzo iteration loop shared by duplexer and multiplexer.
    *loaded* fixed point (displacement from independent ~1e-2, bounded), not
    to independent synthesis; the machine-tolerance claim holds for the
    *iteration's* convergence error, which is what the gate asserts.
-4. **B4 — Close the bench-standard gaps.** Implement what mfs can honestly
-   implement of the `cm`/`star` gates (per-channel coupling-matrix checks,
-   star-domain response) and mark remaining gaps with reasons in
-   `benches/multiplexer.rs` instead of blanket `SKIP`.
+4. **B4 — Close the bench-standard gaps. [DONE 2026-10-04]** The
+   `cm`/`star` gates are now reported per gate with specific reasons instead
+   of a blanket `SKIP`:
+   - `unitarity` → **PASS** (measured, not skipped). mfs computes the full
+     complex (N+1)×(N+1) common-junction S-matrix directly at the node
+     (`Multiplexer::response_matrix`, the B1 wave-variable node equation on
+     lossless per-channel 2-ports), so the contract's star-junction unitarity
+     invariant — antenna-row power conservation
+     `max|1 − |S11|² − Σᵢ|S1i|²| ≤ 1e-8` — is measured on that response.
+     `gates.rs` gains `multiplexer_unitarity_residual` + `unitarity_tol`;
+     `benches/multiplexer.rs` sets the gate in the `response` stage.
+     Measured on both runnable standard cases: `multiplexer_a` (Zhao N=4)
+     residual 3.8e-15, `multiplexer_diplexer` 1.3e-15 (machine precision —
+     the KCL junction of lossless 2-ports conserves power by construction).
+     The case aggregate status moves from SKIP to **PASS**.
+   - `matrix_size` → SKIP: mfs does not assemble the contract's single
+     multiport star-junction CM (n_total+n_ports[+1]); it synthesizes each
+     channel to its own (nᵢ+2) CM and composes them at the node, so
+     `cm.shape == invariants.cm_size` has no mfs quantity to measure.
+   - `equiripple` → SKIP: the contract metric compares |S11| against the
+     per-channel determinants |Δᵢ| at band extrema; mfs does not expose |Δᵢ|
+     (a property of the multiport CM star transform). The quasi-equiripple
+     antenna RL is instead asserted by the B2/B3 full-path fidelity gates.
+   - `s11_match` → SKIP: cross-checks the multiport CM response against the
+     `poly`-stage rational-function S11; mfs produces neither a multiport CM
+     nor a rational-function S11, so there is no second S11 to match.
+   - `rz_distribution` → SKIP (unchanged): mfs exposes coupling matrices, not
+     the contract's rational-function pole/zero set.
+   Capability-blocked cases (type2/contiguous) still SKIP all gates with the
+   deciding tag in `detail`.
 
 **Acceptance (section done):** B1–B4 green; `docs/multiplexer-synthesis.md`
 deviation list 2 and 3 resolved or explicitly re-scoped; multiplexer N=2
@@ -581,7 +607,7 @@ Ordered by how much they block the areas above:
 Wave 1 (parallel):  E4 (N=8 regression) · D1-opt (RED)   [E3 + C1 + E4 closed; D1-opt RED gate committed 2026-09-29]
 Wave 2 (serial):    D1–D4 (duplexer full path)   [DONE 2026-10-03 — Type-I orders 2–8 + §V golden + Type-II §VI anchor, all gate-anchored]
 Wave 3 (parallel):  D2–D4-opt (optimizer) · C0 (multi-band design doc + route choice)
-Wave 4 (serial):    B1 [DONE 2026-10-04] → B2 [DONE 2026-10-04] → B3 [DONE 2026-10-04] → B4 (multiplexer; Wave 2 done)
+Wave 4 (serial):    B1 [DONE 2026-10-04] → B2 [DONE 2026-10-04] → B3 [DONE 2026-10-04] → B4 [DONE 2026-10-04] (multiplexer; Wave 2 done — full wave complete)
 Wave 5:             E1 (passband TZ) · E2 (Laurent) — needed by B3's fidelity work and
                     by C2 when route-α is chosen (inter-band TZs); then C2 → C3
 ```
