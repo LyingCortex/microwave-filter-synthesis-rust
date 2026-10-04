@@ -709,3 +709,56 @@ let roots = polynomial.roots_with(&CompanionMatrixRootSolver)?;
 | 极高阶 (order > 35) | `CompanionMatrixRootSolver` | 跳过迭代方法，直接用最稳健的 |
 | 性能敏感的批量计算 | `DurandKernerRootSolver` | 已知能收敛时最快 |
 | 研究/调试 | 逐个尝试 | 对比不同方法的精度 |
+
+---
+
+## 第六部分：耦合矩阵 LM 优化器 —— 状态与边界（D2/D3/D4-opt, 2026-10-04）
+
+前五部分是**综合链路**的数值性能优化（Givens、选择性求解、求根器）。本节
+记录独立的 **Levenberg–Marquardt 优化器**（`src/optimize.rs`：`tune_matrix`
+调优、`extract_matrix` 提取）的状态与能力边界，它是 `continuation-plan.md`
+section D 的交付内容。
+
+### 6.1 算法
+
+`optimize_matrix` 对耦合矩阵的自由参数（源/载耦合、谐振器间耦合、失谐对角
+线）做 LM 迭代，最小化「当前响应 − 目标响应」的 4 通道残差平方和
+（`s11`/`s21` 的实虚部，每采样点 4 条残差）。Jacobian 为前向有限差分，
+步长**尺度感知** `δ_j = 1e-7·max(1,|x_j|)`，扰动后响应奇异时对 δ 折半重试
+至多 4 次。参数集由**模板矩阵的非零模式冻结**：只优化模板里已经非零的位置。
+收敛判据是**接受步之后相邻两次迭代的代价相对变化** < tolerance；奇异试探步
+记为**拒绝**（λ×2），不向上抛错。
+
+### 6.2 门禁（gate-anchored 证据）
+
+| 场景 | 入口 | 结果（实测 2026-10-04） |
+|------|------|------------------------|
+| order-6 folded，4 耦合 ×1.07 扰动→恢复（好初值） | `optimize_matrix` | 6 迭代收敛，最坏相对误差 ~3e-10（门禁 `tests/optimizer_integration.rs`，限 1e-4） |
+| order-6 transversal，冷启动提取 | `extract_matrix` | 9 迭代收敛，max\|ΔS\| ~5e-10（同文件，限 1e-3） |
+| order-4 folded / order-4、6 transversal | 两入口 | `tests/cli_integration.rs` 端到端黑盒（CLI 二进制），order-4 恢复 <1e-4、提取 max\|ΔS\| <1e-3 |
+| 0.1 dB 幅度噪声下的 order-6 提取 | `extract_matrix` | 收敛；对**真值**响应偏差 1.22e-3，对**噪声数据**残差 1.0e-2（即噪声本底，不过拟合）（`tests/optimizer_regression.rs`） |
+
+`benches/optimizer.rs`（Criterion，**不属于**跨语言基准标准——标准未定义
+`optimizer` family，自造 case id/容差无据）在 order 4/6/8 上测 `tune`、
+order 4/6 上测 `extract` 的墙钟时间，并打印迭代数与代价下降。
+
+### 6.3 边界（已知限制）
+
+1. **拓扑内恢复。** 优化器冻结模板非零模式，故 `extract_matrix` 只能恢复
+   **其链表（inline-chain）初值可表示的族**。`FilterDesign` 的 transversal
+   矩阵是**星型**模式（源/载耦合到**每个**谐振器，无链耦合）；链表初值可以
+   在响应意义上逼近它（order 4/6 至 ~1e-10），但这属于参数冗余表示，恢复的
+   是**响应**而非原矩阵元素。若目标真矩阵是 folded/arrow（含交叉耦合），
+   链表初值不能表示，提取会拟合「最接近的链表矩阵」——调用方若已知拓扑，应自
+   建初值模板调用 `optimize_matrix`。
+2. **order-8 冷启动提取在收敛域之外（实测）。** 从链表初值出发，order-8
+   提取收敛到远离目标的局部极小：代价 ~39、max\|ΔS\| ~1.0，435 迭代 / ~85 s。
+   混合（星型端口+链）初值在 800 迭代内也只降到 max\|ΔS\| ~0.79；星型端口初值
+   直接奇异。结论：order ≤ 6 的冷启动提取是可靠能力；order 8 需要**更好的初值**
+   （例如先综合再微调，即 `tune` 路径）或**更多迭代 + 多起点重启**，属于后续
+   工作。`benches/optimizer.rs` 因此不测 order-8 提取。
+3. **收敛是物理判据，不保证唯一矩阵。** 上述星型目标参数冗余，同一响应有无
+   穷多矩阵表示；测试与门禁因此断言**响应**（`max|ΔS|`）而非逐元素恢复
+   （好初值的 `tune` 场景局部唯一，仍断言逐元素 1e-4）。
+4. **有限差分 Jacobian 的代价。** 每次迭代需 n_params+1 次响应求解；order-6
+   一次 tune 约 0.4 s（41 点）。未做解析 Jacobian——当前规模下不是瓶颈。

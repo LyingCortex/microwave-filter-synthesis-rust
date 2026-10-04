@@ -55,6 +55,10 @@ harness = false
 name = "root_solvers"
 harness = false
 
+[[bench]]
+name = "optimizer"
+harness = false
+
 [features]
 cli = ["clap"]
 python = ["pyo3"]

@@ -23,7 +23,7 @@ carries *what to do next and how to know it is done*.
 | Duplexer | Simplified frequency-offset perturbation (default); full Macchiarella–Tamiazzo spectral path behind `DuplexerSynthesis::full_iteration(true)` **converges at Type-I orders 2–8 and Type-II (incl. the §VI degree-40 GSM design), all gate-anchored** (2026-10-03) | High (publication-anchored, full path) / Medium (simplified default) |
 | Multiplexer (N-channel) | Independent per-channel synthesis + simplified perturbation (default); **full Macchiarella–Tamiazzo spectral path for N channels behind `MultiplexerSynthesis::full_iteration(true)`** (shared with the duplexer, `src/synthesis/machiarella.rs`; B2, 2026-10-04) converges at N = 3/4 order-4 (gate-anchored); response is the **true (N+1)-port admittance model** (B1) | High (publication-anchored, full path) / Medium (simplified default) |
 | Multi-band | **Mapping layer in place** — `freq` supports all four prototype families plus `MultiBandMapping` (E3/C1, 2026-09-29); no design doc, no multi-band approximation, no synthesis path | — |
-| Optimization | LM `tune_matrix` / `extract_matrix` (hand-rolled Gaussian elimination, **scale-aware FD Jacobian `δ = 1e-7·max(1,|x_i|)`** with halving retry, topology frozen to template; convergence on successive-iteration cost after accepted steps; singular trials rejected, not errors; **`extract_matrix` starts from a crude inline-chain guess**); 3 lib unit tests + **2 order-6 integration gates (synthesize→perturb→recover, extract-from-crude-guess) GREEN (D2-opt, 2026-10-04)** + **CLI `optimize`/`extract` subcommands and Python `extract`/`tune` (D3-opt, 2026-10-04), e2e-gated** | Medium (order-6 extraction/recovery gate-anchored; CLI/Python surface e2e-gated; no bench) |
+| Optimization | LM `tune_matrix` / `extract_matrix` (hand-rolled Gaussian elimination, **scale-aware FD Jacobian `δ = 1e-7·max(1,|x_i|)`** with halving retry, topology frozen to template; convergence on successive-iteration cost after accepted steps; singular trials rejected, not errors; **`extract_matrix` starts from a crude inline-chain guess**); 3 lib unit tests + **2 order-6 integration gates (synthesize→perturb→recover, extract-from-crude-guess) GREEN (D2-opt, 2026-10-04)** + **CLI `optimize`/`extract` subcommands and Python `extract`/`tune` (D3-opt, 2026-10-04), e2e-gated** + **`benches/optimizer.rs` & 0.1 dB-noise extraction regression (D4-opt, 2026-10-04)** | Medium (order ≤ 6 extraction/recovery gate-anchored; CLI/Python e2e-gated; benched; order-8 cold-start extraction and topology-bound recovery documented as limits, report §6) |
 
 Known limitations that gate the areas below (full list in
 `docs/architecture.md` "Known Limitations"):
@@ -532,11 +532,11 @@ from the CLI/Python surfaces, with integration-level evidence.
 - 3 lib unit tests, all order 3–4, well-posed. **2 `tests/optimizer_integration.rs`
   gates now GREEN (D2-opt, 2026-10-04): order-6 folded perturb→recover (6 iters
   → ~3e-10 relative) and order-6 transversal extract-from-crude-guess (9 iters
-  → max|ΔS| ~5e-10).** No bench, but **exposed in the CLI (`optimize`/`extract` subcommands, D3-opt, 2026-10-04) and Python (module-level `extract`, `tune` since D1-opt); both e2e-gated.**
+  → max|ΔS| ~5e-10).** **Exposed in the CLI (`optimize`/`extract` subcommands, D3-opt, 2026-10-04) and Python (module-level `extract`, `tune` since D1-opt), e2e-gated; benched (`benches/optimizer.rs`, tune o4/6/8 + extract o4/6) and noise-regression-gated (`tests/optimizer_regression.rs`, D4-opt, 2026-10-04).** Known limits (order-8 cold-start extraction, topology-bound recovery) documented in §6 of the report.
 - Design/rationale: `docs/numerical-optimization-report.md` (the three
   numeric optimizations: O(n) Givens, selective linear solve, adaptive
-  root finding — all shipped; that doc covers performance, not the LM
-  optimizer's roadmap).
+  root finding — all shipped; **§6 now covers the LM optimizer's status and
+  limits**).
 
 ### Work items (ordered)
 
@@ -585,17 +585,36 @@ from the CLI/Python surfaces, with integration-level evidence.
      max|ΔS| < 1e-3), both asserting physical quantities, plus a `#[cfg(test)]`
      `optimizer_tests` module in the bin covering the JSON parsers (flat +
      nested) and the two optimizer cores.
-4. **D4 (opt) — Bench + regression.** Criterion bench (tune and extract at
-   orders 4/6/8, measuring iterations and cost reduction); a regression
-   entry in `tests/synthesis_regression.rs`-style file for an
-   extract-from-noise case (measured-style S-data with 0.1 dB noise floor)
-   so the "extraction" contract is pinned beyond the well-posed cases.
+4. **D4 (opt) — Bench + regression — DONE (2026-10-04).**
+   - **Bench:** `benches/optimizer.rs` (Criterion, registered in `Cargo.toml`,
+     `harness = false`). Times `tune` at orders 4/6/8 and `extract` at orders
+     4/6 (each run 2.8–17 ms warm; measured cost reduction and iteration count
+     printed alongside: tune 6/6/6 iters → worst_rel ≈ 3e-10/1e-11/7e-12;
+     extract 12/9 iters → max|ΔS| ≈ 2e-12/5e-10). **Deliberately outside the
+     cross-language standard** (no `optimizer` family in `gates.json` —
+     inventing case ids/tolerances without provenance is forbidden, same
+     stance as synthesis.rs's `SWEEP_CASES`). **Order-8 `extract` is not
+     timed**: measured from the cold chain guess it converges to a local
+     minimum far from the target (cost 39.2, max|ΔS| ≈ 1.0 after 435 iters /
+     ~85 s) — timing it would measure noise. See §6.3 of the report.
+   - **Regression:** `tests/optimizer_regression.rs` — order-6 extraction from
+     a 0.1 dB-noise-floor response (deterministic LCG). Asserts convergence,
+     fidelity to the **truth** (max|ΔS| < 5e-3; measured 1.22e-3 against a
+     1.0e-2 noise floor) and that it does **not** chase the noise (residual vs.
+     noisy data < 4× the noise floor). Couplings are not asserted: the
+     transversal parameterisation is redundant, so the physical contract is
+     the response, not the entries.
+   - Report: `docs/numerical-optimization-report.md` gains **第六部分** —
+     "耦合矩阵 LM 优化器 —— 状态与边界" (algorithm, gate evidence, and the four
+     documented limits: topology-bound recovery, order-8 cold-start, response
+     vs. matrix uniqueness, FD-Jacobian cost).
 
 **Acceptance (section done):** D1-opt green; D2-opt shows no worse (and
 typically better) convergence than fixed-δ on the D1-opt suite; CLI and
-Python entry points covered by `tests/cli_integration.rs` and the python
-doctests; `docs/numerical-optimization-report.md` gains a short
-"Optimizer status & limits" section.
+Python entry points covered by `tests/cli_integration.rs`
+(`test_optimize_subcommand_recovers_perturbed_matrix`,
+`test_extract_subcommand_recovers_response`) and `tests/optimizer_regression.rs`;
+`docs/numerical-optimization-report.md` §6 "耦合矩阵 LM 优化器 —— 状态与边界".
 
 ---
 
@@ -636,7 +655,7 @@ Ordered by how much they block the areas above:
 ```
 Wave 1 (parallel):  E4 (N=8 regression) · D1-opt (RED)   [E3 + C1 + E4 closed; D1-opt RED gate committed 2026-09-29, GREEN 2026-10-04]
 Wave 2 (serial):    D1–D4 (duplexer full path)   [DONE 2026-10-03 — Type-I orders 2–8 + §V golden + Type-II §VI anchor, all gate-anchored]
-Wave 3 (parallel):  D2-opt [DONE 2026-10-04 — scale-δ + early-stop + chain-guess, both order-6 gates green] · D3-opt [DONE 2026-10-04 — CLI optimize/extract + Python extract, e2e-gated] · D4-opt (optimizer bench) · C0 (multi-band design doc + route choice)
+Wave 3 (parallel):  D2-opt [DONE 2026-10-04 — scale-δ + early-stop + chain-guess, both order-6 gates green] · D3-opt [DONE 2026-10-04 — CLI optimize/extract + Python extract, e2e-gated] · D4-opt [DONE 2026-10-04 — `benches/optimizer.rs` + noise regression + report §6] · C0 (multi-band design doc + route choice)
 Wave 4 (serial):    B1 [DONE 2026-10-04] → B2 [DONE 2026-10-04] → B3 [DONE 2026-10-04] → B4 [DONE 2026-10-04] (multiplexer; Wave 2 done — full wave complete)
 Wave 5:             E1 (passband TZ) · E2 (Laurent) — needed by B3's fidelity work and
                     by C2 when route-α is chosen (inter-band TZs); then C2 → C3

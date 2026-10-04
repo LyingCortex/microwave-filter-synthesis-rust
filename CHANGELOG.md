@@ -4,6 +4,25 @@
 
 ### Added
 
+- **`benches/optimizer.rs` — a Criterion bench for the LM optimizer (D4-opt).**
+  Times `optimize_matrix` (`tune` scenario: order-4/6/8 folded, 4 inter-resonator
+  couplings perturbed 7 %, re-optimized from the perturbed good guess) and
+  `extract_matrix` (`extract` scenario: order-4/6, cold inline-chain guess),
+  printing the iteration count, final cost, and physical quality next to each
+  timing (each run 2.8–17 ms warm). **Deliberately outside the cross-language
+  benchmark standard** — `gates.json` defines no `optimizer` family, so case ids
+  and tolerances would have no provenance (same stance as `synthesis.rs`'s
+  program-generated sweep). Order-8 `extract` is not timed: from the cold chain
+  guess it converges to a local minimum far from the target (measured: cost 39.2,
+  max|ΔS| ≈ 1.0, 435 iterations / ~85 s), so a timing would measure noise.
+
+- **`tests/optimizer_regression.rs` — extraction from a noisy response
+  (D4-opt).** Pins the optimizer's *extraction* contract beyond the well-posed
+  cases: order-6, deterministic 0.1 dB magnitude noise (LCG). Asserts
+  convergence, fidelity to the underlying filter (max|ΔS| < 5e-3; measured
+  1.22e-3 against a 1.0e-2 noise floor), and that the fit does **not** chase the
+  noise (residual against the noisy data < 4× the noise floor).
+
 - **Optimizer is now reachable from the CLI and Python (D3-opt).**
   `mfs_cli` gains two subcommands, both thin wrappers over the shared
   `optimize_matrix` core:
