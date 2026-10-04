@@ -323,7 +323,8 @@ Macchiarella–Tamiazzo iteration loop shared by duplexer and multiplexer.
   (`multiplexer.rs` N+1 analysis). No complex (N+1)-port solve, no
   common-port admittance sum `Y_in = Σ 1/Z_in,i`.
 - **No full-spectral path** for N-channel (the full path exists only in
-  `duplexer.rs`, and is itself not yet converged — see section A).
+  `duplexer.rs`; it is converged and gate-anchored there — section A, done
+  2026-10-03 — but not yet generalized to N > 2).
 - **Benchmark-standard gates:** the vendored standard's `cm`, `star`,
   `s11_match`, `rz_distribution` gates have no mfs counterpart and are
   `SKIP`; the convergence gate is a documented FAIL
@@ -345,8 +346,8 @@ Macchiarella–Tamiazzo iteration loop shared by duplexer and multiplexer.
    etc.) into a shared module (candidate: `src/synthesis/macchiarella.rs`) so the
    N=2 duplexer and the N-channel multiplexer share one iteration loop.
    This subsumes the todo.md item "Fold the duplexer synthesis into the
-   multiplexer (N=2)". Must happen *after* D3 — porting a non-convergent
-   path multiplies the debug surface.
+   multiplexer (N=2)". Must happen *after* D3/D4 (done) — porting the now
+   converged path keeps the N > 2 debug surface tractable.
 3. **B3 — Convergence + fidelity gates for N = 3, 4.** Extend the
    `separation_limit` / `adjacent_channels_show_loading` test pair
    (`tests/multiplexer.rs`) to the full path: well-separated channels
@@ -541,17 +542,18 @@ Ordered by how much they block the areas above:
 
 ```
 Wave 1 (parallel):  E4 (N=8 regression) · D1-opt (RED)   [E3 + C1 + E4 closed; D1-opt RED gate committed 2026-09-29]
-Wave 2 (serial):    D1–D4 (duplexer full path)  ← critical path for B
+Wave 2 (serial):    D1–D4 (duplexer full path)   [DONE 2026-10-03 — Type-I orders 2–8 + §V golden + Type-II §VI anchor, all gate-anchored]
 Wave 3 (parallel):  D2–D4-opt (optimizer) · C0 (multi-band design doc + route choice)
-Wave 4 (serial):    B1 → B2 → B3 → B4 (multiplexer; needs Wave 2)
+Wave 4 (serial):    B1 → B2 → B3 → B4 (multiplexer; Wave 2 done — unblocked)
 Wave 5:             E1 (passband TZ) · E2 (Laurent) — needed by B3's fidelity work and
                     by C2 when route-α is chosen (inter-band TZs); then C2 → C3
 ```
 
-Rationale: the duplexer full path (Wave 2) is the only item on the critical
-path — the multiplexer's high-fidelity work (B2/B3) reuses it, and porting
-a non-convergent loop (Wave 4 before Wave 2) would multiply debug surface.
-Everything in Waves 1 and 3 is independent of it and safe to parallelize.
+Rationale: the duplexer full path (Wave 2) was the only item on the critical
+path and is now complete (2026-10-03); the multiplexer's high-fidelity work
+(B2/B3) reuses it, and porting a *converged* loop keeps the debug surface
+tractable. Everything in Waves 1, 3, and 4 (beyond B2's porting) is
+independent and safe to parallelize.
 
 ---
 

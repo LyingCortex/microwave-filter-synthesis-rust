@@ -191,7 +191,9 @@ impl CouplingMatrix {
     ///
     /// Applies trisection extraction sequentially for each zero.
     /// Input should be in Arrow form.
-    // kept: real algorithm, not yet wired to a topology path (see P7 dead-code policy)
+    // Dead only under the default features: the Python bindings (`ct`,
+    // `src/python.rs`, behind the `python` feature) call this. Kept per the
+    // P7 dead-code policy.
     #[allow(dead_code)]
     pub(crate) fn extract_cascade_trisections(
         &self,
@@ -217,7 +219,9 @@ impl CouplingMatrix {
     /// Processes zeros in pairs as quadruplets. An odd remaining zero
     /// is extracted as a standalone trisection.
     /// Input should be in Arrow form.
-    // kept: real algorithm, not yet wired to a topology path (see P7 dead-code policy)
+    // Dead only under the default features: the Python bindings (`cq`,
+    // `src/python.rs`, behind the `python` feature) call this. Kept per the
+    // P7 dead-code policy.
     #[allow(dead_code)]
     pub(crate) fn extract_cascade_quadruplets(
         &self,
@@ -340,7 +344,9 @@ impl CouplingMatrix {
     }
 
     /// Ensure all main (nearest-neighbor) couplings are positive.
-    // kept: real algorithm, not yet wired to a topology path (see P7 dead-code policy)
+    // Dead only under the default features: used by the extract_* topology
+    // methods above, which the Python bindings (`src/python.rs`, `python`
+    // feature) call. Kept per the P7 dead-code policy.
     #[allow(dead_code)]
     fn ensure_positive_main_couplings(&mut self) {
         let side = self.side();
@@ -357,7 +363,9 @@ impl CouplingMatrix {
     // sync: a similarity sign flip must leave the diagonal unchanged
     // (R*M*R^T with R[i][i] = -1). If one is edited, the other must be checked
     // too. Consider deduplicating into a single shared helper.
-    // kept: real algorithm, not yet wired to a topology path (see P7 dead-code policy)
+    // Dead only under the default features: used by
+    // `ensure_positive_main_couplings`, which the extract_* topology methods
+    // call. Kept per the P7 dead-code policy.
     #[allow(dead_code)]
     fn flip_sign_inplace(&mut self, index: usize) {
         let side = self.side();
@@ -382,7 +390,9 @@ impl CouplingMatrix {
     ///
     /// `span` is (start, end) with end-start=3, representing the 4-resonator block.
     /// Internally: center = start+1, used for triplet extraction.
-    // kept: real algorithm, not yet wired to a topology path (see P7 dead-code policy)
+    // Dead only under the default features: used by `extract_box_sections`
+    // below, which the Python bindings (`box_topology`, `src/python.rs`,
+    // `python` feature) call. Kept per the P7 dead-code policy.
     #[allow(dead_code)]
     pub(crate) fn extract_box_section(
         &self,
@@ -419,7 +429,9 @@ impl CouplingMatrix {
 
     /// Extract multiple BOX sections.
     /// Each span is [start, end] with end-start=3.
-    // kept: real algorithm, not yet wired to a topology path (see P7 dead-code policy)
+    // Dead only under the default features: the Python bindings
+    // (`box_topology`, `src/python.rs`, behind the `python` feature) call
+    // this. Kept per the P7 dead-code policy.
     #[allow(dead_code)]
     pub(crate) fn extract_box_sections(&self, zeros: &[f64], spans: &[[usize; 2]]) -> Result<Self> {
         if zeros.len() != spans.len() {
