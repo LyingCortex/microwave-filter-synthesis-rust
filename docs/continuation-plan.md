@@ -23,7 +23,7 @@ carries *what to do next and how to know it is done*.
 | Duplexer | Simplified frequency-offset perturbation (default); full Macchiarella–Tamiazzo spectral path behind `DuplexerSynthesis::full_iteration(true)` **converges at Type-I orders 2–8 and Type-II (incl. the §VI degree-40 GSM design), all gate-anchored** (2026-10-03) | High (publication-anchored, full path) / Medium (simplified default) |
 | Multiplexer (N-channel) | Independent per-channel synthesis + simplified perturbation (default); **full Macchiarella–Tamiazzo spectral path for N channels behind `MultiplexerSynthesis::full_iteration(true)`** (shared with the duplexer, `src/synthesis/machiarella.rs`; B2, 2026-10-04) converges at N = 3/4 order-4 (gate-anchored); response is the **true (N+1)-port admittance model** (B1) | High (publication-anchored, full path) / Medium (simplified default) |
 | Multi-band | **Mapping layer in place** — `freq` supports all four prototype families plus `MultiBandMapping` (E3/C1, 2026-09-29); no design doc, no multi-band approximation, no synthesis path | — |
-| Optimization | LM `tune_matrix` / `extract_matrix` (hand-rolled Gaussian elimination, fixed 1e-7 FD Jacobian, topology frozen to template); 3 lib unit tests at order 3–4 | Low (works on small well-posed cases; no integration coverage, no CLI/Python surface) |
+| Optimization | LM `tune_matrix` / `extract_matrix` (hand-rolled Gaussian elimination, **scale-aware FD Jacobian `δ = 1e-7·max(1,|x_i|)`** with halving retry, topology frozen to template; convergence on successive-iteration cost after accepted steps; singular trials rejected, not errors; **`extract_matrix` starts from a crude inline-chain guess**); 3 lib unit tests + **2 order-6 integration gates (synthesize→perturb→recover, extract-from-crude-guess) GREEN (D2-opt, 2026-10-04)** | Medium (order-6 extraction/recovery gate-anchored; no bench, no CLI/Python surface) |
 
 Known limitations that gate the areas below (full list in
 `docs/architecture.md` "Known Limitations"):
@@ -521,11 +521,18 @@ from the CLI/Python surfaces, with integration-level evidence.
 
 - `src/optimize.rs`: `OptimizeConfig` (200 iters, tol 1e-8, LM λ=1e-3),
   `extract_parameters`/`rebuild_matrix` freeze the topology to the
-  template's non-zero pattern (>1e-15), finite-difference Jacobian with a
-  **fixed `delta = 1e-7`**, hand-rolled Gaussian elimination in `lm_step`,
-  `extract_matrix` starts from a crude uniform-transversal guess.
-- 3 lib unit tests, all order 3–4, well-posed. **No `tests/` integration
-  coverage, no bench, not exposed in the CLI or Python bindings.**
+  template's non-zero pattern (>1e-15), **scale-aware finite-difference
+  Jacobian (`delta = 1e-7 * max(1, |x_i|)`, halving retry on singular
+  perturbed evaluations)**, hand-rolled Gaussian elimination in `lm_step`,
+  convergence on the *successive-iteration* cost (judged only after an
+  accepted step — the old running-`best` comparison falsely terminated on
+  iteration 2), a singular trial step is a **rejection** (λ×2), and
+  `extract_matrix` starts from a **crude inline-chain** guess (the old
+  star-like guess was unrepresentable for a transversal target).
+- 3 lib unit tests, all order 3–4, well-posed. **2 `tests/optimizer_integration.rs`
+  gates now GREEN (D2-opt, 2026-10-04): order-6 folded perturb→recover (6 iters
+  → ~3e-10 relative) and order-6 transversal extract-from-crude-guess (9 iters
+  → max|ΔS| ~5e-10).** No bench, not exposed in the CLI or Python bindings.
 - Design/rationale: `docs/numerical-optimization-report.md` (the three
   numeric optimizations: O(n) Givens, selective linear solve, adaptive
   root finding — all shipped; that doc covers performance, not the LM
@@ -533,21 +540,27 @@ from the CLI/Python surfaces, with integration-level evidence.
 
 ### Work items (ordered)
 
-1. **D1 (opt) — Integration test: synthesize → perturb → extract — RED gate committed (2026-09-29).**
-   `tests/optimizer_integration.rs` (two `#[ignore]`d RED tests, order 6):
+1. **D1 (opt) — Integration test: synthesize → perturb → extract — RED gate committed (2026-09-29), GREEN (2026-10-04).**
+   `tests/optimizer_integration.rs` (two order-6 gates, both now run and pass):
    (a) perturb four inter-resonator couplings by 7 %, re-optimize from the
-   perturbed good-guess matrix, assert 1e-4 relative recovery — currently
-   stops at ~8.3e-3; (b) `extract_matrix` from its crude uniform guess —
-   currently wanders into a singular response solve. Both `#[ignore]`d with
-   the failure documented; they are the RED→GREEN gate for the rest of this
-   section and the scale-sensitivity exposure of the fixed-δ Jacobian that
-   D2-opt is meant to fix.
-2. **D2 (opt) — Scale-aware Jacobian step.** Replace the fixed 1e-7 with
-   `delta = 1e-7 * max(1, |x_i|)` (or central differences if the FD cost
-   stays acceptable at our problem sizes — measure first, don't assume).
-   Keep the hand-rolled elimination only if the D1-opt integration tests
-   show it is not the bottleneck; otherwise move the normal equations to
-   `nalgebra` (already a dependency) — one line, removes a bug surface.
+   perturbed good-guess matrix, assert 1e-4 relative recovery — converges in
+   6 iterations to ~3e-10; (b) `extract_matrix` from its crude guess —
+   converges in 9 iterations to max|ΔS| ~5e-10.
+2. **D2 (opt) — Scale-aware Jacobian step — DONE (2026-10-04).** The fixed
+   1e-7 became `delta = 1e-7 * max(1, |x_i|)` with up to 4 halving retries when
+   a perturbed evaluation returns `Err` (singular). **Honest attribution:
+   the scale-aware δ was *not* the primary fix.** Scenario (a) was broken by
+   the convergence check comparing cost against the running *best* (a false
+   "no change" on iteration 2 — it stopped at ~8.3e-3 regardless of δ, and
+   fixed/scale/central differences all failed identically); it is now judged
+   on the successive-iteration cost after an accepted step. Scenario (b) was
+   broken by `extract_matrix`'s star-like initial guess (every resonator
+   coupled to both ports, chain couplings frozen at zero — a template that
+   cannot represent a transversal inline-chain target), now a crude inline
+   chain; and a trial step whose response evaluation failed (singular)
+   propagated out as an error instead of being a λ×2 rejection. Both gates
+   are un-`#[ignore]`d and green; the hand-rolled elimination is kept (not a
+   bottleneck — 2 gates in ~1 s of test time).
 3. **D3 (opt) — CLI + Python surface.** `mfs_cli.rs` `optimize`
    subcommand (input matrix JSON/Touchstone + target response JSON or
    Touchstone → optimized matrix, same `--format` conventions as the
@@ -604,9 +617,9 @@ Ordered by how much they block the areas above:
 ## Suggested execution order
 
 ```
-Wave 1 (parallel):  E4 (N=8 regression) · D1-opt (RED)   [E3 + C1 + E4 closed; D1-opt RED gate committed 2026-09-29]
+Wave 1 (parallel):  E4 (N=8 regression) · D1-opt (RED)   [E3 + C1 + E4 closed; D1-opt RED gate committed 2026-09-29, GREEN 2026-10-04]
 Wave 2 (serial):    D1–D4 (duplexer full path)   [DONE 2026-10-03 — Type-I orders 2–8 + §V golden + Type-II §VI anchor, all gate-anchored]
-Wave 3 (parallel):  D2–D4-opt (optimizer) · C0 (multi-band design doc + route choice)
+Wave 3 (parallel):  D2-opt [DONE 2026-10-04 — scale-δ + early-stop + chain-guess, both order-6 gates green] · D3–D4-opt (optimizer CLI/Python, bench) · C0 (multi-band design doc + route choice)
 Wave 4 (serial):    B1 [DONE 2026-10-04] → B2 [DONE 2026-10-04] → B3 [DONE 2026-10-04] → B4 [DONE 2026-10-04] (multiplexer; Wave 2 done — full wave complete)
 Wave 5:             E1 (passband TZ) · E2 (Laurent) — needed by B3's fidelity work and
                     by C2 when route-α is chosen (inter-band TZs); then C2 → C3

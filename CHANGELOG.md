@@ -175,6 +175,34 @@
 
 ### Fixed
 
+- **The LM optimizer (`src/optimize.rs`) — four correctness fixes; the two
+  order-6 integration gates go RED→GREEN (D2-opt).**
+  (a) `optimize_matrix` declared convergence by comparing the cost against the
+  running *best*, which equals the current cost on the iteration after any
+  accepted step — a false "no change" that stopped the loop after 2 iterations
+  (~8e-3 relative, far from the 1e-4 gate). Convergence is now judged on the
+  *successive-iteration* cost change, and only after an accepted step (a
+  rejected step leaves the cost trivially unchanged — that is stagnation, not
+  convergence).
+  (b) `extract_matrix`'s crude initial guess was star-like — every resonator
+  coupled to both ports with the inter-resonator chain couplings frozen at
+  zero — a template that cannot represent a transversal (inline-chain) target;
+  the LM steps then wandered into singular response solves. The guess is now a
+  crude inline chain (source `M[0,1]`, load `M[N,N+1]`, chain `M[k,k+1]`).
+  (c) A trial step whose response evaluation failed (a singular matrix)
+  propagated the error out of `optimize_matrix` instead of being a
+  rejection; it is now λ×2.
+  (d) The finite-difference Jacobian step is scale-aware:
+  `δ = 1e-7·max(1,|x_i|)` with up to 4 halvings when a perturbed evaluation
+  returns `Err` (the plan's D2-opt spec — implemented, but not the primary
+  fix; (a)–(c) were).
+  `tests/optimizer_integration.rs`: both `#[ignore]`d RED gates are now run and
+  green — order-6 folded perturb→recover converges in 6 iterations to
+  ~3e-10 relative (gate: 1e-4); order-6 transversal extract-from-crude-guess
+  converges in 9 iterations to max|ΔS| ~5e-10 (gate: 1e-3). Known limitation
+  (documented): extraction recovers within the guess's topology — a folded or
+  arrow target is not representable from the inline-chain start.
+
 - **The D1 full-iteration gate is green at orders 2, 3, 4, 5, 6, and 8.**
   The Tx/Rx diplexers (`full_iteration(true)`, ideal Type-I junction, 22 dB)
   all converge to a physically valid quasi-equiripple diplexer at the

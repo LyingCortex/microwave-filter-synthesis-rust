@@ -195,6 +195,13 @@ fn compute_residuals(
 }
 
 /// Computes the Jacobian matrix numerically (finite differences).
+///
+/// The step is scale-aware: `delta_j = 1e-7 * max(1, |x_j|)` — a fixed
+/// absolute step is not scale-safe when parameter magnitudes vary (large
+/// entries under-perturb, tiny entries over-perturb). If a perturbed
+/// evaluation fails (the response matrix is singular at that point —
+/// possible far from the solution basin), the step is halved and retried up
+/// to 4 times before the error is surfaced.
 fn compute_jacobian(
     template: &CouplingMatrix,
     params: &[f64],
@@ -204,21 +211,36 @@ fn compute_jacobian(
     settings: ResponseSettings,
     n_residuals: usize,
 ) -> Result<Vec<Vec<f64>>> {
+    const MAX_DELTA_RETRIES: u32 = 4;
     let n_params = params.len();
-    let delta = 1e-7;
     let mut jacobian = vec![vec![0.0; n_params]; n_residuals];
 
     let base_matrix = rebuild_matrix(template, params, config)?;
     let base_residuals = compute_residuals(&base_matrix, target, grid, settings)?;
 
     for j in 0..n_params {
-        let mut perturbed = params.to_vec();
-        perturbed[j] += delta;
-        let perturbed_matrix = rebuild_matrix(template, &perturbed, config)?;
-        let perturbed_residuals = compute_residuals(&perturbed_matrix, target, grid, settings)?;
-
-        for i in 0..n_residuals {
-            jacobian[i][j] = (perturbed_residuals[i] - base_residuals[i]) / delta;
+        let mut delta = 1e-7 * 1.0_f64.max(params[j].abs());
+        let mut last_err: Option<MfsError> = None;
+        for _retry in 0..MAX_DELTA_RETRIES {
+            let mut perturbed = params.to_vec();
+            perturbed[j] += delta;
+            let perturbed_matrix = rebuild_matrix(template, &perturbed, config)?;
+            match compute_residuals(&perturbed_matrix, target, grid, settings) {
+                Ok(perturbed_residuals) => {
+                    for i in 0..n_residuals {
+                        jacobian[i][j] = (perturbed_residuals[i] - base_residuals[i]) / delta;
+                    }
+                    last_err = None;
+                    break;
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    delta *= 0.5;
+                }
+            }
+        }
+        if let Some(e) = last_err {
+            return Err(e);
         }
     }
 
@@ -328,8 +350,10 @@ pub fn optimize_matrix(
     }
 
     let mut lambda = config.lambda;
-    let mut best_cost = f64::INFINITY;
     let mut iterations = 0;
+    let mut prev_cost: Option<f64> = None;
+    let mut accepted_step = false;
+    let mut best_cost = f64::INFINITY;
 
     for iter in 0..config.max_iterations {
         iterations = iter + 1;
@@ -337,16 +361,29 @@ pub fn optimize_matrix(
         let matrix = rebuild_matrix(initial, &params, config)?;
         let residuals = compute_residuals(&matrix, target, grid, settings)?;
         let cost: f64 = residuals.iter().map(|r| r * r).sum();
+        best_cost = best_cost.min(cost);
 
-        if (best_cost - cost).abs() < config.tolerance && iter > 0 {
-            let final_matrix = rebuild_matrix(initial, &params, config)?;
-            return Ok(OptimizeResult {
-                matrix: final_matrix,
-                cost,
-                iterations,
-                converged: true,
-            });
+        // Convergence: the cost stopped changing after an *accepted* step.
+        // (Comparing against the running *best* is wrong: after an accepted
+        // trial the next cost equals the best exactly, which reads as "zero
+        // change" on iteration 2 and stops the loop before it has converged.
+        // And checking after a *rejected* step is also wrong: the parameters
+        // did not move, so the cost is trivially unchanged — that is
+        // stagnation, not convergence.)
+        if accepted_step {
+            if let Some(prev) = prev_cost {
+                if (prev - cost).abs() < config.tolerance {
+                    return Ok(OptimizeResult {
+                        matrix,
+                        cost,
+                        iterations,
+                        converged: true,
+                    });
+                }
+            }
         }
+        prev_cost = Some(cost);
+        accepted_step = false;
 
         let jacobian = compute_jacobian(
             initial,
@@ -359,18 +396,27 @@ pub fn optimize_matrix(
         )?;
         let step = lm_step(&jacobian, &residuals, lambda, n_params);
 
-        // Trial step
+        // Trial step. A trial whose response cannot be evaluated (a
+        // singular matrix) is a *rejection*, not an error: the step walked
+        // outside the well-posed region, so damp harder and retry.
         let trial_params: Vec<f64> = params.iter().zip(step.iter()).map(|(p, s)| p + s).collect();
-        let trial_matrix = rebuild_matrix(initial, &trial_params, config)?;
-        let trial_residuals = compute_residuals(&trial_matrix, target, grid, settings)?;
-        let trial_cost: f64 = trial_residuals.iter().map(|r| r * r).sum();
+        let trial_cost = rebuild_matrix(initial, &trial_params, config)
+            .and_then(|m| compute_residuals(&m, target, grid, settings))
+            .map(|r| r.iter().map(|r| r * r).sum::<f64>());
 
-        if trial_cost < cost {
-            params = trial_params;
-            best_cost = trial_cost;
-            lambda *= 0.5; // Decrease damping (more Newton-like)
-        } else {
-            lambda *= 2.0; // Increase damping (more gradient descent-like)
+        match trial_cost {
+            Ok(tc) if tc < cost => {
+                params = trial_params;
+                lambda *= 0.5; // Decrease damping (more Newton-like)
+                accepted_step = true;
+            }
+            _ => {
+                lambda *= 2.0; // Increase damping (more gradient descent-like)
+            }
+        }
+        // Damped to a negligible step: no further progress is possible.
+        if lambda > 1e12 {
+            break;
         }
     }
 
@@ -397,8 +443,20 @@ pub fn tune_matrix(
 
 /// Extracts a coupling matrix from measured S-parameter data.
 ///
-/// Starts from an initial guess (e.g., from synthesis) and optimizes
-/// all coupling values to match the measured response.
+/// Builds a crude initial guess — an *inline chain* (source `M[0,1]`,
+/// load `M[N,N+1]`, inter-resonator `M[k,k+1]`, all set to a uniform rough
+/// coupling) with zero diagonals, and optimizes every free value (couplings
+/// and diagonals) to match the measured response.
+///
+/// **Topology limitation:** `optimize_matrix` freezes the template's
+/// non-zero pattern, so the recovered matrix shares the *inline-chain*
+/// topology of this guess. This is the transversal family — the most common
+/// topology and the one the order-6 extraction gate uses. A target whose
+/// true matrix has a different non-zero pattern (e.g. a folded or arrow
+/// topology with cross couplings) is *not* representable from this start
+/// and the extraction will fit the nearest inline-chain matrix instead.
+/// Callers who know a better topology should build the guess themselves and
+/// call `optimize_matrix` with a custom template.
 ///
 /// `order` specifies the filter order (number of resonators).
 pub fn extract_matrix(
@@ -406,20 +464,22 @@ pub fn extract_matrix(
     grid: &FrequencyGrid,
     order: usize,
 ) -> Result<OptimizeResult> {
-    // Build initial guess: estimate couplings from the response bandwidth
-    // For a Chebyshev filter, the source/load coupling ≈ 1/sqrt(g0*g1)
-    // and chain couplings ≈ 1/sqrt(gk*g(k+1)). Use uniform approximation.
+    // Build the initial guess as a crude *inline chain*: source M[0,1],
+    // load M[N, N+1], and inter-resonator chain couplings M[k, k+1],
+    // all set to a uniform rough coupling estimate. The optimizer freezes
+    // the template's non-zero pattern, so the guess must be a template that
+    // can *represent* the target family — a transversal (inline-chain)
+    // order-`order` filter has exactly this pattern. (The previous guess
+    // coupled every resonator to both ports and left the chain couplings
+    // frozen at zero — a star-like pattern that cannot represent a
+    // transversal target, which is what made the extraction wander into
+    // singular response matrices.)
     let coupling = (2.0 / (order as f64 + 1.0)).sqrt();
     let mut builder = CouplingMatrixBuilder::new(order)?;
-
-    // Source couplings (transversal: all resonators couple to source)
-    for k in 1..=order {
-        builder = builder.set_symmetric(0, k, coupling / (k as f64).sqrt())?;
-    }
-    // Load couplings
-    for k in 1..=order {
-        builder =
-            builder.set_symmetric(k, order + 1, coupling / ((order + 1 - k) as f64).sqrt())?;
+    builder = builder.set_symmetric(0, 1, coupling)?;
+    builder = builder.set_symmetric(order, order + 1, coupling)?;
+    for k in 1..order {
+        builder = builder.set_symmetric(k, k + 1, coupling)?;
     }
 
     let initial = builder.build()?;

@@ -108,14 +108,16 @@ fn assert_relative_recovery(original: &CouplingMatrix, recovered: &CouplingMatri
 /// re-optimize from the perturbed (good-guess) matrix against the recorded
 /// response. The recovered couplings must be within 1e-4 relative of the
 /// originals. This is the core D1-opt RED→GREEN gate.
-///
-/// **Status (2026-09-29): RED.** The fixed `δ = 1e-7` finite-difference
-/// Jacobian is not scale-safe for order-6 couplings (some entries are O(0.1)),
-/// so the optimizer converges to ~1e-2 relative instead of 1e-4. The
-/// scale-aware step (section D, D2-opt) is the fix; un-ignore this test when
-/// D2-opt lands.
+/// **Status (2026-10-04): GREEN.** Two root causes were fixed in
+/// `optimize_matrix` (section D, D2-opt): (a) the early-termination check
+/// compared the cost against the running *best*, which equals the current
+/// cost on the iteration after an accepted step — a false "no change" that
+/// stopped the loop after 2 iterations at ~8e-3 relative; it now compares
+/// successive iterations. (b) the finite-difference Jacobian step is
+/// scale-aware (`δ = 1e-7 * max(1, |x_j|)` with a halving retry when a
+/// perturbed evaluation is singular). Measured: converges in 6 iterations
+/// to ~3e-10 relative.
 #[test]
-#[ignore = "D1-opt RED gate: fixed-δ Jacobian not scale-safe at order 6 (D2-opt is the fix)"]
 fn optimizer_recovers_perturbed_order6_folded_from_good_guess() -> Result<()> {
     let original = synthesize_order6(mfs::matrix::MatrixTopology::Folded)?;
     let g = grid();
@@ -147,14 +149,16 @@ fn optimizer_recovers_perturbed_order6_folded_from_good_guess() -> Result<()> {
 /// uniform transversal guess) and require the recovered matrix to reproduce the
 /// target response to a tight point-wise bound. Pins the `extract_matrix`
 /// entry point end-to-end.
-///
-/// **Status (2026-09-29): RED.** From the crude uniform guess the LM path
-/// wanders into singular response matrices ("response matrix became singular
-/// during solve") before recovering the response. Same root-cause family as
-/// scenario 1 (fixed-δ Jacobian + crude starting point); D2-opt is the fix.
-/// Un-ignore when D2-opt lands.
+/// **Status (2026-10-04): GREEN.** Two fixes: (a) `extract_matrix`'s crude
+/// initial guess was star-like (every resonator coupled to both ports, chain
+/// couplings frozen at zero) — a template that cannot represent a
+/// transversal (inline-chain) target, which is what drove the LM steps into
+/// singular response matrices. It is now a crude inline chain (source M[0,1],
+/// load M[N,N+1], chain M[k,k+1]). (b) a trial step whose response cannot be
+/// evaluated (a singular matrix) is now a *rejection* (raise λ) instead of a
+/// propagated hard error. Measured: converges in 9 iterations to max|ΔS|
+/// ~5e-10.
 #[test]
-#[ignore = "D1-opt RED gate: extract_matrix from crude guess hits a singular solve (D2-opt is the fix)"]
 fn optimizer_extracts_order6_from_crude_guess() -> Result<()> {
     let original = synthesize_order6(mfs::matrix::MatrixTopology::Transversal)?;
     let g = grid();
