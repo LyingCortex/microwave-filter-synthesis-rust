@@ -53,9 +53,10 @@ section should be released as the next version tag when the maintainer cuts it.
 
 - **Multi-band synthesis (scope-1, decided 2026-09-29)** — true
   multi-passband synthesis, not per-band composition. Mapping layer done
-  (`MultiBandMapping` in `freq`, 2026-09-29); design doc next
-  (`docs/internal/multi-band-synthesis-design.md`); sequencing and
-  acceptance in `docs/continuation-plan.md` section C.
+  (`MultiBandMapping` in `freq`, 2026-09-29); **C0 design doc done
+  2026-10-05** (`docs/internal/multi-band-synthesis-design.md`, route-α
+  committed); next is **E1 (passband TZs — hard blocker)** then C2/C3.
+  Sequencing and acceptance in `docs/continuation-plan.md` section C.
 - **Fold the duplexer synthesis into the multiplexer (N=2)** — the
   duplicated `recover_filter_design` path is now a single
   `synthesis::recover_channel_design` (closed), but `DuplexerSynthesis`

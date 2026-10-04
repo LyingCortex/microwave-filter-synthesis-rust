@@ -4,6 +4,22 @@
 
 ### Added
 
+- **Multi-band synthesis design doc (C0) — route committed.**
+  `docs/internal/multi-band-synthesis-design.md` fixes the multi-passband
+  synthesis plan (`docs/continuation-plan.md` §C, scope-1): **route-α**
+  (multi-band Chebyshev via frequency transformation), anchored on
+  Macchiarella–Tamiazzo, *Design techniques for dual-passband filters*,
+  IEEE TMTT 53(11) 2005 (DOI `10.1109/TMTT.2005.855749`); route-β deferred
+  with rationale. The doc specifies the characteristic function, the
+  `MultiBandSpec`/`BandSpec`/`RejectionSpec` surface, the transmission-zero
+  placement law (outer zeros stopband; **inter-band zeros passband** →
+  **E1 is a hard prerequisite**, exact code named:
+  `safe_sqrt_term`, `src/approx/generalized_ops.rs`), the target $N+2$
+  transversal topology (inter-band TZs become trisection/extracted-zero
+  sections), and the first acceptance fixture
+  `Cameron2011_10_5_dual_band_symmetric` (Cameron 2011 Fig. 25), already
+  in-repo. No code yet — C2/C3 are gated on E1.
+
 - **`benches/optimizer.rs` — a Criterion bench for the LM optimizer (D4-opt).**
   Times `optimize_matrix` (`tune` scenario: order-4/6/8 folded, 4 inter-resonator
   couplings perturbed 7 %, re-optimized from the perturbed good guess) and

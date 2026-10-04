@@ -190,7 +190,10 @@ Separates physical frequency handling from normalized prototype math.
 - `BandPassMapping` — center frequency + bandwidth
 - `BandStopMapping` — stopband center + width (`ω = -1/Ω_BPF(f)`); `f = f0` clamps to `-SINGULAR_CLAMP`
 - `MultiBandMapping` — disjoint, center-sorted passbands; piecewise forward
-  map (nearest band by prototype-transform distance), band-local inverse
+  map (nearest band by prototype-transform distance), band-local inverse.
+  The multi-band **synthesis** route is designed in
+  `docs/internal/multi-band-synthesis-design.md` (C0, route-α; implementation
+  blocked on E1 passband TZs)
 - `FrequencyGrid` — uniform or custom frequency point sets
 
 ### `approx` — Polynomial Approximation
@@ -574,7 +577,7 @@ Worked plan with sequencing and acceptance criteria:
 | Done | Generalize the full spectral path to N-channel (multiplexer) mutual loading (B2, 2026-10-04) | — |
 | Done | Full Macchiarella spectral path converged for the duplexer (Type-I orders 2–8 + Type-II, gate-anchored, 2026-10-03) | — |
 | Later | Butterworth/Elliptic approximation families | Low |
-| Later | Multi-band synthesis (true multi-passband, scope-1) — design doc first | Medium |
+| Later | Multi-band synthesis (true multi-passband, scope-1) — **C0 design doc done 2026-10-05, route-α committed** (`docs/internal/multi-band-synthesis-design.md`); implementation blocked on passband TZs (E1) | Medium |
 
 > Touchstone export, Python bindings, and criterion benchmarks are already
 > implemented (see `src/touchstone.rs`, `src/python.rs`, `benches/`).

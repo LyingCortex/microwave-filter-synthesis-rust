@@ -22,7 +22,7 @@ carries *what to do next and how to know it is done*.
 | Two-port synthesis | Full generalized-Chebyshev pipeline, orders 2–8 fixture-anchored, 10–30 numerically stable | High (publication-anchored) |
 | Duplexer | Simplified frequency-offset perturbation (default); full Macchiarella–Tamiazzo spectral path behind `DuplexerSynthesis::full_iteration(true)` **converges at Type-I orders 2–8 and Type-II (incl. the §VI degree-40 GSM design), all gate-anchored** (2026-10-03) | High (publication-anchored, full path) / Medium (simplified default) |
 | Multiplexer (N-channel) | Independent per-channel synthesis + simplified perturbation (default); **full Macchiarella–Tamiazzo spectral path for N channels behind `MultiplexerSynthesis::full_iteration(true)`** (shared with the duplexer, `src/synthesis/machiarella.rs`; B2, 2026-10-04) converges at N = 3/4 order-4 (gate-anchored); response is the **true (N+1)-port admittance model** (B1) | High (publication-anchored, full path) / Medium (simplified default) |
-| Multi-band | **Mapping layer in place** — `freq` supports all four prototype families plus `MultiBandMapping` (E3/C1, 2026-09-29); no design doc, no multi-band approximation, no synthesis path | — |
+| Multi-band | **Mapping layer in place** — `freq` supports all four prototype families plus `MultiBandMapping` (E3/C1, 2026-09-29); **C0 design doc done (2026-10-05), route-α committed** (`docs/internal/multi-band-synthesis-design.md`: math, `MultiBandSpec`, TZ law, topology, Fig. 25 fixture); no approximation/synthesis code yet (C2 blocked on E1) | — |
 | Optimization | LM `tune_matrix` / `extract_matrix` (hand-rolled Gaussian elimination, **scale-aware FD Jacobian `δ = 1e-7·max(1,|x_i|)`** with halving retry, topology frozen to template; convergence on successive-iteration cost after accepted steps; singular trials rejected, not errors; **`extract_matrix` starts from a crude inline-chain guess**); 3 lib unit tests + **2 order-6 integration gates (synthesize→perturb→recover, extract-from-crude-guess) GREEN (D2-opt, 2026-10-04)** + **CLI `optimize`/`extract` subcommands and Python `extract`/`tune` (D3-opt, 2026-10-04), e2e-gated** + **`benches/optimizer.rs` & 0.1 dB-noise extraction regression (D4-opt, 2026-10-04)** | Medium (order ≤ 6 extraction/recovery gate-anchored; CLI/Python e2e-gated; benched; order-8 cold-start extraction and topology-bound recovery documented as limits, report §6) |
 
 Known limitations that gate the areas below (full list in
@@ -443,10 +443,14 @@ roadmap line — and the one that most needs new mathematics.
 - `src/freq.rs` implements all four prototype families
   (`LowPassMapping`, `HighPassMapping`, `BandPassMapping`,
   `BandStopMapping`) plus `MultiBandMapping` (E3/C1, 2026-09-29).
-- No multi-band approximation, no multi-band synthesis path.
+- **C0 design doc done (2026-10-05):** route committed (**C-route-α**),
+  math/spec/TZ-law/topology/fixture fixed in
+  `docs/internal/multi-band-synthesis-design.md`.
+- No multi-band approximation, no multi-band synthesis path (C2/C3 open;
+  C2 blocked on **E1**, passband TZs — see the doc and §E item 1).
 - The vendored benchmark standard has **no** multi-band case family —
-  there is no external gate; literature fixtures will have to define the
-  acceptance bar (the fixture tool is `tests/extract_from_pdf.py`).
+  there is no external gate; the acceptance bar is the in-repo literature
+  fixture `Cameron2011_10_5_dual_band_symmetric` (Cameron 2011 Fig. 25).
 
 ### Why generalized Chebyshev cannot do this
 
@@ -478,15 +482,25 @@ C0 must decide between them before any code):
 
 ### Work items (ordered)
 
-1. **C0 — Design doc (gate for everything else).** Write
-   `docs/internal/multi-band-synthesis-design.md` *before any code*, the
-   way `docs/multiplexer-synthesis.md` was: the chosen route (α or β) with
-   the math, the spec structure (`MultiBandSpec`: per-band
-   `{center_hz, bandwidth_hz, return_loss_db}` + out-of-band rejection
-   requirements), the TZ placement law (which zeros in which gap, and the
-   per-band passband-zero analysis that E1 must cover), the target matrix
-   topology, and a 2-band reference design from the literature as the
-   first acceptance fixture.
+1. **C0 — Design doc — DONE (2026-10-05).**
+   `docs/internal/multi-band-synthesis-design.md` (written the way
+   `docs/multiplexer-synthesis.md` was). **Route committed: C-route-α**
+   (multi-band Chebyshev via frequency transformation), anchored on
+   Macchiarella–Tamiazzo, *Design techniques for dual-passband filters*,
+   IEEE TMTT 53(11), 2005, pp. 3265–3271 (DOI `10.1109/TMTT.2005.855749`);
+   route-β deferred with rationale (it needs a new synthesis engine).
+   The doc fixes: the characteristic function (product of per-band
+   band-Chebyshev factors on the `MultiBandMapping` transform), the
+   `MultiBandSpec`/`BandSpec`/`RejectionSpec` surface (invariants inherited
+   from `MultiBandMapping`), the **TZ placement law** (outer zeros are
+   stopband; inter-band zeros are **passband** relative to a band's
+   prototype → **E1 is a hard prerequisite**, with the exact code to relax:
+   `safe_sqrt_term`, `src/approx/generalized_ops.rs:96-105`), the target
+   topology ($N+2$ transversal; inter-band TZs become
+   trisection/extracted-zero sections — no new `MatrixTopology`), and the
+   **first acceptance fixture: `Cameron2011_10_5_dual_band_symmetric`
+   (Cameron 2011 Fig. 25, order 10, 22 dB RL, 2 bands ±[0.35,1.0], 5 TZs)**,
+   already in-repo at `tests/cameron2011_fixtures.json`.
 2. **C1 — `MultiBandMapping` in `freq` — closed (2026-09-29).** Disjoint,
    center-sorted passbands; piecewise forward map (nearest band by
    prototype-transform distance `|Ω_b(f)|`), band-local inverse (the type
@@ -655,10 +669,10 @@ Ordered by how much they block the areas above:
 ```
 Wave 1 (parallel):  E4 (N=8 regression) · D1-opt (RED)   [E3 + C1 + E4 closed; D1-opt RED gate committed 2026-09-29, GREEN 2026-10-04]
 Wave 2 (serial):    D1–D4 (duplexer full path)   [DONE 2026-10-03 — Type-I orders 2–8 + §V golden + Type-II §VI anchor, all gate-anchored]
-Wave 3 (parallel):  D2-opt [DONE 2026-10-04 — scale-δ + early-stop + chain-guess, both order-6 gates green] · D3-opt [DONE 2026-10-04 — CLI optimize/extract + Python extract, e2e-gated] · D4-opt [DONE 2026-10-04 — `benches/optimizer.rs` + noise regression + report §6] · C0 (multi-band design doc + route choice)
+Wave 3 (parallel):  D2-opt [DONE 2026-10-04 — scale-δ + early-stop + chain-guess, both order-6 gates green] · D3-opt [DONE 2026-10-04 — CLI optimize/extract + Python extract, e2e-gated] · D4-opt [DONE 2026-10-04 — `benches/optimizer.rs` + noise regression + report §6] · C0 [DONE 2026-10-05 — design doc, route-α committed]
 Wave 4 (serial):    B1 [DONE 2026-10-04] → B2 [DONE 2026-10-04] → B3 [DONE 2026-10-04] → B4 [DONE 2026-10-04] (multiplexer; Wave 2 done — full wave complete)
-Wave 5:             E1 (passband TZ) · E2 (Laurent) — needed by B3's fidelity work and
-                    by C2 when route-α is chosen (inter-band TZs); then C2 → C3
+Wave 5:             E1 (passband TZ — **hard blocker for C2, route-α committed**) · E2 (Laurent) — needed by B3's fidelity work and
+                    by C2 (inter-band TZs); then C2 → C3
 ```
 
 Rationale: the duplexer full path (Wave 2) was the only item on the critical
