@@ -206,18 +206,30 @@ the doc reflects reality, not aspiration.
    promised `label: String` was not added, to avoid disturbing the shared
    duplexer type.
 
-2. **Response is a geometric-mean model, not a full (N+1)-port solve.**
-   `Multiplexer::response` (multiplexer.rs) evaluates each channel filter
-   independently and approximates:
-   - antenna reflection `antenna_s11_db` = the **geometric mean** of the channel
-     S11 magnitudes `(∏ᵢ |S11ᵢ|)^(1/N)` at each frequency point (consistent
-     with the diplexer's `√(|S11_tx|·|S11_rx|)` for N=2);
-   - isolation `isolation_db[i][j]` = the **product** of channel `i` and `j`
-     S21 magnitudes.
-   The doc's promised complex-valued `S11 / S(i+1)1 / S(i+1)(j+1)` via the
-   common-port admittance sum `Y_in = Σ 1/Z_in,i` is **not** implemented.
-   The `MultiplexerResponse` struct likewise stores dB (`f64`) arrays rather
-   than complex coefficients.
+2. **Response is now a true (N+1)-port model (B1, 2026-10-04); the
+   geometric-mean model is retained behind a flag.** `Multiplexer::response`
+   defaults to [`ResponseModel::Admittance`], which treats each channel as a
+   lossless reciprocal 2-port (input port A at the common node, output port B
+   at the external channel port) and composes the full complex (N+1)×(N+1)
+   S-matrix by the wave-variable node equation. For lossless channels the
+   result is unitary and reciprocal, and N=1 reduces exactly to the channel's
+   own 2-port S-matrix (gate tests in `src/multiplexer.rs`). The
+   `MultiplexerResponse` struct still stores dB (`f64`) arrays, but they are
+   the *true* (N+1)-port S-magnitude values: `antenna_s11_db = |S₀₀|`,
+   `channel_s21_db[i] = |Sᵢ₊₁₀|`, `channel_s11_db[i] = |Sᵢ₊₁,ᵢ₊₁|`,
+   `isolation_db[i][j] = |Sᵢ₊₁,ⱼ₊₁|`. The full complex matrix is exposed
+   directly by `Multiplexer::response_matrix`. The legacy geometric-mean
+   magnitude model (antenna = `(∏ᵢ|S11ᵢ|)^(1/N)`, isolation = product of S21
+   magnitudes) is kept as `ResponseModel::GeometricMean` via
+   `Multiplexer::response_with` for one release cycle for parity comparison;
+   it approximates the admittance model well in the deep stopband (both
+   channels reflective) but is off by up to ~150 dB in a channel's passband
+   (the single in-band channel drives the geometric mean toward zero while
+   the other channels' stopband reactances load the common node).
+
+   The `Duplexer::response` (N=2 diplexer) still uses its own geometric-mean
+   model and is unchanged; B2 will fold the duplexer into the shared
+   multiplexer path.
 
 3. **p₀ N×N linear system not implemented.** The doc's §Unitary condition
    (solving for `|p_{0i}|²` from a return-loss constraint per passband edge)
@@ -269,11 +281,12 @@ verifiable contract the tests assert.
 not asserted (approximate model / tolerance).
 
 1. ✅ **Diplexer parity**: `MultiplexerSynthesis` with N=2 reproduces the
-   existing `DuplexerSynthesis` band placement; the two independent common-port
-   responses agree to within ~1 dB (`tests/multiplexer.rs`). Both paths now use
-   a consistent geometric-mean antenna-reflection model. ("Same convergence"
-   in the strict numeric sense is not asserted; both paths share the same
-   approximate perturbation loop.)
+   existing `DuplexerSynthesis` band placement (`tests/multiplexer.rs`).
+   ("Same convergence" in the strict numeric sense is not asserted; both paths
+   share the same approximate perturbation loop.) The two paths use *different*
+   common-port response models (multiplexer: true (N+1)-port admittance;
+   duplexer: geometric mean), so cross-implementation response tracking is not
+   asserted — see the note in that test.
 2. ⚠️ **Triplexer** (3 channels): synthesizes, converges to a finite bounded
    error, and the recovered channels are valid passband filters (no longer
    fully-reflective). **Caveat (deviation item 5, as of 0.5.0):** the
@@ -283,10 +296,10 @@ not asserted (approximate model / tolerance).
    The dimensional N-port contract is asserted strictly. The quasi-equiripple
    RL / strong-isolation *values* are not tightly asserted (approximate model).
 3. ⚠️ **Quadruplexer** (4 channels): same status as the triplexer.
-4. ✅ **Response**: `Multiplexer::response` matches `Duplexer::response` for
-   N=2 (shape + agreement). The antenna model is the geometric mean
-   `(∏ᵢ|S11ᵢ|)^(1/N)`; it is magnitude-based, so a complex-valued exact match
-   is not asserted.
+4. ✅ **Response (true (N+1)-port, B1)**: `Multiplexer::response_matrix`
+   returns the full complex (N+1)×(N+1) S-matrix; it is unitary and
+   reciprocal for lossless channel filters and reduces exactly to the channel's
+   own 2-port S-matrix at N=1 (gate tests in `src/multiplexer.rs`).
 5. ⚠️ **Convergence**: iteration count finite/bounded; under-relaxation prevents
    divergence for well-separated channels (triplexer/quadruplexer converge).
    The `s_roots` iteration converges, and (as of 0.5.0, P1) the reconstructed

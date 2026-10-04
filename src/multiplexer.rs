@@ -18,6 +18,7 @@ use crate::matrix::CouplingMatrix;
 use crate::response::ResponseSolver;
 use crate::spec::FilterSpec;
 use crate::synthesis::build_filter_spec;
+use nalgebra::DMatrix;
 use num_complex::Complex64;
 
 /// N-channel multiplexer synthesis result.
@@ -460,8 +461,28 @@ mod tests {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Multiplexer N+1-port Analysis
+// Multiplexer (N+1)-port Analysis
 // ═══════════════════════════════════════════════════════════════════════════════
+
+/// Model used to combine N channel filters into the common-port response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponseModel {
+    /// True (N+1)-port common-junction model: each channel is a lossless
+    /// reciprocal 2-port (port A at the common node, port B at the external
+    /// channel port), and the (N+1)×(N+1) S-matrix is the result of the
+    /// parallel junction `Y_in = Σᵢ 1/Z_in,i` — assembled via the
+    /// wave-variable node equation, which is well-conditioned where the
+    /// explicit per-channel admittance matrix is singular (matched band
+    /// center). Unitary and reciprocal for lossless inputs; N=1 reduces
+    /// exactly to the channel's own 2-port S-matrix. Physically correct.
+    Admittance,
+    /// Legacy magnitude model (geometric-mean antenna reflection
+    /// `(∏ᵢ|S11ᵢ|)^(1/N)` and product-of-transmissions isolation). Retained
+    /// for one release cycle for parity comparison; superseded by
+    /// [`ResponseModel::Admittance`], which it approximates poorly in the
+    /// passband (see `docs/multiplexer-synthesis.md` deviation item 2).
+    GeometricMean,
+}
 
 /// An N-channel multiplexer combining N bandpass filters on one common port.
 #[derive(Debug, Clone)]
@@ -512,15 +533,132 @@ impl Multiplexer {
         self.channels.iter().map(|ch| ch.matrix()).collect()
     }
 
-    /// N+1-port response over [start_hz, stop_hz].
+    /// N+1-port response over [start_hz, stop_hz] using the default
+    /// [`ResponseModel::Admittance`] model (the true (N+1)-port common-node
+    /// composition).
     ///
-    /// The model mirrors the diplexer's simplified per-channel evaluation:
-    /// each channel's filter is evaluated independently, the common (antenna)
-    /// reflection is approximated as the geometric mean of the channel S11
-    /// magnitudes `(∏ᵢ |S11ᵢ|)^(1/N)` (reducing to the diplexer's
+    /// For the legacy geometric-mean magnitude model use
+    /// [`Multiplexer::response_with`].
+    pub fn response(
+        &self,
+        start_hz: f64,
+        stop_hz: f64,
+        points: usize,
+    ) -> Result<MultiplexerResponse> {
+        self.response_with(start_hz, stop_hz, points, ResponseModel::Admittance)
+    }
+
+    /// N+1-port response over [start_hz, stop_hz] with an explicit
+    /// [`ResponseModel`].
+    pub fn response_with(
+        &self,
+        start_hz: f64,
+        stop_hz: f64,
+        points: usize,
+        model: ResponseModel,
+    ) -> Result<MultiplexerResponse> {
+        match model {
+            ResponseModel::Admittance => self.response_admittance(start_hz, stop_hz, points),
+            ResponseModel::GeometricMean => {
+                self.response_geometric_mean(start_hz, stop_hz, points)
+            }
+        }
+    }
+
+    /// Full complex (N+1)×(N+1) S-matrix at every sampled frequency
+    /// ([`ResponseModel::Admittance`]).
+    ///
+    /// Each channel filter is treated as a lossless reciprocal 2-port whose
+    /// input (port A) sits at the common node and whose output (port B) is the
+    /// external channel port. The (N+1)-port S-matrix is assembled from the
+    /// wave-variable node equation (KCL at the common node), per the
+    /// [`ResponseModel::Admittance`] model. For lossless channels the result
+    /// is unitary and reciprocal, and N = 1 reduces exactly to the channel's
+    /// own 2-port S-matrix. The formulation is well-conditioned at the
+    /// matched band center, where the per-channel admittance matrix is
+    /// singular.
+    pub fn response_matrix(
+        &self,
+        start_hz: f64,
+        stop_hz: f64,
+        points: usize,
+    ) -> Result<MultiplexerSMatrix> {
+        let grid = FrequencyGrid::linspace(start_hz, stop_hz, points)?;
+        let channels = self.evaluate_channels(&grid)?;
+        let mut s = Vec::with_capacity(points);
+        for p in 0..points {
+            let s11s: Vec<Complex64> = channels.iter().map(|ch| ch[p].0).collect();
+            let s21s: Vec<Complex64> = channels.iter().map(|ch| ch[p].1).collect();
+            let mat = compose_node_s(&s11s, &s21s);
+            s.push(mat.iter().cloned().collect());
+        }
+        Ok(MultiplexerSMatrix {
+            frequencies: grid.as_slice().to_vec(),
+            num_ports: self.channels.len() + 1,
+            s,
+        })
+    }
+
+    /// Admittance-model response: the true (N+1)-port S-matrix, reported as dB.
+    ///
+    /// `antenna_s11_db` = |S₀₀|, `channel_s21_db[i]` = |Sᵢ₊₁₀| (antenna →
+    /// channel i), `channel_s11_db[i]` = |Sᵢ₊₁,ᵢ₊₁|, `isolation_db[i][j]` =
+    /// |Sᵢ₊₁,ⱼ₊₁| (channel j driven, channel i measured). Unitarity bounds
+    /// every entry by 0 dB.
+    fn response_admittance(
+        &self,
+        start_hz: f64,
+        stop_hz: f64,
+        points: usize,
+    ) -> Result<MultiplexerResponse> {
+        let matrix = self.response_matrix(start_hz, stop_hz, points)?;
+        let n = self.channels.len();
+        let p = n + 1;
+
+        let mut antenna_s11_db = Vec::with_capacity(points);
+        let mut channel_s21_db: Vec<Vec<f64>> =
+            (0..n).map(|_| Vec::with_capacity(points)).collect();
+        let mut channel_s11_db: Vec<Vec<f64>> =
+            (0..n).map(|_| Vec::with_capacity(points)).collect();
+        let mut isolation_db: Vec<Vec<Vec<f64>>> =
+            (0..n).map(|_| (0..n).map(|_| Vec::new()).collect()).collect();
+
+        for q in 0..points {
+            let row = &matrix.s[q];
+            antenna_s11_db.push(mag_to_db(row[0]));
+            for i in 0..n {
+                channel_s21_db[i].push(mag_to_db(row[i * p + 1]));
+                channel_s11_db[i].push(mag_to_db(row[(i + 1) * p + (i + 1)]));
+            }
+            for i in 0..n {
+                for j in 0..n {
+                    if i != j {
+                        isolation_db[i][j].push(mag_to_db(row[i * p + (j + 1)]));
+                    }
+                }
+            }
+        }
+
+        Ok(MultiplexerResponse {
+            frequencies: matrix.frequencies,
+            antenna_s11_db,
+            channel_s21_db,
+            channel_s11_db,
+            isolation_db,
+        })
+    }
+
+    /// Legacy geometric-mean magnitude model: each channel's filter is
+    /// evaluated independently, the common (antenna) reflection is approximated
+    /// as the geometric mean of the channel S11 magnitudes
+    /// `(∏ᵢ |S11ᵢ|)^(1/N)` (reducing to the diplexer's
     /// `√(|S11_tx|·|S11_rx|)` for N=2), and the isolation between channels i
     /// and j is approximated as the product of their S21 magnitudes.
-    pub fn response(
+    ///
+    /// Retained for one release cycle for parity comparison; superseded by
+    /// the admittance model, which it approximates poorly in the passband
+    /// (see `docs/multiplexer-synthesis.md` deviation item 2).
+    fn response_geometric_mean(
         &self,
         start_hz: f64,
         stop_hz: f64,
@@ -626,6 +764,108 @@ impl Multiplexer {
             isolation_db,
         })
     }
+
+    /// Evaluate every channel's 2-port `(s11, s21)` over the shared grid.
+    fn evaluate_channels(&self, grid: &FrequencyGrid) -> Result<Vec<Vec<(Complex64, Complex64)>>> {
+        let mut channels = Vec::with_capacity(self.channels.len());
+        for ch in &self.channels {
+            let center = ch.center_hz().unwrap();
+            let bw = ch.bandwidth_hz().unwrap();
+            let mapping = BandPassMapping::new(center, bw)?;
+            let resp = ResponseSolver.evaluate(ch.matrix(), grid, &mapping)?;
+            channels.push(
+                resp
+                    .samples
+                    .iter()
+                    .map(|s| {
+                        (
+                            Complex64::new(s.s11_re, s.s11_im),
+                            Complex64::new(s.s21_re, s.s21_im),
+                        )
+                    })
+                    .collect(),
+            );
+        }
+        Ok(channels)
+    }
+}
+
+/// S-magnitude to dB, with the -300 dB floor used across the crate.
+fn mag_to_db(mag: Complex64) -> f64 {
+    let m = mag.norm();
+    if m > 1e-15 {
+        20.0 * m.log10()
+    } else {
+        -300.0
+    }
+}
+
+/// Lossless-reciprocal 2-port `s22` from `s11` and `s21`:
+/// `s22 = −conj(s11)·s21/conj(s21)`, with the `s21 → 0` limit `−conj(s11)`.
+fn lossless_s22(s11: Complex64, s21: Complex64) -> Complex64 {
+    if s21 == Complex64::new(0.0, 0.0) {
+        -s11.conj()
+    } else {
+        -s11.conj() * s21 / s21.conj()
+    }
+}
+
+/// Compose the (N+1)-port S-matrix at the common node using the wave-variable
+/// node equation (KCL). For each channel the input (port A) sits at the common
+/// node and the output (port B) is the external channel port. With
+/// `a₀`/`aBₖ` the driven-port incident waves, the node voltage is
+///
+/// `V = [2a₀ + Σₖ 2 s₁₂ₖ aBₖ/(1+s₁₁ₖ)] / [1 + Σₖ (1−s₁₁ₖ)/(1+s₁₁ₖ)]`
+///
+/// and `b₀ = V − a₀`, `bBₖ = s₂₁ₖ(V − s₁₂ₖ aBₖ)/(1+s₁₁ₖ) + s₂₂ₖ aBₖ`.
+///
+/// For lossless reciprocal channels (`s₁₂=s₂₁`, `s₂₂` from [`lossless_s22`])
+/// the resulting (N+1)×(N+1) S-matrix is unitary and reciprocal, and N=1
+/// reduces exactly to the channel's own 2-port S-matrix. This form is
+/// well-conditioned at the matched band center (s₁₁=0), where the admittance
+/// construction is singular.
+fn compose_node_s(s11s: &[Complex64], s21s: &[Complex64]) -> DMatrix<Complex64> {
+    let n = s11s.len();
+    let p = n + 1;
+    let mut s = DMatrix::zeros(p, p);
+    for drive in 0..p {
+        let a0 = if drive == 0 { 1.0 } else { 0.0 };
+        let mut num = Complex64::new(2.0 * a0, 0.0);
+        let mut den = Complex64::new(1.0, 0.0);
+        for k in 0..n {
+            let s11 = s11s[k];
+            let s21 = s21s[k];
+            let one_plus = Complex64::new(1.0, 0.0) + s11;
+            if k + 1 == drive {
+                num += 2.0 * s21 / one_plus; // s12 = s21 (reciprocal)
+            }
+            den += (1.0 - s11) / one_plus;
+        }
+        let v = num / den;
+        s[(0, drive)] = v - a0;
+        for k in 0..n {
+            let s11 = s11s[k];
+            let s21 = s21s[k];
+            let s22 = lossless_s22(s11, s21);
+            let ab = if k + 1 == drive { 1.0 } else { 0.0 };
+            s[(k + 1, drive)] = s21 * (v - s21 * ab) / (1.0 + s11) + s22 * ab;
+        }
+    }
+    s
+}
+
+/// Full complex (N+1)×(N+1) S-matrix at each sampled frequency
+/// ([`ResponseModel::Admittance`]). Port 0 is the antenna (common port);
+/// ports 1..N+1 are the channels in order. Row-major:
+/// `s[q][i * num_ports + j]` = Sᵢⱼ at frequency `q`.
+#[derive(Debug, Clone)]
+pub struct MultiplexerSMatrix {
+    /// Frequency points in Hz.
+    pub frequencies: Vec<f64>,
+    /// Number of ports (N channels + 1 antenna).
+    pub num_ports: usize,
+    /// Per-frequency (N+1)×(N+1) S-matrix, row-major.
+    pub s: Vec<Vec<Complex64>>,
 }
 
 /// (N+1)-port response: 1 common port + N channel ports.
@@ -686,6 +926,97 @@ mod analysis_tests {
         for db in &resp.antenna_s11_db {
             assert!(db.is_finite());
         }
+        Ok(())
+    }
+
+    /// The admittance-model (N+1)-port S-matrix is power-conserving (unitary)
+    /// and reciprocal for the lossless channel filters. This is the physical
+    /// correctness gate for the true (N+1)-port response (B1 acceptance).
+    #[test]
+    fn multiplexer_admittance_response_is_unitary_and_reciprocal() -> Result<()> {
+        let mux = Multiplexer::new(vec![
+            bandpass_design(10.0e9)?,
+            bandpass_design(10.2e9)?,
+            bandpass_design(10.4e9)?,
+        ])?;
+        let mat = mux.response_matrix(9.6e9, 10.8e9, 61)?;
+        let p = mat.num_ports;
+        assert_eq!(p, 4);
+        assert_eq!(mat.s.len(), 61);
+        for row in mat.s.iter() {
+            assert_eq!(row.len(), p * p);
+            for r in 0..p {
+                for c in 0..p {
+                    let mut ss = Complex64::new(0.0, 0.0);
+                    for k in 0..p {
+                        ss += row[k * p + r] * row[k * p + c].conj();
+                    }
+                    let expected = if r == c {
+                        Complex64::new(1.0, 0.0)
+                    } else {
+                        Complex64::new(0.0, 0.0)
+                    };
+                    assert!(
+                        (ss - expected).norm() < 1e-9,
+                        "unitarity violated at row {r} col {c}: {ss:?}"
+                    );
+                    assert!(
+                        (row[r * p + c] - row[c * p + r]).norm() < 1e-9,
+                        "reciprocity violated at ({r},{c})"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// N=1 reduction: a single-channel "multiplexer" is exactly the channel's
+    /// own lossless 2-port S-matrix (antenna port = channel input port).
+    #[test]
+    fn multiplexer_single_channel_reduces_to_2port() -> Result<()> {
+        let ch = bandpass_design(10.0e9)?;
+        let mux = Multiplexer::new(vec![ch])?;
+        let mat = mux.response_matrix(9.9e9, 10.1e9, 21)?;
+        assert_eq!(mat.num_ports, 2);
+
+        let center = mux.channel(0).center_hz().unwrap();
+        let bw = mux.channel(0).bandwidth_hz().unwrap();
+        let mapping = BandPassMapping::new(center, bw)?;
+        let grid = FrequencyGrid::linspace(9.9e9, 10.1e9, 21)?;
+        let resp = ResponseSolver.evaluate(mux.channel(0).matrix(), &grid, &mapping)?;
+
+        for (q, row) in mat.s.iter().enumerate() {
+            let s11 = Complex64::new(resp.samples[q].s11_re, resp.samples[q].s11_im);
+            let s21 = Complex64::new(resp.samples[q].s21_re, resp.samples[q].s21_im);
+            let s22 = lossless_s22(s11, s21);
+            assert!((row[0] - s11).norm() < 1e-9, "S11 mismatch at {q}");
+            assert!((row[1] - s21).norm() < 1e-9, "S21 mismatch at {q}");
+            assert!((row[2] - s21).norm() < 1e-9, "S12 (reciprocity) mismatch at {q}");
+            assert!((row[3] - s22).norm() < 1e-9, "S22 (lossless) mismatch at {q}");
+        }
+        Ok(())
+    }
+
+    /// The legacy geometric-mean model and the true admittance model agree in
+    /// the deep stopband (10.1 GHz, between the two bands where both channels
+    /// are reflective) — the only regime where the geomean approximation is
+    /// physically accurate. In the passband the two legitimately diverge
+    /// (geomean underestimates the common-port reflection).
+    #[test]
+    fn multiplexer_models_agree_in_stopband() -> Result<()> {
+        let mux = Multiplexer::new(vec![bandpass_design(10.0e9)?, bandpass_design(10.2e9)?])?;
+        let points = 21;
+        let adm = mux.response(10.09e9, 10.11e9, points)?;
+        let geo = mux.response_with(10.09e9, 10.11e9, points, ResponseModel::GeometricMean)?;
+        let mid = points / 2; // 10.10 GHz, both channels in stopband
+        let delta = (adm.antenna_s11_db[mid] - geo.antenna_s11_db[mid]).abs();
+        assert!(
+            delta < 0.5,
+            "stopband antenna S11: admittance = {} dB, geomean = {} dB, delta = {} dB",
+            adm.antenna_s11_db[mid],
+            geo.antenna_s11_db[mid],
+            delta
+        );
         Ok(())
     }
 }

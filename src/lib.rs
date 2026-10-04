@@ -71,7 +71,8 @@ pub use duplexer::{ChannelSpec, JunctionType};
 pub use error::{MfsError, Result};
 pub use matrix::{CouplingMatrix, MatrixTopology};
 pub use multiplexer::{
-    Multiplexer, MultiplexerResponse, MultiplexerSynthesis, MultiplexerSynthesisResult,
+    Multiplexer, MultiplexerResponse, MultiplexerSMatrix, MultiplexerSynthesis,
+    MultiplexerSynthesisResult, ResponseModel,
 };
 pub use response::{ResponseSample, SParameterResponse};
 

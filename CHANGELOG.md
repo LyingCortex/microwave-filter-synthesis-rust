@@ -92,6 +92,23 @@
   reflection zero at `s = 1/c0`, and `S_TX·S_RX = (c0/2)(D − N)` with D
   normalized exactly monic so the leading terms cancel to machine precision.
 
+- **True (N+1)-port multiplexer response (B1).** `Multiplexer::response`
+  now composes the full complex (N+1)×(N+1) S-matrix at the common node:
+  each channel filter is a lossless reciprocal 2-port whose input port sits
+  at the node and whose output port is the external channel port. For
+  lossless channels the result is unitary and reciprocal, and N=1 reduces
+  exactly to the channel's own 2-port S-matrix (asserted by gate tests).
+  New API: `Multiplexer::response_matrix` (per-frequency complex S-matrix)
+  and `Multiplexer::response_with(.., model)`; the new
+  `ResponseModel::{Admittance, GeometricMean}` names the two models. The
+  legacy geometric-mean magnitude model is retained as
+  `ResponseModel::GeometricMean` for one release cycle — it approximates
+  the true model in the deep stopband but underestimates the common-port
+  reflection by up to ~150 dB inside a channel's passband.
+  `MultiplexerResponse` field semantics are unchanged in shape; the dB
+  values are now the true (N+1)-port S-magnitudes
+  (`isolation[i][j]` = |Sᵢ₊₁,ⱼ₊₁|, channel j driven).
+
 ### Fixed
 
 - **The D1 full-iteration gate is green at orders 2, 3, 4, 5, 6, and 8.**

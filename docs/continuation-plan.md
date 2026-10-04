@@ -318,10 +318,13 @@ Macchiarella–Tamiazzo iteration loop shared by duplexer and multiplexer.
   the simplified perturbation does not converge to independent synthesis
   even for well-separated channels; the cross-channel term keeps a non-zero
   residual, so far-apart channels pay a small passband-peak cost.
-- **Response is a magnitude model:** antenna S11 = geometric mean
-  `(∏ᵢ|S11ᵢ|)^(1/N)`, isolation[i][j] = product of S21 magnitudes
-  (`multiplexer.rs` N+1 analysis). No complex (N+1)-port solve, no
-  common-port admittance sum `Y_in = Σ 1/Z_in,i`.
+- **Response is now a true (N+1)-port model (B1, 2026-10-04):**
+  `Multiplexer::response` defaults to the admittance node model — each channel
+  is a lossless reciprocal 2-port (port A at the common node) and the full
+  complex (N+1)×(N+1) S-matrix is composed at the node (unitary + reciprocal;
+  N=1 reduces exactly to the channel's 2-port). `response_matrix` exposes the
+  complex matrix; `response_with(.., ResponseModel::GeometricMean)` keeps the
+  legacy magnitude model for one release cycle.
 - **No full-spectral path** for N-channel (the full path exists only in
   `duplexer.rs`; it is converged and gate-anchored there — section A, done
   2026-10-03 — but not yet generalized to N > 2).
@@ -333,14 +336,19 @@ Macchiarella–Tamiazzo iteration loop shared by duplexer and multiplexer.
 
 ### Work items (ordered; depends on A)
 
-1. **B1 — True (N+1)-port response (magnitude model out).** Implement the
-   common-port admittance model from `docs/multiplexer-synthesis.md`
-   §"New API Surface": `Y_in = Σᵢ 1/Z_in,i`, complex-valued antenna S11 and
-   channel-to-channel S-parameters. Keep the geometric-mean model behind a
-   named flag for one release cycle; tests assert the two agree at N=2 to
-   within ~0.1 dB where the model is known to be accurate. Acceptance:
-   unitary-check test — for lossless inputs the (N+1)×(N+1) S-matrix is
-   power-conserving to 1e-9 at sampled frequencies.
+1. **B1 — True (N+1)-port response (magnitude model out). [DONE 2026-10-04]**
+   Common-node model: each channel is a lossless reciprocal 2-port (port A at
+   the common node, port B external); the full complex (N+1)×(N+1) S-matrix is
+   composed at the node via the wave-variable node equation.
+   `Multiplexer::response_matrix` exposes the complex matrix;
+   `Multiplexer::response` defaults to this model (dB output); the legacy
+   geometric-mean model is kept as `ResponseModel::GeometricMean` via
+   `response_with` for one release cycle. Gate tests: unitarity + reciprocity
+   (1e-9, lossless inputs), N=1 exact reduction to the channel 2-port, stopband
+   agreement between the two models. Note: the models do *not* agree in the
+   passband (geomean underestimates the common-port reflection by up to ~150
+   dB) — the original "agree to ~0.1 dB where accurate" criterion only holds in
+   the all-reflective stopband, which is what the gate test asserts.
 2. **B2 — Generalize the full spectral path to N channels.** Port
    `duplexer.rs`'s full-path helpers (`solve_scaling_constants`, `compute_s_product`,
    etc.) into a shared module (candidate: `src/synthesis/macchiarella.rs`) so the
@@ -544,7 +552,7 @@ Ordered by how much they block the areas above:
 Wave 1 (parallel):  E4 (N=8 regression) · D1-opt (RED)   [E3 + C1 + E4 closed; D1-opt RED gate committed 2026-09-29]
 Wave 2 (serial):    D1–D4 (duplexer full path)   [DONE 2026-10-03 — Type-I orders 2–8 + §V golden + Type-II §VI anchor, all gate-anchored]
 Wave 3 (parallel):  D2–D4-opt (optimizer) · C0 (multi-band design doc + route choice)
-Wave 4 (serial):    B1 → B2 → B3 → B4 (multiplexer; Wave 2 done — unblocked)
+Wave 4 (serial):    B1 [DONE 2026-10-04] → B2 → B3 → B4 (multiplexer; Wave 2 done)
 Wave 5:             E1 (passband TZ) · E2 (Laurent) — needed by B3's fidelity work and
                     by C2 when route-α is chosen (inter-band TZs); then C2 → C3
 ```
