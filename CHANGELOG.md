@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-05
+
 ### Added
 
 - **Multi-band synthesis design doc (C0) — route committed.**

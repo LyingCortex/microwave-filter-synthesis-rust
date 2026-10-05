@@ -1,64 +1,48 @@
 # MFS TODO List
 
-**Status as of 0.5.0 (2026-09-27).** This file previously tracked work that has
-since been completed or superseded; it is maintained as the single open-item
-list. Closed items are listed with the version that closed them so history is
-traceable. Authoritative architecture/limitation references:
+**Status as of 0.6.0 (2026-10-05).** This file is maintained as the single
+open-item list. Closed items are listed with the version that closed them so
+history is traceable. Authoritative architecture/limitation references:
 `docs/architecture.md` (Known Limitations / Future Roadmap) and
 `docs/internal/architecture-review-2026-09-25.md`.
 
-## Current state (2026-09-28)
+## Current state (0.6.0, 2026-10-05)
 
-Working tree clean, `master` == `gitlab/master` (head `2d735c0`), all
-CI-parity checks green on that head:
+Working tree clean; `master` head `33e8a79` (the multi-band K ≥ 3 DOF refutation).
+All CI-parity checks green on that head:
 
-- `cargo test --all-targets` — green (lib 202 passed + 15 integration
+- `cargo test --all-targets` — green (lib 250 passed + 19 integration
   binaries, 0 failed)
 - `cargo clippy --all-targets -- -D warnings` — zero warnings
-- `cargo doc --no-deps` — zero warnings (a `rustdoc::private_intra_doc_links`
-  warning in `FaerRootSolver`'s doc, introduced by the faer residual gate,
-  was fixed by the 2026-09-28 docs-sync commit)
+- `cargo doc --no-deps` — zero warnings
 
-The uncommitted work found after the 2026-09-28 session interruption was
-verified complete (not lost): functional code (faer backward-residual gate,
-DK/Aberth NaN guards, `recover_channel_design`, `context_from_request`,
-benchmark standard) was already committed in `3dab2ff`..`24e5880`; the
-remaining 62 files were one whole-crate `cargo fmt` pass plus the doc/
-changelog syncs, committed as `df8ee83` (style), `a59e055`
-([Unreleased] changelog), `75c6dba` (docs sync) and pushed to
-`gitlab/master`.
+0.6.0 closes the four active development areas end-to-end: the duplexer
+full Macchiarella spectral path (Wave 2), the N-channel multiplexer full path
+(B1–B4), true multi-band synthesis (C0/C2/C3, dual-band route-α) with
+K ≥ 3 refuted as a degrees-of-freedom wall, and the LM optimizer's
+integration/CLI/bench surface (D1–D4-opt). Passband transmission zeros are
+refuted as unrealizable in the single-function prototype (E1). The four
+previously-open core items (passband TZ, repeated poles / Laurent, N-channel
+generalization, multi-band scope-1) are now Closed below.
 
-Next steps: the continuation plan for the four active areas (duplexer,
-multiplexer, multi-band, optimization) is
-[`docs/continuation-plan.md`](../continuation-plan.md) (2026-09-28). The Open
-sections below remain the flat open-item list. The `[Unreleased]` changelog
-section should be released as the next version tag when the maintainer cuts it.
+The continuation plan for the four areas is
+[`docs/continuation-plan.md`](../continuation-plan.md); all of its Wave 1–5
+items are done (2026-09-29 → 2026-10-05). The Open sections below hold the
+remaining low-priority ecosystem items and the refuted passband-TZ work.
 
 ## Open
 
 ### High priority (core functionality)
 
-- **Passband transmission zeros** (`|zero| < 1`) — `generalized_ops.rs`
-  rejects `|zero| < 1` with `NotImplemented` (`safe_sqrt_term` restriction).
-  Needs the complex-zero handling for the stopband-only assumption.
-- **Repeated poles in residue expansion** — `residues/expansion.rs` returns
-  `NotImplemented` when a pole slope degenerates (no Laurent expansion).
-- **Generalize the full Macchiarella spectral path to N channels** for
-  mutual loading — the **duplexer** portion is done (2026-10-03):
-  `full_iteration(true)` converges and is gate-anchored at Type-I orders 2–8
-  and Type-II (incl. the §VI degree-40 GSM design). What remains is the
-  N > 2 multiplexer (continuation plan B2). See `docs/multiplexer-code-review.md`.
+- **Passband transmission zeros** (`|zero| < 1`) — still rejected at the
+  `approx` entry point (typed `MfsError::InvalidTransmissionZero`). The 0.6.0
+  E1 investigation refuted the in-band-null prototype in the single-function
+  form (Feldtkeller violation); realizing them needs the multifunction
+  characteristic, which is genuine new approximation research, not a helper
+  relaxation.
 
 ### Medium priority (engineering quality)
 
-- **Multi-band synthesis (scope-1, decided 2026-09-29)** - true
-  multi-passband synthesis, not per-band composition. Mapping layer done
-  (`MultiBandMapping` in `freq`, 2026-09-29); **C0 design doc done
-  2026-10-05** (`docs/internal/multi-band-synthesis-design.md`, route-α
-  committed); **E1 investigated 2026-10-05 and is NOT a blocker** (gap TZs
-  are ordinary stopband zeros — the C0 doc's "passband" claim was wrong,
-  corrected); next is **C2a/C2b/C2c** then C3. Sequencing and acceptance in
-  `docs/continuation-plan.md` section C.
 - **Fold the duplexer synthesis into the multiplexer (N=2)** — the
   duplicated `recover_filter_design` path is now a single
   `synthesis::recover_channel_design` (closed), but `DuplexerSynthesis`
@@ -94,3 +78,8 @@ section should be released as the next version tag when the maintainer cuts it.
 | Duplicate `recover_filter_design` path | 0.5.0+ | single `mfs::synthesis::recover_channel_design` used by both duplexer and multiplexer |
 | `HighPassMapping` / `BandStopMapping` | 0.5.0+ | `freq` now covers all four prototype families; singular points (`f = 0` for HP, `f = f0` for BS) clamp to `-SINGULAR_CLAMP`, edges map to ±1 exactly under the geometric-mean convention (E3, continuation plan) |
 | High-order integration tests (N=8) | 0.5.0+ | `tests/benchmark_standard.rs::mfs_synthesized_folded_order8_reproduces_the_printed_book_matrix` pins order 8 against the printed Cameron 2018 `EIGHT_THREE_FOLDED` anchor (E4, continuation plan) |
+| Full Macchiarella spectral path (duplexer, Type-I 2–8 + Type-II) | 0.6.0 | `full_iteration(true)` converges and is gate-anchored (orders 2–8 + the §V order-7 golden + the §VI degree-40 GSM anchor); continuation plan D1–D4 |
+| Repeated-pole (Laurent) residue expansion | 0.6.0 | E2 — `residues/expansion.rs` Laurent principal part + per-Y fast-path summation; transversal rejects a repeated pole typed; `tests/synthesis_properties.rs` round-trip |
+| N > 2 multiplexer full path (B1–B4) | 0.6.0 | true (N+1)-port response (B1), shared Macchiarella full path generalized to N channels (B2), convergence + fidelity gates at N = 3/4 (B3), per-gate cm/star unitarity gates (B4); `tests/multiplexer.rs` |
+| Multi-band synthesis (scope-1, dual-band route-α) | 0.6.0 | C0 design doc (route committed) + C2a/C2b/C2c (`multi_band_chebyshev_polynomials` → `MatrixSynthesisEngine`) + C3 (`tests/multi_band.rs` Fig. 25 anchor); K ≥ 3 refuted as a degrees-of-freedom wall (E1-style) |
+| Passband transmission zeros (`|zero| < 1`) | 0.6.0 (refuted) | E1: no valid in-band-null prototype in the single-function real-rooted form (Feldtkeller violation); `approx` rejects typed. Realizing them needs the multifunction characteristic (new research) |
