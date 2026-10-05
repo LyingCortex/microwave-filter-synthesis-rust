@@ -41,6 +41,14 @@ That means the remaining work is no longer about basic architectural cleanup.
 The next major gains come from deeper mathematical integration and a more
 complete coupling-matrix recovery path.
 
+> *(Superseded as of 0.6.0, 2026-10-05: that "deeper mathematical integration
+> and coupling-matrix recovery path" work — the duplexer full Macchiarella
+> path, the N-channel multiplexer full path, true multi-band synthesis, and
+> the LM optimizer — is now complete. This section records the design-time
+> state; for the live status read `docs/architecture.md` and
+> `docs/internal/todo.md`, and for the work that landed read
+> `docs/continuation-plan.md`.)*
+
 ## Workflow Coverage Against The Classical Literature Flow
 
 For orientation, the current crate can be compared against the common

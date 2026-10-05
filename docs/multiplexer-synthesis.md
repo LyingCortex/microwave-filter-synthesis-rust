@@ -13,9 +13,10 @@ clear, non-overlapping responsibilities and a well-defined integration point.
 
 ## Current State
 
-> **Status as of 0.5.0:** the N-channel multiplexer described below has been
-> implemented and shipped. The pre-implementation state recorded here is
-> kept for context; "Current State" now reflects the code.
+> **Status as of 0.6.0 (2026-10-05):** the N-channel multiplexer described
+> below is implemented and shipped. The full Macchiarella–Tamiazzo spectral
+> path (B2, 2026-10-04) converges and is gate-anchored at N = 3/4 order-4;
+> the pre-implementation state recorded below is kept for context.
 
 - `src/duplexer.rs` (~950 lines) implements the 2-channel (TX/RX) duplexer:
   - `Duplexer` — analysis: combines two `FilterDesign`s, evaluates the 3-port
@@ -27,10 +28,11 @@ clear, non-overlapping responsibilities and a well-defined integration point.
     junction, s_tx_roots, s_rx_roots }`.
   - The full spectral-factorization path is opt-in via
     `DuplexerSynthesis::full_iteration(true)` (0.5.0; previously a hardcoded
-    `false` flag). It is **not** numerically converged for order ≥ 4 — see
-    `docs/architecture.md` Known Limitations and
-    `docs/multiplexer-code-review.md`. The active path is the simplified
-    frequency-offset perturbation.
+    `false` flag). **Converges and is gate-anchored at Type-I orders 2–8 and
+    Type-II (incl. the §VI degree-40 GSM design)** (D1–D4, 2026-10-03); the
+    N-channel extension is `MultiplexerSynthesis::full_iteration(true)`
+    (B2, 2026-10-04), gate-anchored at N = 3/4 order-4. The simplified
+    frequency-offset perturbation remains the default (no spectral solve).
 - `src/multiplexer.rs` (~700 lines) — the N-channel generalization shipped
   with this design; the post-iteration channel recovery is the shared
   `mfs::synthesis::recover_channel_design` (0.5.0+; previously a

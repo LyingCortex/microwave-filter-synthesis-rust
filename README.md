@@ -10,7 +10,7 @@ topology transformation and S-parameter evaluation.
 
 ```toml
 [dependencies]
-mfs = "0.5"
+mfs = "0.6"
 ```
 
 ```rust

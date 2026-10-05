@@ -3,6 +3,9 @@
 **Date:** 2026-09-28 · **Baseline head:** `2d735c0` (`master`, pushed to gitlab)
 **Status:** all CI-parity checks green on baseline (lib 202 + 15 integration
 binaries, clippy `-D warnings`, rustdoc — zero warnings).
+**Current (0.6.0, 2026-10-05):** all Wave 1–5 items DONE; `master` head
+`2106465`; lib 250 + 19 integration suites, 0 failed; clippy `-D warnings`;
+doc — zero warnings. Tag `v0.6.0`.
 
 This is the single authoritative continuation plan for the four active
 development areas — **duplexer, multiplexer, multi-band, optimization** — plus

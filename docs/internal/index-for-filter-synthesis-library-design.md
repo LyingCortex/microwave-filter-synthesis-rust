@@ -24,14 +24,14 @@ Use this status column when reading:
 
 | Status | Meaning |
 |---|---|
-| **Current** | Describes the shipped 0.5.0 code; verify against `src/` when in doubt |
+| **Current** | Describes the shipped 0.6.0 code; verify against `src/` when in doubt |
 | **Algorithm reference** | Literature notes (Cameron / Macchiarella); valid independent of code state |
 | **Historical** | Design-time plan/sketch; superseded by the implementation, kept for context |
 
 ## Current Implementation Status
 
 The codebase has adopted most of the library-facing structure described in
-these design notes (as of 0.5.0):
+these design notes (as of 0.6.0):
 
 - `FilterSpec` and `FilterSpecBuilder` are the active spec entry points
 - the approximation layer exposes a generalized-only Chebyshev path
@@ -125,11 +125,11 @@ This path is best if your first question is:
   [architecture.md](../architecture.md) + the 2026-09-25 review.
 - [Refactor Roadmap](./refactor-roadmap.md) — *(historical, input to the 0.5.0 remediation)*
 - [Current Code Architecture Review 2026-09-25](./architecture-review-2026-09-25.md) — *(current)*
-- [Continuation Plan](../continuation-plan.md) — *(current, 2026-09-28)*
-  Next steps for duplexer (full Macchiarella path), multiplexer (N+1-port
-  response, N-channel fidelity), multi-band (true multi-passband synthesis,
-  scope-1), and
-  optimization (LM tune/extract), with acceptance criteria and sequencing.
+- [Continuation Plan](../continuation-plan.md) — *(current, 0.6.0, 2026-10-05)*
+  All Wave 1–5 items DONE: duplexer full Macchiarella path (D1–D4),
+  multiplexer N-channel full path (B1–B4), true multi-passband synthesis
+  (C0/C2/C3, dual-band route-α; K ≥ 3 refuted), and the LM optimizer
+  (D1–D4-opt).
 - [Development Guide](./development-guide.md) — *(mostly current)*
   Build/test/doc workflow for contributors.
 - [Open-Source Release Checklist](./open-source-release-checklist.md) — *(current)*
