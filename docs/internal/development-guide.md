@@ -102,7 +102,9 @@ Current status: substantially implemented with restrictions
 
 Current restrictions:
 
-- repeated poles are not yet supported
+- repeated poles are supported by the residue expansion (Laurent principal
+  part, E2) but the transversal reconstruction still rejects them with a
+  typed `NotImplemented` — a chain has one simple pole per resonator
 - the current transversal reconstruction expects poles to lie close to the
   imaginary axis
 

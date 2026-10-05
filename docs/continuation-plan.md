@@ -709,14 +709,19 @@ Ordered by how much they block the areas above:
    division of the shifted numerator, then leading near-zero coefficients are
    trimmed (numerator–denominator cancellation lowers the effective pole
    order). The pole-expansion fast path sums the full principal part
-   (`PoleExpansionData.evaluate_at`), and `build_transversal_from_residues`
-   rejects a repeated pole with a typed `MfsError::NotImplemented` — a
-   transversal chain has one simple pole per resonator and cannot represent
-   `1/(s-p)^m`. Gates: `expansion::tests::double_pole_laurent_principal_part`
-   (hand-computed coefficients `-2/3, 7/9, 2/9`),
+   (`PoleExpansionData.evaluate_at`), summing each Y parameter with its own
+   principal part — a shared pole's effective order can differ between
+   y11/y12/y22 after cancellation, so the three need not be equal-length.
+   `build_transversal_from_residues` rejects a repeated pole with a typed
+   `MfsError::NotImplemented` — a transversal chain has one simple pole per
+   resonator and cannot represent `1/(s-p)^m`. Gates:
+   `expansion::tests::double_pole_laurent_principal_part` (hand-computed
+   coefficients `-2/3, 7/9, 2/9`),
    `transversal::tests::repeated_pole_rejected_with_not_implemented`,
    `pole_expansion::tests::laurent_principal_part_contributes_to_sum`,
-   plus the `property_2` residue round-trip (now covers the Laurent form).
+   `pole_expansion::tests::repeated_pole_with_cancellation_uses_each_y_own_order`
+   (per-Y principal-part length), plus the `property_2` residue round-trip
+   (now covers the Laurent form).
    Valid filter specs have distinct poles, so this path is only exercised by
    degenerate/synthetic inputs.
 3. **HighPass / BandStop mappings — closed (2026-09-29).** `HighPassMapping`

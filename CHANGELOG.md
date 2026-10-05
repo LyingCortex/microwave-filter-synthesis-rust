@@ -290,8 +290,9 @@
     numerator by `x^m·R(x)`, then leading near-zero coefficients are trimmed
     (a numerator–denominator cancellation lowers the effective pole order).
   - `PoleExpansionData::evaluate_at` (`src/response/pole_expansion.rs`) sums
-    the full principal part per repeated pole in the fast path, so the
-    precomputed-sweep and the direct-solve paths agree.
+    the full principal part per repeated pole in the fast path, and each Y
+    parameter is summed with **its own** principal part — a shared pole's
+    effective order can differ between the three after cancellation.
   - `build_transversal_from_residues` rejects a repeated pole with a typed
     `MfsError::NotImplemented`: a transversal (inline-chain) matrix has one
     simple pole per resonator and cannot represent `1/(s-p)^m`. (This was
@@ -307,6 +308,24 @@
 
 
 ### Fixed
+
+- **`PoleExpansionData::evaluate_at` — per-Y principal-part length (review fix, 2026-10-05).**
+  The fast path summed all three Y parameters with a single shared length
+  (`m = l11.len()`, then indexing `l12[k]`/`l22[k]` over it), assuming the
+  three principal parts are always equal-length. They are not: each Y
+  parameter is a distinct rational function, and `trim_leading_zeros`
+  (numerator–denominator cancellation) can shorten one of them
+  independently. With y11 shortest, extra y12/y22 terms were silently
+  dropped; with y11 longest, the indexing panicked. Unreachable through
+  `from_matrix` (all-`None`) and by the hand-built unit tests (equal
+  lengths), but reachable through `from_polynomials` on a degenerate root
+  set with per-parameter cancellation — exactly the E2 input class. Fixed
+  by summing each Y parameter with its own principal part via a
+  `laurent_sum` helper; new regression test
+  `repeated_pole_with_cancellation_uses_each_y_own_order` pins a
+  hand-computed case where y11/y12 keep the double-pole part and y22
+  collapses to a simple residue (the old code silently dropped the y11/y12
+  principal parts there).
 
 - **`PoleExpansionData::evaluate_at` — Laurent principal-part power indexing.**
   The fast path summed a repeated pole's principal part with the wrong
