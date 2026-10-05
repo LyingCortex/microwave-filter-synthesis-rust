@@ -6,8 +6,9 @@ route decision and math **before** any code, so the approximation and synthesis
 work items (C2) start from a fixed target.
 
 Status: **route committed (C-route-α), C2 + C3 done (2026-10-05)** — the
-Fig. 25 dual-band anchor is GREEN (`tests/multi_band.rs`), with the
-K ≥ 3 extension deferred.
+Fig. 25 dual-band anchor is GREEN (`tests/multi_band.rs`); the K ≥ 3
+extension is **infeasible for this characteristic** (measured 2026-10-05 —
+see §"K ≥ 3: the DOF Wall").
 
 ---
 
@@ -301,6 +302,46 @@ normalized prototype domain ($\pm1$ edges), not in Hz. C3's test constructs a
 `MultiBandMapping` whose two bands map to $[-1,-0.35]$ and $[0.35,1.0]$ and
 checks the synthesized response against the fixture's $N+2$ matrix.
 
+## K ≥ 3: the DOF Wall (measured 2026-10-05)
+
+The "single contiguous positive-axis interval" requirement in C2b is **not a
+deferred implementation detail — it is a fundamental degrees-of-freedom limit
+of the chosen characteristic**, and it was measured, not assumed.
+
+The characteristic is a single function $K(w) = F(w)/P(w)$ with a **real-rooted**
+$F$ (the reflection zeros enter as $\pm r_k$). On the positive axis $w \ge 0$,
+$|K|$ has a local maximum at every band edge and between every pair of
+consecutive reflection zeros. For $M$ positive-axis passband intervals with
+$N/2$ reflection zeros, that is $2M$ edge maxima plus $(N/2 - M)$ between-zeros
+maxima $= N/2 + M$ peaks; equiripple sets them to one shared level (free
+during the solve, fixed by $\\varepsilon$ afterward), i.e. $N/2 + M - 1$
+independent constraints on the $N/2$ unknown zero locations:
+
+| $M$ (positive-axis intervals) | constraints | unknowns | system |
+|---|---|---|---|
+| 1 (symmetric dual-band, $K=2$) | $N/2$ | $N/2$ | square — solvable |
+| $\ge 2$ ($K \ge 3$) | $N/2 + M - 1$ | $N/2$ | overdetermined by $M-1$ |
+
+This is the classical multiple-interval Chebyshev result: a real-rooted
+single-function characteristic is equiripple on **one** positive-axis interval
+only; multi-interval equiripple needs complex-rooted (Zolotarev) or a
+multifunction characteristic.
+
+**Measurement** (throwaway probe, generalized the solver to $M$ intervals;
+residual = deviation of the $N/2+M$ peaks from their mean):
+
+| case | $M$ | achieved residual | behavior |
+|---|---|---|---|
+| $M=1$ control (Fig. 25 fixture) | 1 | $1.7\mathrm{e}{-9}$ | converges; zeros match the oracle |
+| $K=3$ center band (origin-spanning) | 2 | $5.7\mathrm{e}{+2}$ | stuck; zeros pinned to band edges |
+| $K=3$ three positive bands | 3 | $4.2\mathrm{e}{-2}$ | stuck; zeros pinned to band edges |
+
+**Decision:** $K \ge 3$ is rejected as infeasible for this characteristic
+family (an E1-style refutation, not a gap). The solve rejects it with a
+`MfsError::NotImplemented` that states the reason. A genuine $K \ge 3$
+equiripple design would need a different route (complex-rooted characteristic
+or per-band multifunction), out of scope here.
+
 ---
 
 ## Work Items (C2, C3)
@@ -309,10 +350,13 @@ checks the synthesized response against the fixture's $N+2$ matrix.
    `src/spec/multi_band.rs`; constraints of §Specification).
 2. **C2b — multi-band approximation** (`src/approx/multi_band.rs`) — **done**
    (2026-10-05); produces a `PolynomialSet`, $K=2$ first (the Fig. 25
-   fixture). **$K \ge 3$ deferred**: the equiripple solve requires the
-   positive-axis passband union to be a single contiguous interval, which a
-   center band spanning the origin violates — a documented
-   `MfsError::NotImplemented`, not a silent failure.
+   fixture). **$K \ge 3$ infeasible for this characteristic (measured, 2026-10-05)**:
+   the equiripple solve is square only for a single positive-axis passband
+   interval (the symmetric dual-band); $K \ge 2$ positive-axis intervals
+   (a center band spanning the origin, or 2+ positive bands) overdetermine a
+   real-rooted characteristic by $M-1$ — see the §"K ≥ 3: the DOF Wall".
+   The solve rejects it with a `MfsError::NotImplemented` that states the
+   reason.
 3. **C2c — synthesize** via `MatrixSynthesisEngine::synthesize` — **done**
    (2026-10-05); the output is consumed with **no engine changes**.
 4. **C3 — verification surface** — **done** (2026-10-05): `tests/multi_band.rs`
@@ -360,6 +404,14 @@ asserted · ⛔ blocked.
   adjacent bands), and a literal passband-TZ relaxation was additionally shown
   to break the Feldtkeller identity at O(1). C2 is unblocked; C3 is gated on
   C2 only.
+- **$K \ge 3$ DOF wall — RESOLVED as infeasible (measured, 2026-10-05).** The
+  equiripple solve is square only for a single positive-axis passband interval
+  ($M=1$, the symmetric dual-band); $M \ge 2$ overdetermines a real-rooted
+  characteristic by $M-1$ and has no solution (residuals $5.7\mathrm{e}{+2}$ /
+  $4.2\mathrm{e}{-2}$ vs. the $M=1$ control's $1.7\mathrm{e}{-9}$). The solve
+  rejects $K \ge 3$ with a `MfsError::NotImplemented` that states the reason;
+  see the §"K ≥ 3: the DOF Wall". A genuine $K \ge 3$ equiripple design needs a
+  complex-rooted (Zolotarev) or multifunction characteristic — out of scope.
 - **Equiripple across $K$ bands is not automatic.** A product of per-band
   Chebyshev factors gives equiripple *per band* only if the band edges are the
   ripple extrema; the $K$-band edge equations must be solved jointly.

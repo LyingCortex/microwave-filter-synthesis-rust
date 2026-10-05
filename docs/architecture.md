@@ -227,10 +227,11 @@ Implements the generalized Chebyshev approximation algorithm.
 - `multi_band_chebyshev_polynomials` — true multi-passband (route-α)
   approximation: an LM equiripple solve for the positive-axis reflection
   zeros, then the single-band Feldtkeller `E(s)`/`PolynomialSet` assembly
-  reused verbatim; output feeds `MatrixSynthesisEngine` unchanged.
-  K ≥ 3 requires the positive-axis passband union to be one contiguous
-  interval (a center band spanning the origin is rejected with
-  `MfsError::NotImplemented`).
+  reused verbatim; output feeds `MatrixSynthesisEngine` unchanged. Dual-band
+  (K = 2) only: the real-rooted characteristic is equiripple-square on a single
+  positive-axis interval, so K ≥ 3 (a center band spanning the origin, or 2+
+  positive-axis bands) is rejected with `MfsError::NotImplemented` (DOF wall —
+  see the design doc's "K ≥ 3: the DOF Wall").
 
 **Algorithm:**
 Recursive Chebyshev function generation with transmission zero injection,
@@ -585,13 +586,19 @@ let context = run_full_pipeline(request)?;
    (n = 1, b0 = 0) and Type-II are supported. See
    `docs/multiplexer-code-review.md`, `docs/internal/architecture-review-2026-09-25.md`,
    and `docs/continuation-plan.md` sections A and B.
-5. **Multi-band synthesis is dual-band (K = 2) only.** The route-α
-   equiripple solve (`multi_band_chebyshev_polynomials`) requires the
-   positive-axis passband union to be a single contiguous interval, which
-   holds for a symmetric dual-band design (e.g. `[-1,-0.35]` ∪ `[0.35,1]`)
-   but not for a center band spanning the origin (K ≥ 3); such a design is
-   rejected with a typed `MfsError::NotImplemented`. See
-   `docs/internal/multi-band-synthesis-design.md` (§Work Items, item 2).
+5. **Multi-band synthesis is dual-band (K = 2) only.** The route-α equiripple
+   solve (`multi_band_chebyshev_polynomials`) uses a real-rooted
+   characteristic, so equiripple is square only for a **single** positive-axis
+   passband interval (the symmetric dual-band, e.g. `[-1,-0.35]` ∪ `[0.35,1]`).
+   K ≥ 3 — a center band spanning the origin, or 2+ positive-axis passbands —
+   **overdetermines the characteristic by M − 1** (M = number of positive-axis
+   intervals) and has no equiripple solution; this is a fundamental
+   degrees-of-freedom limit, measured 2026-10-05 (M = 2/3 residuals 5.7e+2 /
+   4.2e-2 vs. the M = 1 control's 1.7e-9). Such a design is rejected with a
+   typed `MfsError::NotImplemented` stating the reason; a genuine K ≥ 3
+   equiripple needs a complex-rooted (Zolotarev) or multifunction
+   characteristic. See `docs/internal/multi-band-synthesis-design.md`
+   (§"K ≥ 3: the DOF Wall").
 
 ## Future Roadmap
 
@@ -606,7 +613,7 @@ Worked plan with sequencing and acceptance criteria:
 | Done | Full Macchiarella spectral path converged for the duplexer (Type-I orders 2–8 + Type-II, gate-anchored, 2026-10-03) | — |
 | Later | Butterworth/Elliptic approximation families | Low |
 | Done | Multi-band synthesis (true multi-passband, scope-1) — dual-band route-α shipped (C2/C3, 2026-10-05): `multi_band_chebyshev_polynomials` → `MatrixSynthesisEngine`, Fig. 25 anchor gate-anchored (`tests/multi_band.rs`) | — |
-| Later | Multi-band K ≥ 3 extension (multi-contiguous-interval equiripple solve) | Low |
+| Blocked | Multi-band K ≥ 3 — infeasible for the single-function real-rooted characteristic (DOF wall, measured 2026-10-05); needs a complex-rooted (Zolotarev) or multifunction characteristic | n/a (route change) |
 
 > Touchstone export, Python bindings, and criterion benchmarks are already
 > implemented (see `src/touchstone.rs`, `src/python.rs`, `benches/`).

@@ -22,7 +22,7 @@ carries *what to do next and how to know it is done*.
 | Two-port synthesis | Full generalized-Chebyshev pipeline, orders 2–8 fixture-anchored, 10–30 numerically stable | High (publication-anchored) |
 | Duplexer | Simplified frequency-offset perturbation (default); full Macchiarella–Tamiazzo spectral path behind `DuplexerSynthesis::full_iteration(true)` **converges at Type-I orders 2–8 and Type-II (incl. the §VI degree-40 GSM design), all gate-anchored** (2026-10-03) | High (publication-anchored, full path) / Medium (simplified default) |
 | Multiplexer (N-channel) | Independent per-channel synthesis + simplified perturbation (default); **full Macchiarella–Tamiazzo spectral path for N channels behind `MultiplexerSynthesis::full_iteration(true)`** (shared with the duplexer, `src/synthesis/machiarella.rs`; B2, 2026-10-04) converges at N = 3/4 order-4 (gate-anchored); response is the **true (N+1)-port admittance model** (B1) | High (publication-anchored, full path) / Medium (simplified default) |
-| Multi-band | **True multi-passband synthesis shipped (C2/C3, 2026-10-05)** — route-α multi-band Chebyshev: `MultiBandMapping` (C1) + `MultiBandSpec` (C2a) + `multi_band_chebyshev_polynomials` (C2b) → `MatrixSynthesisEngine` (C2c, unchanged) → Fig. 25 dual-band anchor; response invariance, per-band RL, TZ nulls, unitarity, outer-stopband all gate-anchored (C3, `tests/multi_band.rs`); **K ≥ 3 deferred** (single-contiguous-interval equiripple solve) | High (publication-anchored, dual-band) |
+| Multi-band | **True multi-passband synthesis shipped (C2/C3, 2026-10-05)** — route-α multi-band Chebyshev: `MultiBandMapping` (C1) + `MultiBandSpec` (C2a) + `multi_band_chebyshev_polynomials` (C2b) → `MatrixSynthesisEngine` (C2c, unchanged) → Fig. 25 dual-band anchor; response invariance, per-band RL, TZ nulls, unitarity, outer-stopband all gate-anchored (C3, `tests/multi_band.rs`); **K ≥ 3 infeasible** for this characteristic (DOF wall: equiripple is square only for one positive-axis interval; M ≥ 2 overdetermined — measured, design doc "K ≥ 3: the DOF Wall") | High (publication-anchored, dual-band) |
 | Optimization | LM `tune_matrix` / `extract_matrix` (hand-rolled Gaussian elimination, **scale-aware FD Jacobian `δ = 1e-7·max(1,|x_i|)`** with halving retry, topology frozen to template; convergence on successive-iteration cost after accepted steps; singular trials rejected, not errors; **`extract_matrix` starts from a crude inline-chain guess**); 3 lib unit tests + **2 order-6 integration gates (synthesize→perturb→recover, extract-from-crude-guess) GREEN (D2-opt, 2026-10-04)** + **CLI `optimize`/`extract` subcommands and Python `extract`/`tune` (D3-opt, 2026-10-04), e2e-gated** + **`benches/optimizer.rs` & 0.1 dB-noise extraction regression (D4-opt, 2026-10-04)** | Medium (order ≤ 6 extraction/recovery gate-anchored; CLI/Python e2e-gated; benched; order-8 cold-start extraction and topology-bound recovery documented as limits, report §6) |
 
 Known limitations that gate the areas below (full list in
@@ -451,8 +451,11 @@ roadmap line — and the one that most needs new mathematics.
 - **C2 done (2026-10-05):** `src/approx/multi_band.rs` (route-α multi-band
   Chebyshev, `PolynomialSet` output, LM equiripple solve) + `MultiBandSpec`
   (C2a, `src/spec/multi_band.rs`) + `MatrixSynthesisEngine` reuse (C2c, no
-  new engine). **K ≥ 3 deferred** — the equiripple solve requires the
-  positive-axis passband union to be a single contiguous interval.
+  new engine). **K ≥ 3 infeasible** (measured 2026-10-05) — the equiripple
+  solve is square only for a single positive-axis passband interval; a center
+  band spanning the origin (or 2+ positive-axis bands) overdetermines the
+  real-rooted characteristic by M − 1 (DOF wall; see the design doc's
+  "K ≥ 3: the DOF Wall" for the proof and the measurement).
 - **C3 done (2026-10-05):** `tests/multi_band.rs` (Fig. 25 anchor — response
   invariance, per-band RL, TZ nulls, unitarity, outer stopband) +
   `examples/multi_band_response.rs`.
@@ -527,12 +530,17 @@ C0 must decide between them before any code):
    single-band helpers verbatim. `MatrixSynthesisEngine::synthesize`
    (C2c) consumes the output with **no changes** — no new engine. The
    C2a spec surface `MultiBandSpec`/`BandSpec`/`RejectionSpec` is in
-   `src/spec/multi_band.rs`. 2-band first (the Fig. 25 fixture); **K ≥ 3
-   is a documented deferred extension** — the equiripple solve
-   currently requires the positive-axis passband union to be a single
-   contiguous interval (`MfsError::NotImplemented` otherwise), which
-   holds for symmetric dual-band but not for a center band spanning the
-   origin.
+   `src/spec/multi_band.rs`. 2-band first (the Fig. 25 fixture); **K ≥ 3 is
+   infeasible for this characteristic (measured 2026-10-05)** — the
+   equiripple solve is square only for a single positive-axis passband
+   interval (`n_rz + 1` maxima sharing one level); a center band spanning
+   the origin, or 2+ positive-axis bands, overdetermines the real-rooted
+   characteristic by M − 1 (M = number of positive-axis intervals). The
+   probe measured residuals 5.7e+2 / 4.2e-2 (M = 2/3) vs. the M = 1 control's
+   1.7e-9, with the zeros pinned to the band edges. The solve rejects K ≥ 3
+   with a typed `MfsError::NotImplemented` stating the DOF reason; a genuine
+   K ≥ 3 equiripple needs a complex-rooted (Zolotarev) or multifunction
+   characteristic (see the design doc's "K ≥ 3: the DOF Wall").
 4. **C3 — Verification surface — DONE (2026-10-05).** `tests/multi_band.rs`
    (`dual_band_response_reproduces_cameron_fig25_fixture`) asserts, on a
    4001-point grid over `-2..2`: (1) **response invariance** — max|ΔS11|,

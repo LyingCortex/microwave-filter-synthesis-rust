@@ -39,12 +39,18 @@
     invariants (≥ 2 disjoint center-sorted bands).
   - **C2c — synthesis** reuses `MatrixSynthesisEngine::synthesize` with
     **no changes** (the output is an ordinary `PolynomialSet`).
-  - **Dual-band only (K = 2):** the equiripple solve requires the
-    positive-axis passband union to be a single contiguous interval (true for
-    a symmetric design like `[-1,-0.35]` ∪ `[0.35,1]`); a K ≥ 3 design with a
-    center band spanning the origin is rejected with a typed
-    `MfsError::NotImplemented`. Documented as a known limitation and a Low
-    roadmap item.
+  - **Dual-band only (K = 2):** the equiripple solve is *square* only for a
+    single positive-axis passband interval (true for a symmetric design like
+    `[-1,-0.35]` ∪ `[0.35,1]`). K ≥ 3 — a center band spanning the origin, or
+    two or more positive-axis passbands — **overdetermines the real-rooted
+    characteristic by M − 1** (M = number of positive-axis intervals) and has
+    no equiripple solution; this is a fundamental degrees-of-freedom limit of
+    the single-function characteristic, **measured** 2026-10-05 (M=1 control
+    residual 1.7e-9 vs. 5.7e+2 / 4.2e-2 for the K=3 cases, zeros pinned to the
+    band edges). The solve rejects it with a typed `MfsError::NotImplemented`
+    stating the reason; a genuine K ≥ 3 equiripple needs a complex-rooted
+    (Zolotarev) or multifunction characteristic (out of scope). See
+    `docs/internal/multi-band-synthesis-design.md` §"K ≥ 3: the DOF Wall".
 
 - **Multi-band verification surface — C3 (2026-10-05).** `tests/multi_band.rs`
   (`dual_band_response_reproduces_cameron_fig25_fixture`) anchors the design to
@@ -308,6 +314,25 @@
 
 
 ### Fixed
+
+- **Multi-band `K ≥ 3` equiripple — refuted as infeasible for the
+  single-function characteristic (measured, 2026-10-05).** The C2
+  multi-band approximation (`src/approx/multi_band.rs`) was documented as
+  "dual-band only, K ≥ 3 a Low roadmap item". Measuring that extension
+  (a throwaway probe generalizing the equiripple solve to `M` disjoint
+  positive-axis intervals) showed it is **not** a bounded feature: the
+  characteristic `K(w) = F(w)/P(w)` is real-rooted, so equiripple on `M`
+  positive-axis passband intervals imposes `N/2 + M − 1` independent
+  constraints on the `N/2` reflection zeros — square only for `M = 1`
+  (the symmetric dual-band). `M = 2` / `M = 3` (a center band spanning the
+  origin, or 2+ positive-axis bands) are overdetermined by `M − 1`; the
+  probe measured residuals `5.7e+2` / `4.2e-2` (zeros pinned to band edges)
+  versus the `M = 1` control's `1.7e-9`. The rejection is now a typed
+  `MfsError::NotImplemented` whose message states the degrees-of-freedom
+  reason instead of "currently requires a single contiguous interval"; the
+  design doc gains a "K ≥ 3: the DOF Wall" section with the proof and the
+  measurement. A genuine `K ≥ 3` equiripple design needs a complex-rooted
+  (Zolotarev) or multifunction characteristic — out of scope for this route.
 
 - **`PoleExpansionData::evaluate_at` — per-Y principal-part length (review fix, 2026-10-05).**
   The fast path summed all three Y parameters with a single shared length

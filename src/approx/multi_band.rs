@@ -360,13 +360,23 @@ pub fn multi_band_chebyshev_polynomials(
         .collect();
 
     // The reflection zeros are tiled across the positive-axis passband union.
-    // This implementation solves a single contiguous positive interval (the
-    // symmetric prototype case, e.g. bands `[-1, -0.35]` and `[0.35, 1]`). A
-    // positive union split across several bands is the deferred extension.
+    // The characteristic is a single-function K(w) = F(w)/P(w) with a
+    // *real-rooted* F (roots +/-r_k). Equiripple imposes N/2 + M - 1
+    // independent constraints (the maxima on M positive-axis intervals, with
+    // one free shared level) on N/2 reflection zeros, so the system is square
+    // only for M = 1 - the symmetric dual-band case (e.g. bands
+    // `[-1, -0.35]` and `[0.35, 1]`). For M >= 2 (K >= 3: a center band
+    // spanning the origin, or 2+ positive-axis passbands) it is overdetermined
+    // by M - 1 and has no real-rooted solution; a genuine K >= 3 equiripple
+    // characteristic needs complex-rooted (Zolotarev) or a multifunction form.
+    // See `docs/internal/multi-band-synthesis-design.md` §"K >= 3".
     if pos.len() != 1 {
         return Err(MfsError::NotImplemented(
-            "multi-band equiripple solve currently requires the positive-axis \
-             passband union to be a single contiguous interval"
+            "multi-band equiripple requires a real-rooted characteristic, which \
+             can only be equiripple on a single positive-axis interval (the \
+             symmetric dual-band, K = 2); K >= 3 (a center band spanning the \
+             origin, or 2+ positive-axis passbands) is overdetermined and needs \
+             a complex-rooted (Zolotarev) or multifunction characteristic"
                 .to_string(),
         ));
     }
