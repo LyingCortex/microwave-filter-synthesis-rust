@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Whole-crate code review of 0.6.0 (2026-10-05).**
+  `docs/internal/review-findings-0.6.0.md`: five parallel review slices over
+  all of `src/` plus an independent adjudication pass. 18 reported findings →
+  **17 valid (6 P1 / 5 P2 / 6 P3) + 1 false positive** (the `response_lossy`
+  Q formula, re-derived and confirmed correct). The six P1s are the
+  "gate-green but wrong result" class: full-path channel recovery rescaling
+  (`recovery.rs`), sign-mirrored band-pass denormalization (`scaling.rs`),
+  LU-backend group-delay port nodes (`response/backend.rs`), silently clamped
+  overlapping-channel p0² (`machiarella.rs`), no-op CQ merge (`cascade.rs`),
+  and a Python `tune()` length-check gap. **Assessment only — nothing fixed
+  yet**; remediation is planned in two waves (see doc §F).
+
 ## [0.6.0] — 2026-10-05
 
 ### Added

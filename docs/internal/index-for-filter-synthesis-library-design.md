@@ -59,6 +59,10 @@ The most recent assessment of the architecture is
 [architecture-review-2026-09-25.md](./architecture-review-2026-09-25.md)
 (current; its P1–P4 findings were remediated in 0.5.0).
 
+The 0.6.0 whole-crate code review (2026-10-05) is
+[review-findings-0.6.0.md](./review-findings-0.6.0.md) — 17 valid findings
+(6 P1 / 5 P2 / 6 P3), assessment only, nothing fixed yet.
+
 ## Reading Paths
 
 ### If you want the algorithm background first
@@ -124,7 +128,8 @@ This path is best if your first question is:
   Maps which target boundaries had landed; superseded by
   [architecture.md](../architecture.md) + the 2026-09-25 review.
 - [Refactor Roadmap](./refactor-roadmap.md) — *(historical, input to the 0.5.0 remediation)*
-- [Current Code Architecture Review 2026-09-25](./architecture-review-2026-09-25.md) — *(current)*
+- [Current Code Architecture Review 2026-09-25](./architecture-review-2026-09-25.md) — *(current, pre-0.6.0)*
+- [Review Findings 0.6.0 (2026-10-05)](./review-findings-0.6.0.md) — *(current; 17 findings, not yet remediated)*
 - [Continuation Plan](../continuation-plan.md) — *(current, 0.6.0, 2026-10-05)*
   All Wave 1–5 items DONE: duplexer full Macchiarella path (D1–D4),
   multiplexer N-channel full path (B1–B4), true multi-passband synthesis
