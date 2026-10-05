@@ -387,8 +387,13 @@ impl PyFilterDesign {
 
     /// Tunes the coupling matrix to match a target response.
     ///
-    /// target_s21 and target_s11 are lists of complex values (re, im) pairs
-    /// at the same frequency points as the grid.
+    /// `target_s21` and `target_s11` are lists of complex values (re, im)
+    /// pairs at the same frequency points as `freqs`.
+    ///
+    /// The optimizer rebuilds its evaluation grid as
+    /// `linspace(freqs[0], freqs[-1], len(freqs))`, so `freqs` must be
+    /// uniformly ascending; non-uniform `freqs` are mis-interpreted (the
+    /// targets would be matched at the wrong normalized frequencies).
     ///
     /// Returns a dict with: matrix (2D list), cost (float), iterations (int), converged (bool).
     #[pyo3(signature = (freqs, target_s21_re, target_s21_im, target_s11_re, target_s11_im, max_iter=200))]
@@ -407,10 +412,18 @@ impl PyFilterDesign {
         use crate::response::{ResponseSample, SParameterResponse};
         use pyo3::types::PyDict;
 
-        if freqs.len() != target_s21_re.len() {
-            return Err(PyValueError::new_err(
-                "all arrays must have the same length",
-            ));
+        let n = freqs.len();
+        for (name, v) in [
+            ("target_s21_re", &target_s21_re),
+            ("target_s21_im", &target_s21_im),
+            ("target_s11_re", &target_s11_re),
+            ("target_s11_im", &target_s11_im),
+        ] {
+            if v.len() != n {
+                return Err(PyValueError::new_err(format!(
+                    "{name} must have the same length as freqs ({n})"
+                )));
+            }
         }
 
         let target = SParameterResponse {

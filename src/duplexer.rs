@@ -233,6 +233,11 @@ pub struct DuplexerSynthesisResult {
     pub iterations: usize,
     /// Final convergence error (max root displacement).
     pub convergence_error: f64,
+    /// Whether the iteration met its convergence criterion (`state.converged`
+    /// on the full path; `convergence_error < tol` on the simplified path).
+    /// Distinguishes convergence from budget exhaustion without callers
+    /// heuristically comparing `convergence_error` (review P2-5).
+    pub converged: bool,
     /// The junction parameters used.
     pub junction: JunctionType,
     /// Tx S-polynomial roots (auxiliary polynomial).
@@ -558,6 +563,7 @@ impl DuplexerSynthesis {
 
         let mut iterations = 0;
         let mut convergence_error = f64::INFINITY;
+        let mut converged = false;
 
         // Convergence-time common-domain diplexer state, captured from the
         // final iteration (full path only) so the result can report the
@@ -607,6 +613,7 @@ impl DuplexerSynthesis {
             s_rx_roots = state.s_roots[1].clone();
             iterations = state.iterations;
             convergence_error = state.convergence_error;
+            converged = state.converged;
             conv_common = state.common;
         } else {
             // Fallback: simplified perturbation (frequency-offset aware)
@@ -673,6 +680,7 @@ impl DuplexerSynthesis {
                 s_rx_roots = new_s_rx_roots;
                 convergence_error = max_delta;
                 if max_delta < self.convergence_tol {
+                    converged = true;
                     break;
                 }
             }
@@ -717,6 +725,10 @@ impl DuplexerSynthesis {
             b: common.b,
         });
 
+        // Full path: D = S − F⁰ is already in S's monic normalization (no
+        // rescale). Simplified path: D = (E − F)/2, rescale to S's
+        // normalization (historical behavior).
+        let rescale_d = !self.full_iteration;
         let tx_design = crate::synthesis::recover_channel_design(
             &s_tx_roots,
             &d_tx_recover,
@@ -725,6 +737,7 @@ impl DuplexerSynthesis {
             self.tx_rl,
             self.tx_center,
             self.tx_bw,
+            rescale_d,
         )?;
         let rx_design = crate::synthesis::recover_channel_design(
             &s_rx_roots,
@@ -734,6 +747,7 @@ impl DuplexerSynthesis {
             self.rx_rl,
             self.rx_center,
             self.rx_bw,
+            rescale_d,
         )?;
 
         Ok(DuplexerSynthesisResult {
@@ -741,6 +755,7 @@ impl DuplexerSynthesis {
             rx: rx_design,
             iterations,
             convergence_error,
+            converged,
             junction: self.junction,
             s_tx_roots,
             s_rx_roots,

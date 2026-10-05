@@ -185,6 +185,7 @@ impl MultiplexerSynthesis {
                     ch.return_loss_db,
                     ch.center_hz,
                     ch.bandwidth_hz,
+                    false, // full path: D = S − F⁰, already in S's monic normalization
                 )?;
                 channels.push(design);
             }
@@ -338,6 +339,7 @@ impl MultiplexerSynthesis {
                 self.channels[i].return_loss_db,
                 centers[i],
                 bandwidths[i],
+                true, // simplified path: D = (E − F)/2, rescale to S's normalization
             )?;
             channels.push(design);
         }

@@ -82,6 +82,15 @@ impl FilterDesignBuilder {
 
     /// Runs the synthesis pipeline. Returns a completed `FilterDesign`.
     pub fn synthesize(self) -> Result<FilterDesign> {
+        // Validate band-pass parameters at this common choke point. Both
+        // `bandpass()` and `bandpass_edges()` (which *derives* center/bandwidth
+        // from the passband edges — inverted edges yield bw < 0, non-positive
+        // edges yield a NaN center) land here, so a single `BandPassMapping::new`
+        // check rejects an invalid mapping with a typed error up front instead
+        // of storing it and failing later at `.response()`/`.scale()`.
+        if let (Some(center), Some(bw)) = (self.center_hz, self.bandwidth_hz) {
+            BandPassMapping::new(center, bw)?;
+        }
         // Normalize Hz zeros if band-pass parameters are available
         let mut all_zeros = self.zeros_normalized;
         if !self.zeros_hz.is_empty() {
@@ -90,7 +99,12 @@ impl FilterDesignBuilder {
                     "zeros_hz requires band-pass parameters (use FilterDesign::bandpass)".into(),
                 )
             })?;
-            let bw = self.bandwidth_hz.unwrap_or(0.0);
+            let bw = self.bandwidth_hz.ok_or_else(|| {
+                crate::error::MfsError::PreconditionViolation(
+                    "zeros_hz requires a band-pass bandwidth (use \
+                     FilterDesign::bandpass)".into(),
+                )
+            })?;
             let mapping = BandPassMapping::new(center, bw)?;
             for hz in &self.zeros_hz {
                 let sample = mapping.map_hz_to_normalized(*hz)?;
@@ -177,6 +191,12 @@ impl FilterDesign {
     /// This is an alternative to `bandpass()` for engineers who think in terms
     /// of passband start/stop rather than center/bandwidth.
     ///
+    /// The passband edges must be positive and ordered (`f_start_hz <
+    /// f_stop_hz`): the center is derived as their geometric mean
+    /// `√(f_start·f_stop)` and the bandwidth as `f_stop − f_start`. Inverted
+    /// edges (bandwidth < 0) or a non-positive edge (non-finite center) are
+    /// rejected with a typed [`crate::error::MfsError::InvalidFrequency`] at
+    /// [`FilterDesignBuilder::synthesize`].
     /// ```rust
     /// # use mfs::prelude::*;
     /// // 6.6 GHz to 6.9 GHz passband → center=√(6.6e9×6.9e9), BW=300 MHz
@@ -257,18 +277,19 @@ impl FilterDesign {
         bandwidth_hz: f64,
         polynomials: PolynomialSet,
         matrix: CouplingMatrix,
-    ) -> Self {
-        // Build a minimal spec matching the design parameters
-        let spec = FilterSpec::new(order, return_loss_db)
-            .unwrap_or_else(|_| FilterSpec::new(order, 20.0).unwrap());
+    ) -> Result<Self> {
+        // Build a minimal spec matching the design parameters. Propagate a
+        // validation failure (order 0 / non-positive return loss) rather than
+        // silently substituting a 20 dB spec.
+        let spec = FilterSpec::new(order, return_loss_db)?;
 
-        Self {
+        Ok(Self {
             spec,
             polynomials,
             matrix,
             center_hz: Some(center_hz),
             bandwidth_hz: Some(bandwidth_hz),
-        }
+        })
     }
 
     // ─── Basic info ──────────────────────────────────────────────────────
@@ -433,7 +454,12 @@ impl FilterDesign {
                     .into(),
             )
         })?;
-        let bw = self.bandwidth_hz.unwrap_or(0.0);
+        let bw = self.bandwidth_hz.ok_or_else(|| {
+            crate::error::MfsError::PreconditionViolation(
+                "response() requires a band-pass bandwidth; use \
+                 response_bandpass() or FilterDesign::bandpass()".into(),
+            )
+        })?;
         self.response_bandpass(center, bw, start_hz, stop_hz, points)
     }
 
@@ -550,7 +576,12 @@ impl FilterDesign {
                 "response_lossy() requires band-pass parameters".into(),
             )
         })?;
-        let bw = self.bandwidth_hz.unwrap_or(0.0);
+        let bw = self.bandwidth_hz.ok_or_else(|| {
+            crate::error::MfsError::PreconditionViolation(
+                "response_lossy() requires a band-pass bandwidth; create \
+                 the design with FilterDesign::bandpass()".into(),
+            )
+        })?;
         let mapping = BandPassMapping::new(center, bw)?;
         let grid = FrequencyGrid::linspace(start_hz, stop_hz, points)?;
 
@@ -599,7 +630,12 @@ impl FilterDesign {
                     .into(),
             )
         })?;
-        let bw = self.bandwidth_hz.unwrap_or(0.0);
+        let bw = self.bandwidth_hz.ok_or_else(|| {
+            crate::error::MfsError::PreconditionViolation(
+                "scale() requires a band-pass bandwidth; use scale_to() or \
+                 create the design with FilterDesign::bandpass()".into(),
+            )
+        })?;
         self.scale_to(center, bw)
     }
 

@@ -4,7 +4,13 @@
 **Method:** Five parallel read-only review slices (S1 approx/frequency, S2 matrix/transform, S3 synthesis/duplexer/multiplexer, S4 response/spectral, S5 API surfaces: CLI/Python/pipeline/output/spec/design) with evidence-backed findings, then an independent adjudication pass: every finding re-derived against source at `file:line`, and the single highest-stakes numeric claim (normalized lossy Q) independently re-derived analytically. S1's agent failed on a model length-stop; S1 was re-reviewed manually (see §E).
 **Companion docs:** `architecture-review-2026-09-25.md` (prior wave), `continuation-plan.md` (roadmap), `CHANGELOG.md` [Unreleased].
 
-This is an **assessment**, not a code change. **No findings have been fixed yet** — the report-only disposition was requested. Every row carries `file:line` evidence so it can be acted on independently.
+This is an **assessment**, not a code change. **Status (2026-10-06):** the
+"silent errors" wave (§F.1) — P1-1/2/3/4/6, P2-1/2/3/5, all six P3 — is **fixed
+and gate-anchored** on `master`; each P1 fix ships with the value-level gate
+that anchors the previously-unchecked observable (per-channel F zeros,
+physical detuning vs `freq.rs`, group-delay value vs the numerical
+derivative, p0² sign, array lengths). **P1-5 + P2-4 (the CT/CQ cascade
+re-implementation, §F.2) remain open.**
 
 ---
 

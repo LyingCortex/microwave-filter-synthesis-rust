@@ -757,6 +757,7 @@ Wave 2 (serial):    D1–D4 (duplexer full path)   [DONE 2026-10-03 — Type-I o
 Wave 3 (parallel):  D2-opt [DONE 2026-10-04 — scale-δ + early-stop + chain-guess, both order-6 gates green] · D3-opt [DONE 2026-10-04 — CLI optimize/extract + Python extract, e2e-gated] · D4-opt [DONE 2026-10-04 — `benches/optimizer.rs` + noise regression + report §6] · C0 [DONE 2026-10-05 — design doc, route-α committed]
 Wave 4 (serial):    B1 [DONE 2026-10-04] → B2 [DONE 2026-10-04] → B3 [DONE 2026-10-04] → B4 [DONE 2026-10-04] (multiplexer; Wave 2 done — full wave complete)
 Wave 5:             E1 [INVESTIGATED 2026-10-05 — refuted: no valid passband-TZ prototype in the single-function form; approx now rejects |z|<1 typed; route-α does NOT need it] · C2 [DONE 2026-10-05 — route-α approx + spec + engine reuse] → C3 [DONE 2026-10-05 — Fig. 25 anchor GREEN + example] · E2 (Laurent) [DONE 2026-10-05 — Laurent principal part + fast-path summation; transversal rejects repeated pole typed; gates green]
+Wave 6 (review):    0.6.0 whole-crate review "silent errors" wave (review-findings-0.6.0.md §F.1) [DONE 2026-10-06 — P1-1/2/3/4/6 + P2-1/2/3/5 + all six P3 fixed and gate-anchored; P1-5 + P2-4 (CT/CQ cascade, §F.2) deferred as a separate re-implementation wave]
 ```
 
 Rationale: the duplexer full path (Wave 2) was the only item on the critical

@@ -61,7 +61,9 @@ The most recent assessment of the architecture is
 
 The 0.6.0 whole-crate code review (2026-10-05) is
 [review-findings-0.6.0.md](./review-findings-0.6.0.md) — 17 valid findings
-(6 P1 / 5 P2 / 6 P3), assessment only, nothing fixed yet.
+(6 P1 / 5 P2 / 6 P3). The "silent errors" wave (P1-1/2/3/4/6, P2-1/2/3/5,
+all six P3) was fixed and gate-anchored 2026-10-06; P1-5 + P2-4 (the CT/CQ
+cascade re-implementation) remain open.
 
 ## Reading Paths
 
@@ -129,7 +131,7 @@ This path is best if your first question is:
   [architecture.md](../architecture.md) + the 2026-09-25 review.
 - [Refactor Roadmap](./refactor-roadmap.md) — *(historical, input to the 0.5.0 remediation)*
 - [Current Code Architecture Review 2026-09-25](./architecture-review-2026-09-25.md) — *(current, pre-0.6.0)*
-- [Review Findings 0.6.0 (2026-10-05)](./review-findings-0.6.0.md) — *(current; 17 findings, not yet remediated)*
+- [Review Findings 0.6.0 (2026-10-05)](./review-findings-0.6.0.md) — *(current; 17 findings; "silent errors" wave remediated 2026-10-06, CT/CQ cascade P1-5/P2-4 open)*
 - [Continuation Plan](../continuation-plan.md) — *(current, 0.6.0, 2026-10-05)*
   All Wave 1–5 items DONE: duplexer full Macchiarella path (D1–D4),
   multiplexer N-channel full path (B1–B4), true multi-passband synthesis

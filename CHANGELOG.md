@@ -13,8 +13,56 @@
   (`recovery.rs`), sign-mirrored band-pass denormalization (`scaling.rs`),
   LU-backend group-delay port nodes (`response/backend.rs`), silently clamped
   overlapping-channel p0² (`machiarella.rs`), no-op CQ merge (`cascade.rs`),
-  and a Python `tune()` length-check gap. **Assessment only — nothing fixed
-  yet**; remediation is planned in two waves (see doc §F).
+  and a Python `tune()` length-check gap. Assessment only at review time;
+  the "silent errors" wave (P1-1/2/3/4/6, P2-1/2/3/5, all six P3) is fixed
+  2026-10-06 (see Fixed below); P1-5 + P2-4 (the CT/CQ cascade
+  re-implementation) are the deferred second wave (doc §F.2).
+
+### Fixed
+
+- **0.6.0 "silent errors" review wave (2026-10-06)** — the five
+  "gate-green but wrong result" P1s plus P2-1/2/3/5 and all six P3
+  (review-findings-0.6.0.md §F.1):
+  - **P1-1 full-path channel recovery** (`src/synthesis/recovery.rs`):
+    `recover_channel_design` gained a `rescale_d` flag; the full path passes
+    `false` (D = S − F⁰ is already in S's monic normalization), so the a
+    priori reflection zeros are no longer destroyed (was ~1e30 root
+    corruption on the §V golden spec). Simplified path keeps the rescale.
+    New value-level gate `multiplexer_full_iteration_preserves_a_priori_reflection_zeros`.
+  - **P1-2 band-pass denormalization sign** (`src/matrix/scaling.rs`):
+    `denormalize_resonator_frequency` now uses the positive-frequency branch
+    `(t + √(t²+4c²))/2` (was the sign-mirrored `c(√(…) − t)`), and
+    `normalize_resonator_frequency` routes through
+    `BandPassMapping::map_hz_to_normalized` so the two cannot drift. New
+    cross-check test vs `freq.rs`.
+  - **P1-3 LU-backend group delay** (`src/response/backend.rs`): the numerator
+    fold is `(1..side−1)` (resonator block only), not `(0..side)` — the spurious
+    port-node terms are gone (was 2.679 vs 0.905 at ω=0). New value-level test
+    vs the numerical S21 phase derivative.
+  - **P1-4 overlapping-channel p0²** (`src/synthesis/machiarella.rs`): a
+    genuinely negative p0² (`< −1e-12`, calibrated from the measured
+    legitimate floor ~4e-12 and the non-physical negatives O(1e-2)) is now
+    rejected with a typed `PreconditionViolation` instead of silently clamped;
+    the `1e-15` floor is kept only for ~0 round-off.
+  - **P1-6 Python `tune()`** (`src/python.rs`): all five companion arrays are
+    length-checked (was only `target_s21_re`), raising `PyValueError` instead
+    of crashing the interpreter.
+  - **P2-1 CLI `optimize`** reads the matrix from `--input`/stdin even when the
+    target is a `.s2p` (was "invalid matrix JSON").
+  - **P2-2 CLI `design`** reports an `InputParse` error for an incomplete
+    band-pass parameter set (was a silently-ignored center, normalizing to a
+    prototype).
+  - **P2-3 pipeline schema/validator** accept the canonical PascalCase
+    `MatrixTopology` (`Transversal`/`Folded`/`Arrow`), matching the serde
+    request path (was lowercase-only).
+  - **P2-5 `DuplexerSynthesisResult`** now carries `pub converged: bool`
+    (was dropped; multiplexer had it).
+  - **P3** `FilterDesignBuilder` band-pass validation at the choke point (P3-1),
+    `tune()` uniform-grid contract documented (P3-2), `bandpass_edges` validates
+    `0 < f_start < f_stop` (P3-3), `from_polynomials_and_matrix` propagates the
+    spec error instead of a silent RL=20 fallback (P3-4),
+    `PoleExpansionData::from_polynomials` y22 length check (P3-5), Givens step-2
+    comment corrected (P3-6).
 
 ## [0.6.0] — 2026-10-05
 

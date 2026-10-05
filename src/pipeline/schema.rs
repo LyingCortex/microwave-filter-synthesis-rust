@@ -65,7 +65,7 @@ fn build_input_schema() -> Value {
             },
             "topology": {
                 "type": "string",
-                "enum": ["transversal", "folded", "arrow"],
+                "enum": ["Transversal", "Folded", "Arrow"],
                 "description": "Requested output topology for the coupling matrix."
             },
             "mapping": {
@@ -181,7 +181,7 @@ fn build_output_schema() -> Value {
                     "order": { "type": "integer" },
                     "topology": {
                         "type": "string",
-                        "enum": ["transversal", "folded", "arrow"]
+                        "enum": ["Transversal", "Folded", "Arrow"]
                     },
                     "data": {
                         "type": "array",
@@ -196,7 +196,7 @@ fn build_output_schema() -> Value {
                 "properties": {
                     "topology": {
                         "type": "string",
-                        "enum": ["transversal", "folded", "arrow"]
+                        "enum": ["Transversal", "Folded", "Arrow"]
                     },
                     "pattern_verified": { "type": "boolean" },
                     "response_invariant": { "type": "boolean" }
@@ -295,9 +295,11 @@ pub fn validate_request(request: &Value) -> Vec<String> {
 
     if let Some(topo) = obj.get("topology") {
         if let Some(s) = topo.as_str() {
-            if !["transversal", "folded", "arrow"].contains(&s) {
+            // PascalCase: the canonical `MatrixTopology` serde form (the
+            // source of truth for what `SynthesisRequest` deserializes).
+            if !["Transversal", "Folded", "Arrow"].contains(&s) {
                 errors.push(format!(
-                    "field 'topology' must be one of: transversal, folded, arrow (got '{s}')"
+                    "field 'topology' must be one of: Transversal, Folded, Arrow (got '{s}')"
                 ));
             }
         } else {
@@ -418,7 +420,7 @@ mod tests {
             "order": 4,
             "return_loss_db": 20.0,
             "transmission_zeros": [-2.0, 1.5],
-            "topology": "folded",
+            "topology": "Folded",
             "mapping": {
                 "kind": "bandpass",
                 "center_hz": 6.75e9,

@@ -847,3 +847,71 @@ fn multiplexer_full_iteration_vendored_zhao_n4_converges() -> mfs::error::Result
     // tolerance — exactly the regime the duplexer order-7/8 gates use.
     assert_full_path_quasi_equiripple(&result, &channels, f_lo, f_hi)
 }
+
+/// P1-1 regression gate: the full-path per-channel recovery must preserve the
+/// a priori reflection zeros. The full iteration fixes each channel's F
+/// polynomial (reflection zeros) and iterates only S; recovery therefore
+/// rebuilds the channel from `D = S − F⁰` **without** rescaling D to S's
+/// normalization — rescaling it (the historical always-rescale path, dropped
+/// flag re-added 2026-10-06) corrupts the exact reconstruction
+/// `F = S − D` and moves every reflection zero (measured ~1e30 on the §V
+/// golden spec). This gate compares each recovered channel's F roots against
+/// the independently-synthesized a priori F⁰ (the same public
+/// `FilterDesign::bandpass_edges` path `prepare` uses), so it anchors the
+/// per-channel observable the junction-level gates never check.
+fn sorted_f_roots(design: &FilterDesign) -> mfs::error::Result<Vec<mfs::approx::ComplexCoefficient>> {
+    let mut roots = design.polynomials().f.roots()?;
+    roots.sort_by(|a, b| {
+        a.re.partial_cmp(&b.re)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.im.partial_cmp(&b.im).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    Ok(roots)
+}
+
+#[test]
+fn multiplexer_full_iteration_preserves_a_priori_reflection_zeros() -> mfs::error::Result<()> {
+    let edges = [(14.90e9, 15.00e9), (15.10e9, 15.20e9), (15.30e9, 15.40e9)];
+    let channels: Vec<mfs::ChannelSpec> = edges
+        .iter()
+        .map(|&(lo, hi)| edge_channel(4, 22.0, lo, hi))
+        .collect();
+    let result = MultiplexerSynthesis::new()
+        .channels(channels.clone())
+        .junction(JunctionType::TypeI { n: 1.0, b0: 0.0 })
+        .max_iterations(60)
+        .convergence_tol(1e-8)
+        .full_iteration(true)
+        .synthesize()?;
+
+    assert!(
+        result.convergence_error < 1e-8,
+        "full path must converge, got {:.3e}",
+        result.convergence_error
+    );
+
+    // Bound calibrated by measurement: the fix reproduces F⁰ to
+    // root-extraction precision (0.0e0 on this spec), while the rescaled
+    // (buggy) D corrupts the roots to ~1e30 — so 1e-6 sits orders of
+    // magnitude below the corruption and above the floor.
+    const MAX_REL_ROOT_DIST: f64 = 1e-6;
+    for (i, ch) in result.channels.iter().enumerate() {
+        let (lo, hi) = edges[i];
+        let a_priori = FilterDesign::bandpass_edges(channels[i].order, channels[i].return_loss_db, lo, hi)
+            .synthesize()?;
+        let f0 = sorted_f_roots(&a_priori)?;
+        let f_rec = sorted_f_roots(ch)?;
+        assert_eq!(f0.len(), f_rec.len(), "channel {i}: F degree mismatch");
+        let max_dist = f0
+            .iter()
+            .zip(f_rec.iter())
+            .map(|(a, b)| (a - b).norm() / 1.0_f64.max(b.norm()))
+            .fold(0.0_f64, f64::max);
+        assert!(
+            max_dist <= MAX_REL_ROOT_DIST,
+            "channel {i}: recovered F deviates from a priori F0 by {max_dist:.3e} \
+             (limit {MAX_REL_ROOT_DIST:.0e}); reflection zeros were not preserved"
+        );
+    }
+    Ok(())
+}

@@ -296,11 +296,9 @@ impl CouplingMatrix {
         }
 
         // Step 2: M'' = M' * R^T (affects columns pivot_a and pivot_b)
-        // col_a' = cos * col_a - sin * col_b  (of M')
-        // col_b' = sin * col_a + cos * col_b  (of M')
-        // Note: R^T has cos on diagonal, but transposed off-diag: R^T[a,b] = sin, R^T[b,a] = -sin
-        // So col_a'' = cos * col_a' + sin * col_b'
-        //    col_b'' = -sin * col_a' + cos * col_b'
+        // With R^T[a,a] = cos, R^T[a,b] = sin, R^T[b,a] = -sin, R^T[b,b] = cos:
+        // col_a'' = cos * col_a' - sin * col_b'  (of M')
+        //    col_b'' = sin * col_a' + cos * col_b'  (of M')
         for row in 0..side {
             let a = self.data[row * side + pivot_a];
             let b = self.data[row * side + pivot_b];

@@ -231,6 +231,57 @@ mod tests {
         Ok(())
     }
 
+    /// P1-3 (value level): the LU group delay must equal `-d/dω arg(S21(ω))`,
+    /// not just be finite/some. Derivation: S21 = -2√(R_S R_L)·x[L] where
+    /// x = A(ω)⁻¹e₀; by x' = -A⁻¹A'x and A' = I_r (resonator block only),
+    /// (S21'/S21) = -Σ_{k=1}^{L-1}(A⁻¹A')_{L,k}x[k]/x[L] = -numerator/denominator,
+    /// so group delay = (numerator/denominator).im = -d/dω arg(S21). A central
+    /// difference of S21 over the (uniform) grid is an independent reference;
+    /// the historical `0..side` fold (which added the two port-node terms)
+    /// deviates by O(1) from this (measured 2.679 vs 0.905 at ω=0 on an
+    /// order-2 matrix), so the value comparison pins the fix.
+    #[test]
+    fn lu_group_delay_matches_s21_phase_derivative() -> Result<()> {
+        use num_complex::Complex64;
+        let matrix = CouplingMatrixBuilder::new(2)?
+            .set_symmetric(0, 1, 0.5)?
+            .set_symmetric(1, 2, 0.7)?
+            .set_symmetric(2, 3, 0.5)?
+            .build()?;
+        // Fine uniform grid (h = 0.01): the central difference's O(h²)
+        // truncation error (amplified past the passband edge where S21 varies
+        // rapidly) must stay well under the assert tolerance. At h = 0.1 the
+        // worst (edge) gap measured 1.3e-2; at h = 0.01 it drops ~100× to
+        // ~1e-4, while the O(1) port-node bug the fix removes is ~1.8.
+        let grid = FrequencyGrid::linspace(-2.0, 2.0, 401)?;
+        let resp = ResponseSolver.evaluate_normalized(&matrix, &grid)?;
+        let step = 4.0 / 400.0; // linspace(-2, 2, 401)
+        let s21c = |i: usize| Complex64::new(resp.samples[i].s21_re, resp.samples[i].s21_im);
+
+        let mut checked = 0usize;
+        for i in 1..resp.samples.len() - 1 {
+            let s21 = s21c(i);
+            // Skip points where S21 is near a null: the phase derivative is
+            // ill-conditioned there and carries no information about the fix.
+            if s21.norm_sqr() < 1e-6 {
+                continue;
+            }
+            // S21' ≈ (S21[i+1] - S21[i-1]) / 2h (central difference).
+            let ds21 = (s21c(i + 1) - s21c(i - 1)) / (2.0 * step);
+            let numerical = -(ds21 / s21).im;
+            let actual = resp.samples[i].group_delay.expect("LU group delay present");
+            checked += 1;
+            // Loose enough for O(h²)≈1e-4, tight enough to reject the O(1)
+            // port-node error the P1-3 fix removes.
+            assert!(
+                (actual - numerical).abs() < 1e-2 + 1e-3 * numerical.abs(),
+                "group delay at ω={}: LU {actual} vs S21 phase derivative {numerical}",
+                resp.samples[i].normalized_omega
+            );
+        }
+        assert!(checked > 5, "expected to check > 5 interior points, checked {checked}");
+        Ok(())
+    }
     #[test]
     fn response_with_lowpass_mapping_uses_normalized_mapping() -> Result<()> {
         let matrix = CouplingMatrix::identity(1)?;

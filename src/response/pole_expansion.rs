@@ -81,10 +81,10 @@ impl PoleExpansionData {
     pub fn from_polynomials(polynomials: &PolynomialSet) -> Result<Self> {
         let (y11, y12, y22) = synthesize_residue_expansions(polynomials)?;
 
-        if y11.residues.len() != y12.residues.len() {
+        if y11.residues.len() != y12.residues.len() || y11.residues.len() != y22.residues.len() {
             return Err(MfsError::DimensionMismatch {
                 expected: y11.residues.len(),
-                actual: y12.residues.len(),
+                actual: y12.residues.len().min(y22.residues.len()),
             });
         }
 

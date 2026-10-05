@@ -1,5 +1,5 @@
 use crate::error::{MfsError, Result};
-use crate::freq::BandPassMapping;
+use crate::freq::{BandPassMapping, FrequencyMapping};
 
 use super::core::{BandPassScaledCouplingMatrix, CouplingMatrix};
 
@@ -105,13 +105,19 @@ impl CouplingMatrix {
     }
 }
 
+/// Inverse band-pass map for a resonator rest frequency: the positive-
+/// frequency branch, exactly matching
+/// [`BandPassMapping::map_normalized_to_hz`] (the same quadratic, same branch).
+/// The historical form subtracted the linear term, which is the *negative-
+/// frequency* branch — `denorm(n) == freq.denorm(-n)` — mirroring every
+/// physical detuning sign (review P1-2).
 fn denormalize_resonator_frequency(normalized: f64, center_hz: f64, bandwidth_hz: f64) -> f64 {
-    let fractional_bw = bandwidth_hz / center_hz;
-    center_hz
-        * ((1.0 + (normalized * fractional_bw / 2.0).powi(2)).sqrt()
-            - normalized * fractional_bw / 2.0)
+    let t = normalized * bandwidth_hz;
+    (t + (t * t + 4.0 * center_hz * center_hz).sqrt()) / 2.0
 }
 
+/// Normalized detuning of a resonator rest frequency: exactly
+/// [`BandPassMapping::map_hz_to_normalized`], so the two cannot drift.
 fn normalize_resonator_frequency(
     physical_hz: f64,
     center_hz: f64,
@@ -123,7 +129,8 @@ fn normalize_resonator_frequency(
         )));
     }
 
-    Ok((center_hz / bandwidth_hz) * (center_hz / physical_hz - physical_hz / center_hz))
+    let mapping = BandPassMapping::new(center_hz, bandwidth_hz)?;
+    Ok(mapping.map_hz_to_normalized(physical_hz)?.omega)
 }
 
 fn external_q_from_normalized_coupling(coupling: f64, fractional_bw: f64) -> Result<f64> {
@@ -145,4 +152,46 @@ fn normalized_coupling_from_external_q(external_q: f64, fractional_bw: f64) -> R
     }
 
     Ok((1.0 / (external_q * fractional_bw)).sqrt())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The resonator rest-frequency denorm/normalize must agree with the
+    /// canonical `BandPassMapping` inverse/forward maps (review P1-2): the
+    /// denorm is the *positive-frequency* branch, not its sign-mirrored twin.
+    #[test]
+    fn resonator_frequency_maps_agree_with_bandpass_mapping() {
+        let center_hz = 6.75e9;
+        let bandwidth_hz = 300.0e6;
+        let mapping = BandPassMapping::new(center_hz, bandwidth_hz).unwrap();
+
+        for &normalized in &[-3.0, -1.5, -0.75, -0.1, 0.0, 0.1, 0.75, 1.5, 3.0] {
+            let denorm =
+                denormalize_resonator_frequency(normalized, center_hz, bandwidth_hz);
+            let canonical = mapping
+                .map_normalized_to_hz(crate::freq::NormalizedSample { omega: normalized })
+                .unwrap();
+            assert!(
+                (denorm - canonical).abs() <= 1e-9 * canonical.max(1.0),
+                "denorm({normalized}) = {denorm} vs {canonical}"
+            );
+
+            let re_norm = normalize_resonator_frequency(denorm, center_hz, bandwidth_hz)
+                .unwrap();
+            assert!(
+                (re_norm - normalized).abs() <= 1e-9,
+                "normalize({denorm}) = {re_norm} vs {normalized}"
+            );
+
+            // Cross-direction: forward map of the denormed frequency must
+            // return the original normalized detuning.
+            let forward = mapping.map_hz_to_normalized(denorm).unwrap().omega;
+            assert!(
+                (forward - normalized).abs() <= 1e-9,
+                "forward({denorm}) = {forward} vs {normalized}"
+            );
+        }
+    }
 }

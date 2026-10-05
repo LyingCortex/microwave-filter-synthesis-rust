@@ -451,7 +451,31 @@ fn run_design(
             }
             (Some(c), Some(bw))
         }
-        _ => (center, bandwidth),
+        _ => {
+            // No resolvable (center, bandwidth) pair. A pure prototype is only
+            // legitimate when NO band-pass parameter was supplied; otherwise a
+            // parameter would be silently ignored (review P2-2). Arm 1 above
+            // already handles (center, bandwidth), so reaching here with any
+            // band-pass parameter set means the combination is incomplete.
+            if center.is_none() && bandwidth.is_none() && start.is_none() && stop.is_none() {
+                (None, None) // pure normalized prototype: no band-pass params
+            } else {
+                let parts: Vec<String> = [
+                    center.map(|c| format!("--center {c}")),
+                    bandwidth.map(|b| format!("--bandwidth {b}")),
+                    start.map(|f1| format!("--start {f1}")),
+                    stop.map(|f2| format!("--stop {f2}")),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                return Err(CliRunError::InputParse(format!(
+                    "incomplete band-pass parameters [{}]: pair --center with \
+                     --bandwidth or --start, or use --start + --stop",
+                    parts.join(", ")
+                )));
+            }
+        }
     };
 
     // Build the design
@@ -1038,14 +1062,11 @@ fn run_optimize(
     format: &OutputFormat,
 ) -> Result<(), CliRunError> {
     use mfs::optimize::optimize_matrix;
-    let use_touchstone_target = target
-        .and_then(|p| p.extension().and_then(|e| e.to_str()))
-        == Some("s2p");
-    let json_input = if use_touchstone_target {
-        String::new()
-    } else {
-        read_input(cli)?
-    };
+    // The matrix always comes from --input/stdin (JSON); only the *target*
+    // may be a .s2p. The documented "matrix from input + Touchstone target"
+    // usage requires reading the matrix even when the target is a .s2p
+    // (mirrors `run_extract`, review P2-1).
+    let json_input = read_input(cli)?;
     let target_resp = load_target(target, &json_input)?;
     let matrix = parse_matrix_json(&json_input)?;
     if matrix.order() != order {

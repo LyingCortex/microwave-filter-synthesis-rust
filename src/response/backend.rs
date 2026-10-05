@@ -60,8 +60,13 @@ pub(super) fn evaluate_response(
             let s11 = Complex64::new(1.0, 0.0) + Complex64::new(0.0, 2.0 * source) * col_first[0];
             let s21 = Complex64::new(0.0, -transmission_scale) * col_first[side - 1];
 
-            // Group delay: Im(sum_k y[k] * x[k] / x[side-1])
-            let numerator = (0..side).fold(Complex64::new(0.0, 0.0), |acc, index| {
+            // Group delay: Im(sum_k y[k] * x[k] / x[side-1]).
+            // dA/dω is the identity on the *resonator* block only (indices
+            // 1..side-1; the port terminations −jRₛ/−jRₗ are
+            // frequency-independent), so by A'⁻¹ = −A⁻¹A'A⁻¹ only the
+            // resonator indices contribute. Folding 0..side added the two
+            // spurious port terms (review P1-3).
+            let numerator = (1..side - 1).fold(Complex64::new(0.0, 0.0), |acc, index| {
                 acc + row_last[index] * col_first[index]
             });
             let denominator = col_first[side - 1];

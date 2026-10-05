@@ -136,6 +136,22 @@ const STAGNATION_ACCEPT: f64 = 1e-3;
 const STAGNATION_WINDOW: usize = 3;
 const STAGNATION_MIN_ITER: usize = 5;
 
+/// Floor for the p₀² power scaling: absorbs the ~0 round-off case (a
+/// physically-absent channel) down to a tiny positive value so `sqrt` is
+/// well-defined. Legitimate p₀² are far above this (measured floor
+/// ~4e-12 on the gated well-separated case).
+const P0_SQ_FLOOR: f64 = 1e-15;
+
+/// Rejection threshold for a *genuinely* negative p₀² (review P1-4). A
+/// negative beyond this means the p₀² system has no all-positive solution —
+/// the channels are too strongly coupled/overlapping for a realizable
+/// quasi-equiripple junction. Calibrated 2026-10-06: the smallest *legitimate*
+/// p₀² measured on the gated cases is ~4.3e-12 (well-separated N=2), so
+/// -1e-12 rejects every observed non-physical negative (O(1e-5) or larger on
+/// the overlapping specs) while never touching a valid one. Values in
+/// (-1e-12, 0] are treated as round-off and floored, not rejected.
+const P0_SQ_REJECTION_TOL: f64 = 1e-12;
+
 /// Common-domain setup for the fixed-point iteration: per-channel affine
 /// maps and edges, the fixed numerator N, the combined-band constants, and
 /// the independently synthesized per-channel polynomial sets (needed by
@@ -351,13 +367,31 @@ fn solve_p0(
 
         let det = pt00 * pt11 - pt01 * pt10;
         if det.abs() < 1e-30 {
+            // Degenerate (nearly) singular 2×2: distribute the total equally
+            // between the two channels. Reject a genuinely negative total.
             let p0_sq = (rhs0 + rhs1) / (pt00 + pt10 + pt01 + pt11);
-            let clamped = p0_sq.max(1e-15);
+            if p0_sq < -P0_SQ_REJECTION_TOL {
+                return Err(MfsError::PreconditionViolation(format!(
+                    "p₀² is non-physical (negative {p0_sq:.3e}); the channels are \
+                     too strongly coupled/overlapping for a realizable \
+                     quasi-equiripple junction"
+                )));
+            }
+            let clamped = p0_sq.max(P0_SQ_FLOOR);
             return Ok(vec![clamped, clamped]);
         }
         let x0 = (rhs0 * pt11 - rhs1 * pt10) / det;
         let x1 = (pt00 * rhs1 - pt01 * rhs0) / det;
-        return Ok(vec![x0.max(1e-15), x1.max(1e-15)]);
+        for (i, v) in [x0, x1].iter().enumerate() {
+            if *v < -P0_SQ_REJECTION_TOL {
+                return Err(MfsError::PreconditionViolation(format!(
+                    "channel {i}'s p₀² is non-physical (negative {v:.3e}); the \
+                     channels are too strongly coupled/overlapping for a \
+                     realizable quasi-equiripple junction"
+                )));
+            }
+        }
+        return Ok(vec![x0.max(P0_SQ_FLOOR), x1.max(P0_SQ_FLOOR)]);
     }
 
     // N ≥ 3: LU solve with partial pivoting (nalgebra).
@@ -378,7 +412,16 @@ fn solve_p0(
         .ok_or_else(|| {
             MfsError::NumericalFailure("p₀² system is singular (LU solve failed)".into())
         })?;
-    Ok((0..n).map(|i| solution[i].max(1e-15)).collect())
+    for (i, &v) in solution.iter().enumerate() {
+        if v < -P0_SQ_REJECTION_TOL {
+            return Err(MfsError::PreconditionViolation(format!(
+                "channel {i}'s p₀² is non-physical (negative {v:.3e}); the \
+                 channels are too strongly coupled/overlapping for a \
+                 realizable quasi-equiripple junction"
+            )));
+        }
+    }
+    Ok((0..n).map(|i| solution[i].max(P0_SQ_FLOOR)).collect())
 }
 
 /// Computes the junction product polynomial ∏ᵢ Sᵢ from N and D.
