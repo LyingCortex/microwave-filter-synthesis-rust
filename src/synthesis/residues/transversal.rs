@@ -27,6 +27,21 @@ pub(crate) fn build_transversal_from_residues(
         });
     }
 
+    // A transversal (inline chain) coupling matrix has exactly one simple
+    // pole per resonator; it cannot represent a repeated pole (a
+    // 1/(s-p)^m term with m >= 2). Fail with a typed error instead of
+    // silently building a wrong matrix.
+    if y11.residues.iter().any(|r| r.laurent.is_some())
+        || y12.residues.iter().any(|r| r.laurent.is_some())
+        || y22.residues.iter().any(|r| r.laurent.is_some())
+    {
+        return Err(MfsError::NotImplemented(
+            "transversal synthesis cannot represent a repeated pole (Laurent \
+             principal part); use a topology that supports higher-order poles"
+                .to_string(),
+        ));
+    }
+
     // Classify residues as real or complex-conjugate pairs
     let classifications = classify_residues(y11, y12, y22, 1e-6)?;
 
@@ -230,7 +245,7 @@ pub(crate) fn combine_conjugate_pair(
 
 #[cfg(test)]
 mod tests {
-    use super::super::expansion::synthesize_residue_expansions;
+    use super::super::expansion::{synthesize_residue_expansions, ResiduePole};
     use super::*;
     use crate::approx::generalized_chebyshev_polynomials;
     use crate::spec::FilterSpec;
@@ -649,5 +664,73 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    /// A repeated pole (Laurent principal part present) must be rejected with
+    /// a typed `NotImplemented` error before any classification or matrix
+    /// construction — a transversal chain cannot represent `1/(s-p)^2`.
+    #[test]
+    fn repeated_pole_rejected_with_not_implemented() {
+        use crate::approx::PolynomialSetParams;
+
+        let polynomials = PolynomialSet::new(&PolynomialSetParams {
+            order: 2,
+            ripple_factor: 0.1,
+            eps: 1.0,
+            eps_r: 1.0,
+            transmission_zeros_normalized: vec![],
+            e: vec![1.0, 0.0, 1.0],
+            f: vec![0.0, 1.0, 0.0],
+            p: vec![1.0],
+        })
+        .unwrap();
+
+        let repeated = ResidueExpansion {
+            residues: vec![
+                ResiduePole {
+                    pole: ComplexCoefficient::new(0.0, 1.0),
+                    residue: ComplexCoefficient::new(0.5, 0.0),
+                    laurent: Some(vec![
+                        ComplexCoefficient::new(0.5, 0.0),
+                        ComplexCoefficient::new(0.1, 0.0),
+                    ]),
+                },
+                ResiduePole {
+                    pole: ComplexCoefficient::new(0.0, -1.0),
+                    residue: ComplexCoefficient::new(0.3, 0.0),
+                    laurent: None,
+                },
+            ],
+            constant_term: None,
+        };
+        let simple = ResidueExpansion {
+            residues: vec![
+                ResiduePole {
+                    pole: ComplexCoefficient::new(0.0, 1.0),
+                    residue: ComplexCoefficient::new(0.2, 0.0),
+                    laurent: None,
+                },
+                ResiduePole {
+                    pole: ComplexCoefficient::new(0.0, -1.0),
+                    residue: ComplexCoefficient::new(0.1, 0.0),
+                    laurent: None,
+                },
+            ],
+            constant_term: None,
+        };
+
+        // One of the three expansions carries a Laurent principal part.
+        let result =
+            build_transversal_from_residues(&polynomials, &repeated, &simple, &simple);
+        match result {
+            Err(MfsError::NotImplemented(msg)) => {
+                assert!(
+                    msg.contains("repeated pole"),
+                    "error message should mention repeated poles, got: {msg}"
+                );
+            }
+            Err(other) => panic!("expected NotImplemented, got: {other}"),
+            Ok(_) => panic!("expected a typed error, got a matrix"),
+        }
     }
 }

@@ -554,14 +554,19 @@ let context = run_full_pipeline(request)?;
 | Asymmetric TZ placement | ✅ Fully supported |
 | Complex-residue configurations | ✅ Fixed (conjugate pairing) |
 | Passband TZs (\|zero\| < 1) | ❌ Not supported — and shown unrealizable by the single-function generalized-Chebyshev prototype (breaks the Feldtkeller identity, E1 2026-10-05); would need the multifunction characteristic |
-| Repeated poles | ❌ Not yet supported |
+| Repeated poles | ✅ Handled by the residue expansion (Laurent principal part) + pole-expansion fast path; transversal synthesis rejects them with a typed `NotImplemented` (a chain cannot represent `1/(s-p)^m`) |
 
 ## Known Limitations
 
 1. **Passband transmission zeros** (`|zero| < 1`) are not supported — the `safe_sqrt_term`
    computation restricts zeros to the stopband.
-2. **Repeated poles** in the residue expansion are not handled — Laurent expansion
-   is not implemented.
+2. **Repeated poles in transversal matrix synthesis.** The residue expansion
+   handles repeated poles (Laurent principal part, plan E2, 2026-10-05) and
+   the pole-expansion fast path sums them exactly, but the transversal
+   (inline-chain) coupling matrix can only represent one simple pole per
+   resonator; a design whose denominator has a multiplicity-≥2 pole is
+   rejected with a typed `MfsError::NotImplemented` rather than silently
+   built as a wrong matrix.
 3. **Wheel topology** is deprecated and currently an alias of Arrow.
 4. **N-channel mutual loading fidelity** — the simplified frequency-offset
    perturbation (the multiplexer's *default*) has limited passband fidelity
@@ -596,7 +601,7 @@ Worked plan with sequencing and acceptance criteria:
 | Phase | Feature | Priority |
 |-------|---------|----------|
 | Next | Passband transmission zeros | High |
-| Next | Repeated-pole residue expansion | High |
+| Done | Repeated-pole residue expansion (Laurent principal part + fast-path summation, transversal rejects with typed error, E2 2026-10-05) | — |
 | Done | Generalize the full spectral path to N-channel (multiplexer) mutual loading (B2, 2026-10-04) | — |
 | Done | Full Macchiarella spectral path converged for the duplexer (Type-I orders 2–8 + Type-II, gate-anchored, 2026-10-03) | — |
 | Later | Butterworth/Elliptic approximation families | Low |

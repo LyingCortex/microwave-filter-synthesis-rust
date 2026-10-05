@@ -822,11 +822,30 @@ proptest! {
 
             skipped_all = false;
 
-            // Reconstruct from residues: sum(residue_k / (s - pole_k)) + constant_term
+            // Reconstruct from residues: for a simple pole this is
+            // residue / (s - pole); for a repeated pole it is the full
+            // Laurent principal part b_0/(s-p)^m + ... + b_{m-1}/(s-p).
             let mut reconstructed = ComplexCoefficient::new(0.0, 0.0);
             for rp in &y12.residues {
                 let denom = s - rp.pole;
-                reconstructed += rp.residue / denom;
+                match &rp.laurent {
+                    Some(coeffs) => {
+                        let m = coeffs.len();
+                        // b_k multiplies 1/(s-p)^(m-k): accumulate the
+                        // inverse powers, then reverse so index k aligns.
+                        let mut powers = Vec::with_capacity(m);
+                        let mut inv = ComplexCoefficient::new(1.0, 0.0) / denom;
+                        for _ in 0..m {
+                            powers.push(inv);
+                            inv /= denom;
+                        }
+                        powers.reverse();
+                        for k in 0..m {
+                            reconstructed += coeffs[k] * powers[k];
+                        }
+                    }
+                    None => reconstructed += rp.residue / denom,
+                }
             }
             if let Some(constant) = y12.constant_term {
                 reconstructed += constant;

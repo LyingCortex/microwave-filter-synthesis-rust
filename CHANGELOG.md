@@ -271,9 +271,55 @@
   would assert is instead covered by the B2/B3 full-path fidelity gates.
 
 
+- **Repeated-pole (Laurent) residue expansion (E2, 2026-10-05).** The
+  residue expansion now supports repeated poles, closing the plan's last
+  open Wave-5 numeric enabler (needed by B3's fidelity work for degenerate
+  root sets):
+  - `ResiduePole` (`src/synthesis/residues/expansion.rs`) gains
+    `laurent: Option<Vec<ComplexCoefficient>>` — the principal part
+    `b_0..b_{m-1}` of the repeated pole, with `residue` = `b_0` (the
+    leading, most-singular coefficient). Simple poles keep `laurent: None`.
+  - `residue_expansion` clusters coalesced roots (single-linkage at 1e-5;
+    the solver splits a multiplicity-m root into m roots within ~1e-7–1e-5,
+    while distinct filter poles are ≥ ~1.6e-3 apart), and takes the
+    **multiplicity `m` as the cluster size** (not re-derived from the
+    pole-shifted coefficient vector, which is ill-conditioned for high-degree
+    denominators — a scale-relative "vanishing" threshold miscounts small
+    genuine `q_1` as zero and inflated `m` on order-16 simple poles). The
+    principal part is computed by power-series division of the shifted
+    numerator by `x^m·R(x)`, then leading near-zero coefficients are trimmed
+    (a numerator–denominator cancellation lowers the effective pole order).
+  - `PoleExpansionData::evaluate_at` (`src/response/pole_expansion.rs`) sums
+    the full principal part per repeated pole in the fast path, so the
+    precomputed-sweep and the direct-solve paths agree.
+  - `build_transversal_from_residues` rejects a repeated pole with a typed
+    `MfsError::NotImplemented`: a transversal (inline-chain) matrix has one
+    simple pole per resonator and cannot represent `1/(s-p)^m`. (This was
+    already in place from B3; the Laurent data now flows to it.)
+  - `tests/synthesis_properties.rs` `property_2` round-trip now reconstructs
+    the Laurent form, so the data-preserving gate covers repeated poles.
+  Valid filter specs have distinct poles, so the Laurent path is exercised
+  only by degenerate/synthetic inputs; the new unit tests
+  (`double_pole_laurent_principal_part` with hand-computed coefficients,
+  `repeated_pole_rejected_with_not_implemented`,
+  `laurent_principal_part_contributes_to_sum`) pin the exact coefficients,
+  the typed rejection, and the fast-path summation.
 
 
 ### Fixed
+
+- **`PoleExpansionData::evaluate_at` — Laurent principal-part power indexing.**
+  The fast path summed a repeated pole's principal part with the wrong
+  powers: `b_k` was multiplied by `1/(s-p)^(k+1)` instead of
+  `1/(s-p)^(m-k)`, so the most-singular coefficient `b_0` landed on a
+  constant (order-0) term and the result was wrong for every multiplicity ≥ 2
+  pole. This bug was latent (repeated poles never occur for valid filter
+  specs) and was caught by the new
+  `laurent_principal_part_contributes_to_sum` test, which hand-computed
+  `s11 = 7/25`, `s21 = -24j/25` and observed the buggy `s11 = 475/493`
+  before the fix. Fixed by accumulating the inverse
+  powers `1/denom, 1/denom², …` and reversing so index `k` holds
+  `1/denom^(m-k)`.
 
 - **E1 (passband transmission zeros) — investigated, refuted, and the
   design-doc premise corrected.** The plan (`docs/continuation-plan.md` §E

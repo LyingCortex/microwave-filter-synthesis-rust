@@ -32,6 +32,14 @@ pub struct PoleExpansionData {
     residues_y12: Vec<Complex64>,
     /// Residues of Y22 at each pole (M_kL²).
     residues_y22: Vec<Complex64>,
+    /// Laurent principal parts for repeated (multiplicity >= 2) poles, one
+    /// `Option` per pole: `Some([b_0, ..., b_{m-1}])` where `b_k` multiplies
+    /// `1/(jω - p)^(m - k)`, or `None` for a simple pole.
+    laurent_y11: Vec<Option<Vec<Complex64>>>,
+    /// Laurent principal parts for Y12 (see `laurent_y11`).
+    laurent_y12: Vec<Option<Vec<Complex64>>>,
+    /// Laurent principal parts for Y22 (see `laurent_y11`).
+    laurent_y22: Vec<Option<Vec<Complex64>>>,
     /// Constant term of Y12 (direct source-load coupling).
     y12_constant: Complex64,
     /// Constant term of Y11 (reserved for future use).
@@ -81,6 +89,12 @@ impl PoleExpansionData {
         let residues_y11: Vec<Complex64> = y11.residues.iter().map(|r| r.residue).collect();
         let residues_y12: Vec<Complex64> = y12.residues.iter().map(|r| r.residue).collect();
         let residues_y22: Vec<Complex64> = y22.residues.iter().map(|r| r.residue).collect();
+        let laurent_y11: Vec<Option<Vec<Complex64>>> =
+            y11.residues.iter().map(|r| r.laurent.clone()).collect();
+        let laurent_y12: Vec<Option<Vec<Complex64>>> =
+            y12.residues.iter().map(|r| r.laurent.clone()).collect();
+        let laurent_y22: Vec<Option<Vec<Complex64>>> =
+            y22.residues.iter().map(|r| r.laurent.clone()).collect();
 
         let y12_constant = y12.constant_term.unwrap_or(Complex64::new(0.0, 0.0));
         let y11_constant = y11.constant_term.unwrap_or(Complex64::new(0.0, 0.0));
@@ -90,6 +104,9 @@ impl PoleExpansionData {
             residues_y11,
             residues_y12,
             residues_y22,
+            laurent_y11,
+            laurent_y12,
+            laurent_y22,
             y12_constant,
             y11_constant,
             source_r: 1.0,
@@ -134,6 +151,9 @@ impl PoleExpansionData {
             residues_y11,
             residues_y12,
             residues_y22,
+            laurent_y11: vec![None; order],
+            laurent_y12: vec![None; order],
+            laurent_y22: vec![None; order],
             y12_constant,
             y11_constant: Complex64::new(0.0, 0.0),
             source_r: 1.0,
@@ -203,9 +223,33 @@ impl PoleExpansionData {
             // poles[i] = -B_k (real), so ω - poles[i] = ω + B_k
             let denom = jw - self.poles[i];
             if denom.norm_sqr() > 1e-30 {
-                sum_11 += self.residues_y11[i] / denom;
-                sum_12 += self.residues_y12[i] / denom;
-                sum_22 += self.residues_y22[i] / denom;
+                // A repeated pole contributes its full Laurent principal
+                // part, b_0/denom^m + b_1/denom^{m-1} + ... + b_{m-1}/denom;
+                // for a simple pole this is just the single residue term.
+                // Accumulate the inverse powers 1/denom, 1/denom^2, ...,
+                // 1/denom^m, then reverse so that index k holds
+                // 1/denom^{m-k} (b_0 gets the most singular term).
+                if let (Some(l11), Some(l12), Some(l22)) =
+                    (self.laurent_y11[i].as_ref(), self.laurent_y12[i].as_ref(), self.laurent_y22[i].as_ref())
+                {
+                    let m = l11.len();
+                    let mut powers = Vec::with_capacity(m);
+                    let mut inv = Complex64::new(1.0, 0.0) / denom;
+                    for _ in 0..m {
+                        powers.push(inv);
+                        inv /= denom;
+                    }
+                    powers.reverse();
+                    for k in 0..m {
+                        sum_11 += l11[k] * powers[k];
+                        sum_12 += l12[k] * powers[k];
+                        sum_22 += l22[k] * powers[k];
+                    }
+                } else {
+                    sum_11 += self.residues_y11[i] / denom;
+                    sum_12 += self.residues_y12[i] / denom;
+                    sum_22 += self.residues_y22[i] / denom;
+                }
             }
         }
 
@@ -282,5 +326,55 @@ impl PoleExpansionData {
             .collect::<Result<Vec<_>>>()?;
 
         Ok(SParameterResponse { samples })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PoleExpansionData;
+    use num_complex::Complex64;
+
+    /// Verify that a repeated pole contributes its full Laurent principal
+    /// part to the partial-fraction sums, and that the simple-pole path is
+    /// unchanged.
+    ///
+    /// Hand-computed case (omega = 0.5, all parameters real):
+    /// - Double pole at p = 1, y12 Laurent part [b_0, b_1] = [2, 3]:
+    ///   contribution to sum_12 = 2/(0.5-1)^2 + 3/(0.5-1) = 8 - 6 = 2
+    ///   (y11/y22 laurent parts are [0,0] so sum_11 = sum_22 = 0)
+    /// - Simple pole at p = 2, y12 residue = 5: contribution = 5/(0.5-2) = -10/3
+    ///
+    /// So sum_12 = 2 - 10/3 = -4/3, y12_constant = 0:
+    ///   s00 = s11s = -j, s01 = 4/3
+    ///   det = (-j)(-j) - (4/3)^2 = -25/9
+    ///   inv_00 = (-j)/(-25/9) = 9j/25,  inv_10 = -(4/3)/(-25/9) = 12/25
+    ///   s_11 = 1 + 2j * (9j/25) = 7/25
+    ///   s_21 = -2j * (12/25) = -24j/25
+    #[test]
+    fn laurent_principal_part_contributes_to_sum() {
+        let c = Complex64::new(0.0, 0.0);
+        let data = PoleExpansionData {
+            poles: vec![Complex64::new(1.0, 0.0), Complex64::new(2.0, 0.0)],
+            residues_y11: vec![c, c],
+            residues_y12: vec![c, Complex64::new(5.0, 0.0)],
+            residues_y22: vec![c, c],
+            laurent_y11: vec![Some(vec![c, c]), None],
+            laurent_y12: vec![
+                Some(vec![Complex64::new(2.0, 0.0), Complex64::new(3.0, 0.0)]),
+                None,
+            ],
+            laurent_y22: vec![Some(vec![c, c]), None],
+            y12_constant: c,
+            y11_constant: c,
+            source_r: 1.0,
+            load_r: 1.0,
+        };
+
+        let (s11, s21) = data.evaluate_at(0.5);
+
+        let expected_s11 = Complex64::new(7.0 / 25.0, 0.0);
+        assert!((s11 - expected_s11).norm() < 1e-12, "s11 = {s11}");
+        let expected_s21 = Complex64::new(0.0, -24.0 / 25.0);
+        assert!((s21 - expected_s21).norm() < 1e-12, "s21 = {s21}");
     }
 }

@@ -3,13 +3,22 @@ use crate::error::{MfsError, Result};
 
 use super::admittance::synthesize_admittance_polynomials;
 
-/// One simple pole with its associated residue.
+/// One pole with its associated residue and, for a repeated (or numerically
+/// coalesced) pole, its Laurent principal-part coefficients.
+///
+/// `residue` is the principal coefficient (the `1/(s-p)` term for a simple
+/// pole, or the leading `1/(s-p)^m` coefficient for a pole of multiplicity
+/// `m`). `laurent` holds the full principal part `[b_0, b_1, ..., b_{m-1}]`
+/// where `b_k` multiplies `1/(s-p)^(m-k)`, and is `Some` only when the pole
+/// is a repeated (multiplicity `>= 2`) pole; it is `None` for simple poles.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResiduePole {
     /// Pole location in the `s` plane.
     pub pole: ComplexCoefficient,
-    /// Residue associated with that pole.
+    /// Principal (leading) residue: the coefficient of the most singular term.
     pub residue: ComplexCoefficient,
+    /// Full Laurent principal part for a repeated pole, or `None` for simple.
+    pub laurent: Option<Vec<ComplexCoefficient>>,
 }
 
 /// Partial-fraction data extracted from one rational Y parameter.
@@ -199,24 +208,71 @@ fn residue_expansion(
         (None, numerator.clone())
     };
 
-    let derivative = denominator.derivative()?;
-    let mut residues = denominator
-        .roots_with(&solver)?
-        .into_iter()
-        .map(|pole| {
-            let slope = derivative.evaluate(pole);
-            if slope.norm_sqr() <= 1e-20 {
-                return Err(MfsError::NotImplemented(
-                    "repeated poles are not yet supported in residue expansion".to_string(),
-                ));
-            }
+    let roots = denominator.roots_with(&solver)?;
 
-            Ok(ResiduePole {
+    // Cluster roots that are closer together than `CLUSTER_TOLERANCE`: the
+    // root solver splits a genuine multiplicity-m root into m numerically
+    // coalesced roots within ~1e-7 (double) to ~1e-5 (triple) of each other,
+    // while distinct roots in a filter prototype are separated by at least
+    // ~1.6e-3 in the normalized s-plane (order-16, measured). A single-linkage
+    // cluster at 1e-5 therefore recovers the true multiplicity as its size;
+    // numerator-denominator cancellation is handled by trimming leading near-
+    // zero principal coefficients after the principal part is computed.
+    const CLUSTER_TOLERANCE: f64 = 1e-5;
+    let mut unassigned = vec![true; roots.len()];
+    let mut residues: Vec<ResiduePole> = Vec::with_capacity(roots.len());
+
+    for i in 0..roots.len() {
+        if unassigned[i] {
+            // Single-linkage: a root joins the cluster if it is within
+            // `CLUSTER_TOLERANCE` of *any* already-assigned member. This is
+            // more robust than chaining from the seed root, whose spread for
+            // a multiplicity-m split can approach the tolerance.
+            let mut cluster: Vec<usize> = vec![i];
+            unassigned[i] = false;
+            for j in (i + 1)..roots.len() {
+                if unassigned[j]
+                    && cluster
+                        .iter()
+                        .any(|&k| (roots[k] - roots[j]).norm() <= CLUSTER_TOLERANCE)
+                {
+                    cluster.push(j);
+                    unassigned[j] = false;
+                }
+            }
+            // Pole location: the mean of the clustered roots. For a genuine
+            // repeated root the solver splits it into coalesced roots whose
+            // mean recovers the root to solver precision.
+            let pole = cluster
+                .iter()
+                .map(|&k| roots[k])
+                .sum::<ComplexCoefficient>()
+                / (cluster.len() as f64);
+            // The multiplicity is the cluster size: the solver splits a
+            // genuine m-fold root into m coalesced roots (single-linkage at
+            // 1e-5), while distinct filter poles are ≥ ~1.6e-3 apart, so the
+            // cluster count recovers the true multiplicity. We do NOT re-derive
+            // it from the shifted coefficient vector, which is ill-conditioned
+            // for high-degree denominators.
+            let principal =
+                principal_part(&adjusted_numerator, denominator, pole, cluster.len())?;
+            // Trim leading near-zero principal coefficients: a numerator factor
+            // cancelling part of the denominator lowers the effective pole order,
+            // and the true leading coefficient is the first genuine one.
+            let principal = trim_leading_zeros(&principal);
+            let residue = principal[0];
+            let laurent = if principal.len() >= 2 {
+                Some(principal)
+            } else {
+                None
+            };
+            residues.push(ResiduePole {
                 pole,
-                residue: adjusted_numerator.evaluate(pole) / slope,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
+                residue,
+                laurent,
+            });
+        }
+    }
 
     residues.sort_by(|left, right| {
         left.pole
@@ -229,6 +285,94 @@ fn residue_expansion(
         residues,
         constant_term,
     })
+}
+
+/// Computes the Laurent principal part of `numerator / denominator` at the
+/// pole `p` (the cluster mean of the numerically coalesced roots).
+///
+/// Returns `[b_0, b_1, ..., b_{m-1}]` for the given multiplicity `m`, where
+/// `b_k` multiplies `1/(s - p)^(m - k)`, i.e.
+///
+/// ```text
+/// f(s) = b_0/(s-p)^m + b_1/(s-p)^{m-1} + ... + b_{m-1}/(s-p) + analytic
+/// ```
+///
+/// `m` is the cluster size: the root solver splits a genuine multiplicity-m
+/// root into m numerically coalesced roots (measured spread ≤ ~1e-5 for
+/// double/triple), while distinct filter poles are separated by at least
+/// ~1.6e-3, so a single-linkage cluster at 1e-5 recovers the true
+/// multiplicity. The multiplicity is therefore taken from the clustering,
+/// not re-detected from the shifted coefficient vector — that vector is
+/// ill-conditioned for high-degree denominators, and a scale-relative
+/// "vanishing" threshold miscounts small-but-genuine `q_1` as zero and
+/// inflates `m` on simple poles.
+///
+/// The computation:
+/// 1. Shift both polynomials to the pole: `P(x) = numerator(p + x)`,
+///    `Q(x) = denominator(p + x)`.
+/// 2. Factor out `x^m` and power-series-divide `P` by the remaining factor
+///    `R(x) = q_m + q_{m+1} x + ...` via
+///    `a_k = (p_k - sum_{i=1..k} r_i a_{k-i}) / q_m`. The analytic series
+///    `P/R` times `1/x^m` gives the principal part
+///    `a_0/x^m + ... + a_{m-1}/x`.
+fn principal_part(
+    numerator: &ComplexPolynomial,
+    denominator: &ComplexPolynomial,
+    p: ComplexCoefficient,
+    m: usize,
+) -> Result<Vec<ComplexCoefficient>> {
+    const ZERO: ComplexCoefficient = ComplexCoefficient::new(0.0, 0.0);
+
+    if m == 0 {
+        return Err(MfsError::NumericalFailure(
+            "principal part requested for a pole of multiplicity 0".to_string(),
+        ));
+    }
+
+    // Step 1: shift both polynomials to the pole.
+    let p_shift = numerator.shift(p)?;
+    let q_shift = denominator.shift(p)?;
+
+    let pc = &p_shift.coefficients;
+    let qc = &q_shift.coefficients;
+
+    if qc[m].norm() <= f64::EPSILON {
+        return Err(MfsError::NumericalFailure(
+            "degenerate denominator at pole: coefficient q_m vanishes after \
+             shifting"
+                .to_string(),
+        ));
+    }
+
+    // Step 2: power-series division of P by R(x) = q_m + q_{m+1} x + ...
+    let mut a: Vec<ComplexCoefficient> = Vec::with_capacity(m);
+    for k in 0..m {
+        let p_k = pc.get(k).copied().unwrap_or(ZERO);
+        let mut sum = ZERO;
+        for i in 1..=k {
+            let r_i = qc.get(m + i).copied().unwrap_or(ZERO);
+            sum += r_i * a[k - i];
+        }
+        a.push((p_k - sum) / qc[m]);
+    }
+
+    Ok(a)
+}
+
+/// Removes leading (most-singular) near-zero coefficients of a principal
+/// part. A numerator factor that cancels part of the denominator lowers the
+/// effective pole order, leaving leading coefficients that are zero to
+/// solver precision; the true leading coefficient is the first genuine one.
+/// The threshold is relative to the largest principal coefficient so a
+/// legitimately tiny `b_0` is not trimmed.
+fn trim_leading_zeros(principal: &[ComplexCoefficient]) -> Vec<ComplexCoefficient> {
+    let max_norm = principal.iter().fold(0.0_f64, |mx, c| mx.max(c.norm()));
+    let threshold = (1e-10 * max_norm).max(1e-14);
+    let first = principal
+        .iter()
+        .position(|c| c.norm() > threshold)
+        .unwrap_or_else(|| principal.len().saturating_sub(1));
+    principal[first..].to_vec()
 }
 
 /// Performs polynomial long division: numerator / denominator = quotient + remainder/denominator.
@@ -368,10 +512,12 @@ mod tests {
                 ResiduePole {
                     pole: ComplexCoefficient::new(0.0, 1e-15),
                     residue: ComplexCoefficient::new(0.5, 1e-15),
+                    laurent: None,
                 },
                 ResiduePole {
                     pole: ComplexCoefficient::new(0.0, 2e-15),
                     residue: ComplexCoefficient::new(0.3, -1e-15),
+                    laurent: None,
                 },
             ],
             constant_term: None,
@@ -381,10 +527,12 @@ mod tests {
                 ResiduePole {
                     pole: ComplexCoefficient::new(0.0, 1e-15),
                     residue: ComplexCoefficient::new(0.4, 1e-15),
+                    laurent: None,
                 },
                 ResiduePole {
                     pole: ComplexCoefficient::new(0.0, 2e-15),
                     residue: ComplexCoefficient::new(0.2, -1e-15),
+                    laurent: None,
                 },
             ],
             constant_term: None,
@@ -394,10 +542,12 @@ mod tests {
                 ResiduePole {
                     pole: ComplexCoefficient::new(0.0, 1e-15),
                     residue: ComplexCoefficient::new(0.6, 1e-15),
+                    laurent: None,
                 },
                 ResiduePole {
                     pole: ComplexCoefficient::new(0.0, 2e-15),
                     residue: ComplexCoefficient::new(0.35, -1e-15),
+                    laurent: None,
                 },
             ],
             constant_term: None,
@@ -437,10 +587,12 @@ mod tests {
                 ResiduePole {
                     pole: ComplexCoefficient::new(0.0, 1.5),
                     residue: ComplexCoefficient::new(0.3, 0.2),
+                    laurent: None,
                 },
                 ResiduePole {
                     pole: ComplexCoefficient::new(0.0, 0.5),
                     residue: ComplexCoefficient::new(0.4, 0.1),
+                    laurent: None,
                 },
             ],
             constant_term: None,
@@ -450,10 +602,12 @@ mod tests {
                 ResiduePole {
                     pole: ComplexCoefficient::new(0.0, 1.5),
                     residue: ComplexCoefficient::new(0.2, 0.15),
+                    laurent: None,
                 },
                 ResiduePole {
                     pole: ComplexCoefficient::new(0.0, 0.5),
                     residue: ComplexCoefficient::new(0.35, 0.05),
+                    laurent: None,
                 },
             ],
             constant_term: None,
@@ -463,10 +617,12 @@ mod tests {
                 ResiduePole {
                     pole: ComplexCoefficient::new(0.0, 1.5),
                     residue: ComplexCoefficient::new(0.25, 0.18),
+                    laurent: None,
                 },
                 ResiduePole {
                     pole: ComplexCoefficient::new(0.0, 0.5),
                     residue: ComplexCoefficient::new(0.38, 0.08),
+                    laurent: None,
                 },
             ],
             constant_term: None,
@@ -595,5 +751,70 @@ mod tests {
                 panic!("unexpected error variant from root solver: {other}");
             }
         }
+    }
+
+    /// Double pole: verify the Laurent principal part is detected and matches
+    /// the hand-computed partial-fraction coefficients.
+    ///
+    /// For f(s) = (s-3)(s-4) / ((s-2)^2 (s-5)) the exact expansion is
+    /// f(s) = -2/3/(s-2)^2 + 7/9/(s-2) + 2/9/(s-5), so the pole at 2 must
+    /// carry `laurent = [-2/3, 7/9]` and `residue = -2/3` (the leading
+    /// coefficient), while the simple pole at 5 carries `laurent = None`
+    /// and `residue = 2/9`.
+    #[test]
+    fn double_pole_laurent_principal_part() {
+        // numerator  = (s-3)(s-4)  = s^2 - 7s + 12
+        let numerator = ComplexPolynomial::new(vec![
+            ComplexCoefficient::new(12.0, 0.0),
+            ComplexCoefficient::new(-7.0, 0.0),
+            ComplexCoefficient::new(1.0, 0.0),
+        ])
+        .unwrap();
+        // denominator = (s-2)^2 (s-5) = s^3 - 9s^2 + 24s - 20
+        let denominator = ComplexPolynomial::new(vec![
+            ComplexCoefficient::new(-20.0, 0.0),
+            ComplexCoefficient::new(24.0, 0.0),
+            ComplexCoefficient::new(-9.0, 0.0),
+            ComplexCoefficient::new(1.0, 0.0),
+        ])
+        .unwrap();
+
+        let expansion = residue_expansion(&numerator, &denominator).unwrap();
+
+        assert_eq!(
+            expansion.residues.len(),
+            2,
+            "double pole at 2 and simple pole at 5 expected"
+        );
+        assert!(expansion.constant_term.is_none());
+
+        // Sorted by pole.imag: both poles are real (im ~ 0), so order is
+        // not guaranteed — locate by pole value.
+        let double = expansion
+            .residues
+            .iter()
+            .find(|r| (r.pole.re - 2.0).abs() < 1e-6)
+            .expect("pole near s=2");
+        let simple = expansion
+            .residues
+            .iter()
+            .find(|r| (r.pole.re - 5.0).abs() < 1e-6)
+            .expect("pole near s=5");
+
+        assert!(
+            double.laurent.is_some(),
+            "the double pole must carry a Laurent principal part"
+        );
+        let l = double.laurent.as_ref().unwrap();
+        assert_eq!(l.len(), 2, "multiplicity-2 pole needs 2 Laurent coefficients");
+        assert!((l[0] - ComplexCoefficient::new(-2.0 / 3.0, 0.0)).norm() < 1e-9);
+        assert!((l[1] - ComplexCoefficient::new(7.0 / 9.0, 0.0)).norm() < 1e-9);
+        assert!((double.residue - ComplexCoefficient::new(-2.0 / 3.0, 0.0)).norm() < 1e-9);
+
+        assert!(
+            simple.laurent.is_none(),
+            "the simple pole must not carry a Laurent principal part"
+        );
+        assert!((simple.residue - ComplexCoefficient::new(2.0 / 9.0, 0.0)).norm() < 1e-9);
     }
 }

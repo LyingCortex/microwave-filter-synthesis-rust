@@ -32,7 +32,7 @@ Known limitations that gate the areas below (full list in
    `MfsError::InvalidTransmissionZero` at the `approx` entry point; E1's
    2026-10-05 investigation showed the single-function prototype cannot
    realize them (Feldtkeller violation) — see §E item 1.
-2. **Repeated poles** — `residues/expansion.rs` returns `NotImplemented`.
+2. ~~**Repeated poles**~~ — handled by the Laurent residue expansion (E2, 2026-10-05): `residues/expansion.rs` returns the principal part for a repeated pole and the pole-expansion fast path sums it; the transversal (inline-chain) builder rejects a repeated pole with a typed `NotImplemented` (a chain cannot represent `1/(s-p)^m`) — see §E item 2.
 3. ~~**HighPass / BandStop mappings**~~ — implemented in `freq` (E3, 2026-09-29: `HighPassMapping`, `BandStopMapping` with full forward + inverse and singular-point clamps).
 4. **N-channel mutual-loading fidelity — RESOLVED for the full path (B2, 2026-10-04):**
    the full spectral path is now generalized to N channels (shared
@@ -697,10 +697,28 @@ Ordered by how much they block the areas above:
    with a typed error (`MfsError::InvalidTransmissionZero`) at the
    entry point instead of leaking `NotImplemented` from a helper.
    `|zero| = 1` (imaginary-axis ripple zero) is likewise rejected.
-2. **Repeated-pole residue expansion (Laurent).** Blocks any design whose
-   perturbed root set degenerates — a realistic risk once the full
-   spectral path actually moves roots (A/B). Work in
-   `residues/expansion.rs`.
+2. **Repeated-pole residue expansion (Laurent) — closed (2026-10-05).**
+   `ResiduePole` gained `laurent: Option<Vec<ComplexCoefficient>>` (the
+   principal part `b_0..b_{m-1}`, `residue` = `b_0`); `residue_expansion`
+   now clusters coalesced roots (single-linkage, 1e-5 — the solver splits a
+   multiplicity-m root into m roots within ~1e-7–1e-5, while distinct filter
+   poles are ≥ ~1.6e-3 apart) and takes the **multiplicity `m` as the cluster
+   size** (not re-derived from the pole-shifted coefficient vector, which is
+   ill-conditioned for high-degree denominators and miscounted order-16
+   simple poles as repeated); the principal part is computed by power-series
+   division of the shifted numerator, then leading near-zero coefficients are
+   trimmed (numerator–denominator cancellation lowers the effective pole
+   order). The pole-expansion fast path sums the full principal part
+   (`PoleExpansionData.evaluate_at`), and `build_transversal_from_residues`
+   rejects a repeated pole with a typed `MfsError::NotImplemented` — a
+   transversal chain has one simple pole per resonator and cannot represent
+   `1/(s-p)^m`. Gates: `expansion::tests::double_pole_laurent_principal_part`
+   (hand-computed coefficients `-2/3, 7/9, 2/9`),
+   `transversal::tests::repeated_pole_rejected_with_not_implemented`,
+   `pole_expansion::tests::laurent_principal_part_contributes_to_sum`,
+   plus the `property_2` residue round-trip (now covers the Laurent form).
+   Valid filter specs have distinct poles, so this path is only exercised by
+   degenerate/synthetic inputs.
 3. **HighPass / BandStop mappings — closed (2026-09-29).** `HighPassMapping`
    and `BandStopMapping` are implemented in `freq` with the shared
    `SINGULAR_CLAMP` convention at their singular points. Unblocks
@@ -722,7 +740,7 @@ Wave 1 (parallel):  E4 (N=8 regression) · D1-opt (RED)   [E3 + C1 + E4 closed; 
 Wave 2 (serial):    D1–D4 (duplexer full path)   [DONE 2026-10-03 — Type-I orders 2–8 + §V golden + Type-II §VI anchor, all gate-anchored]
 Wave 3 (parallel):  D2-opt [DONE 2026-10-04 — scale-δ + early-stop + chain-guess, both order-6 gates green] · D3-opt [DONE 2026-10-04 — CLI optimize/extract + Python extract, e2e-gated] · D4-opt [DONE 2026-10-04 — `benches/optimizer.rs` + noise regression + report §6] · C0 [DONE 2026-10-05 — design doc, route-α committed]
 Wave 4 (serial):    B1 [DONE 2026-10-04] → B2 [DONE 2026-10-04] → B3 [DONE 2026-10-04] → B4 [DONE 2026-10-04] (multiplexer; Wave 2 done — full wave complete)
-Wave 5:             E1 [INVESTIGATED 2026-10-05 — refuted: no valid passband-TZ prototype in the single-function form; approx now rejects |z|<1 typed; route-α does NOT need it] · C2 [DONE 2026-10-05 — route-α approx + spec + engine reuse] → C3 [DONE 2026-10-05 — Fig. 25 anchor GREEN + example] · E2 (Laurent) — needed by B3's fidelity work
+Wave 5:             E1 [INVESTIGATED 2026-10-05 — refuted: no valid passband-TZ prototype in the single-function form; approx now rejects |z|<1 typed; route-α does NOT need it] · C2 [DONE 2026-10-05 — route-α approx + spec + engine reuse] → C3 [DONE 2026-10-05 — Fig. 25 anchor GREEN + example] · E2 (Laurent) [DONE 2026-10-05 — Laurent principal part + fast-path summation; transversal rejects repeated pole typed; gates green]
 ```
 
 Rationale: the duplexer full path (Wave 2) was the only item on the critical
