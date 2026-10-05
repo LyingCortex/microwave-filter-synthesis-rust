@@ -17,7 +17,50 @@
   transversal topology (inter-band TZs become trisection/extracted-zero
   sections), and the first acceptance fixture
   `Cameron2011_10_5_dual_band_symmetric` (Cameron 2011 Fig. 25), already
-  in-repo. No code yet — C2 unblocked (route-α does not need passband TZs).
+  in-repo. (C2/C3 subsequently shipped 2026-10-05 — see below.)
+
+- **True multi-passband (multi-band) synthesis — C2, route-α (2026-10-05).**
+  A dual-band filter whose response is equiripple in **two** passbands with
+  inter-band and outer stopband rejection — one structure, not two
+  single-band designs wired together. Per the C0 design doc, route-α
+  (multi-band Chebyshev via frequency transformation, Macchiarella–Tamiazzo
+  2005, DOI `10.1109/TMTT.2005.855749`):
+  - **C2b — approximation** (`src/approx/multi_band.rs`):
+    `multi_band_chebyshev_polynomials(bands, order, rl, tz)` → `PolynomialSet`.
+    The positive-axis reflection zeros are solved by a damped
+    Levenberg–Marquardt **equiripple** step (a square system: the `n_rz + 1`
+    local maxima of the characteristic function `|F/P|` in one positive
+    passband interval all share the requested ripple level), then the
+    Feldtkeller `E(s)` spectral factor and `PolynomialSet` assembly **reuse the
+    single-band helpers verbatim** — no new machinery.
+  - **C2a — spec surface** (`src/spec/multi_band.rs`): `MultiBandSpec` /
+    `BandSpec` / `RejectionSpec`, a separate type from `FilterSpec` (a K-band
+    filter is not a K-channel multiplexer), with `MultiBandMapping`'s
+    invariants (≥ 2 disjoint center-sorted bands).
+  - **C2c — synthesis** reuses `MatrixSynthesisEngine::synthesize` with
+    **no changes** (the output is an ordinary `PolynomialSet`).
+  - **Dual-band only (K = 2):** the equiripple solve requires the
+    positive-axis passband union to be a single contiguous interval (true for
+    a symmetric design like `[-1,-0.35]` ∪ `[0.35,1]`); a K ≥ 3 design with a
+    center band spanning the origin is rejected with a typed
+    `MfsError::NotImplemented`. Documented as a known limitation and a Low
+    roadmap item.
+
+- **Multi-band verification surface — C3 (2026-10-05).** `tests/multi_band.rs`
+  (`dual_band_response_reproduces_cameron_fig25_fixture`) anchors the design to
+  the in-repo literature fixture `Cameron2011_10_5_dual_band_symmetric` (Cameron
+  2011 Fig. 25: order 10, 22 dB RL, dual-band `±[0.35,1]`, 5 TZs) on a
+  4001-point grid over `-2..2`. The synthesized **transversal** matrix and the
+  fixture's printed `trisection_cascade_with_extracted_zero` matrix are
+  *different topologies of the same network*, so "reproduces the fixture" is
+  asserted at the **response** level (topologically invariant), plus absolute
+  spec-level checks: (1) response invariance — max|ΔS11| 4.8e-4, max|ΔS21|
+  1.7e-4 (both < 1e-3); (2) per-band equiripple — worst in-band |S11| = −22.00
+  dB (the RL spec, ±1); (3) unitarity — max‖|S11|²+|S21|²−1‖ = 2.2e-15 (< 1e-10);
+  (4) transmission zeros — |S21| = −261.8 / −60.4 / −70.5 dB at w = 0, ±0.2542,
+  ±1.1573 (all < −40); (5) outer stopband — worst |S21| = −16.6 dB over
+  |w|∈[1.10, 2.0] (< −15). `examples/multi_band_response.rs` renders the
+  response (per-band / gap / outer table + a Touchstone .s2p).
 
 - **`benches/optimizer.rs` — a Criterion bench for the LM optimizer (D4-opt).**
   Times `optimize_matrix` (`tune` scenario: order-4/6/8 folded, 4 inter-resonator

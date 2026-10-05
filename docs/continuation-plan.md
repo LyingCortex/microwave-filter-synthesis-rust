@@ -22,7 +22,7 @@ carries *what to do next and how to know it is done*.
 | Two-port synthesis | Full generalized-Chebyshev pipeline, orders 2–8 fixture-anchored, 10–30 numerically stable | High (publication-anchored) |
 | Duplexer | Simplified frequency-offset perturbation (default); full Macchiarella–Tamiazzo spectral path behind `DuplexerSynthesis::full_iteration(true)` **converges at Type-I orders 2–8 and Type-II (incl. the §VI degree-40 GSM design), all gate-anchored** (2026-10-03) | High (publication-anchored, full path) / Medium (simplified default) |
 | Multiplexer (N-channel) | Independent per-channel synthesis + simplified perturbation (default); **full Macchiarella–Tamiazzo spectral path for N channels behind `MultiplexerSynthesis::full_iteration(true)`** (shared with the duplexer, `src/synthesis/machiarella.rs`; B2, 2026-10-04) converges at N = 3/4 order-4 (gate-anchored); response is the **true (N+1)-port admittance model** (B1) | High (publication-anchored, full path) / Medium (simplified default) |
-| Multi-band | **Mapping layer in place** — `freq` supports all four prototype families plus `MultiBandMapping` (E3/C1, 2026-09-29); **C0 design doc done (2026-10-05), route-α committed** (`docs/internal/multi-band-synthesis-design.md`: math, `MultiBandSpec`, TZ law, topology, Fig. 25 fixture); no approximation/synthesis code yet (**C2 unblocked — E1 investigated 2026-10-05: gap TZs are stopband, not passband**) | — |
+| Multi-band | **True multi-passband synthesis shipped (C2/C3, 2026-10-05)** — route-α multi-band Chebyshev: `MultiBandMapping` (C1) + `MultiBandSpec` (C2a) + `multi_band_chebyshev_polynomials` (C2b) → `MatrixSynthesisEngine` (C2c, unchanged) → Fig. 25 dual-band anchor; response invariance, per-band RL, TZ nulls, unitarity, outer-stopband all gate-anchored (C3, `tests/multi_band.rs`); **K ≥ 3 deferred** (single-contiguous-interval equiripple solve) | High (publication-anchored, dual-band) |
 | Optimization | LM `tune_matrix` / `extract_matrix` (hand-rolled Gaussian elimination, **scale-aware FD Jacobian `δ = 1e-7·max(1,|x_i|)`** with halving retry, topology frozen to template; convergence on successive-iteration cost after accepted steps; singular trials rejected, not errors; **`extract_matrix` starts from a crude inline-chain guess**); 3 lib unit tests + **2 order-6 integration gates (synthesize→perturb→recover, extract-from-crude-guess) GREEN (D2-opt, 2026-10-04)** + **CLI `optimize`/`extract` subcommands and Python `extract`/`tune` (D3-opt, 2026-10-04), e2e-gated** + **`benches/optimizer.rs` & 0.1 dB-noise extraction regression (D4-opt, 2026-10-04)** | Medium (order ≤ 6 extraction/recovery gate-anchored; CLI/Python e2e-gated; benched; order-8 cold-start extraction and topology-bound recovery documented as limits, report §6) |
 
 Known limitations that gate the areas below (full list in
@@ -448,10 +448,14 @@ roadmap line — and the one that most needs new mathematics.
 - **C0 design doc done (2026-10-05):** route committed (**C-route-α**),
   math/spec/TZ-law/topology/fixture fixed in
   `docs/internal/multi-band-synthesis-design.md`.
-- No multi-band approximation, no multi-band synthesis path (C2/C3 open —
-  **not blocked on E1**: E1's investigation (2026-10-05, §E item 1) showed
-  inter-band TZs are ordinary stopband zeros, so route-α needs no passband-TZ
-  support; C2 is unblocked and gated only on its own implementation).
+- **C2 done (2026-10-05):** `src/approx/multi_band.rs` (route-α multi-band
+  Chebyshev, `PolynomialSet` output, LM equiripple solve) + `MultiBandSpec`
+  (C2a, `src/spec/multi_band.rs`) + `MatrixSynthesisEngine` reuse (C2c, no
+  new engine). **K ≥ 3 deferred** — the equiripple solve requires the
+  positive-axis passband union to be a single contiguous interval.
+- **C3 done (2026-10-05):** `tests/multi_band.rs` (Fig. 25 anchor — response
+  invariance, per-band RL, TZ nulls, unitarity, outer stopband) +
+  `examples/multi_band_response.rs`.
 - The vendored benchmark standard has **no** multi-band case family —
   there is no external gate; the acceptance bar is the in-repo literature
   fixture `Cameron2011_10_5_dual_band_symmetric` (Cameron 2011 Fig. 25).
@@ -513,22 +517,43 @@ C0 must decide between them before any code):
    does not implement `FrequencyMapping` because the trait's inverse has
    no band-index argument). Per-band round-trip and S4 edge-consistency
    tests green.
-3. **C2 — Approximation + synthesis (route-dependent).** Per C0:
-   route-α → new family in `approx` (candidate `approx/multi_band.rs`)
-   producing a `PolynomialSet`-shaped output so `MatrixSynthesisEngine`
-   is reused; route-β → new impedance-level extraction path in
-   `synthesis`. Either way: 2-band first (3-band is the extension
-   check), with the literature fixture from C0 as the RED→GREEN anchor.
-4. **C3 — Verification surface.** Response invariance checks per band
-   (each band's response must match its standalone equiripple spec to
-   within the ripple tolerance), stopband rejection assertions in every
-   gap, and an example in `examples/` rendering the multi-band response.
+3. **C2 — Approximation + synthesis — DONE (2026-10-05).** route-α:
+   `src/approx/multi_band.rs` produces a `PolynomialSet` from
+   `multi_band_chebyshev_polynomials(bands, order, rl, tz)`; the
+   positive-axis reflection zeros are solved by a damped
+   Levenberg–Marquardt equiripple step (square system: `n_rz + 1`
+   local maxima of `|K|` share one ripple level per positive interval),
+   then the Feldtkeller `E(s)` / `PolynomialSet` assembly reuses the
+   single-band helpers verbatim. `MatrixSynthesisEngine::synthesize`
+   (C2c) consumes the output with **no changes** — no new engine. The
+   C2a spec surface `MultiBandSpec`/`BandSpec`/`RejectionSpec` is in
+   `src/spec/multi_band.rs`. 2-band first (the Fig. 25 fixture); **K ≥ 3
+   is a documented deferred extension** — the equiripple solve
+   currently requires the positive-axis passband union to be a single
+   contiguous interval (`MfsError::NotImplemented` otherwise), which
+   holds for symmetric dual-band but not for a center band spanning the
+   origin.
+4. **C3 — Verification surface — DONE (2026-10-05).** `tests/multi_band.rs`
+   (`dual_band_response_reproduces_cameron_fig25_fixture`) asserts, on a
+   4001-point grid over `-2..2`: (1) **response invariance** — max|ΔS11|,
+   max|ΔS21| < 1e-3 vs the fixture's printed matrix (the synthesized
+   transversal and the fixture's `trisection_cascade_with_extracted_zero`
+   are different topologies of the same network, so the gate is at the
+   response level; measured 4.8e-4 / 1.7e-4); (2) **per-band equiripple** —
+   worst in-band |S11| = −22 dB (the RL spec) ±1; (3) **unitarity** —
+   max‖|S11|²+|S21|²−1‖ < 1e-10; (4) **transmission zeros** — |S21| < −40
+   dB in a ±0.005 window at each spec TZ (measured −261.8, −60.4, −70.5
+   dB). `examples/multi_band_response.rs` renders the response (per-band /
+   gap / outer table + Touchstone .s2p).
 
 **Acceptance (section done):** C0 doc reviewed and route committed;
 C1 round-trip tests green; a 2-band design reproduces the C0 literature
-fixture (all couplings within 1e-4 relative, per-band ripple within the
-spec); `docs/architecture.md` module list and Known Limitations updated
-(item "multi-band" removed from the roadmap table).
+fixture at the **response** level (max|ΔS11|, max|ΔS21| < 1e-3; per-band
+ripple at the spec RL; TZ nulls < −40 dB; unitarity < 1e-10) — the
+synthesized transversal and the fixture's printed trisection matrix are
+different topologies of the same network, so coupling equality is **not**
+the gate; `docs/architecture.md` module list and Known Limitations
+updated (item "multi-band" removed from the roadmap table).
 
 ---
 
@@ -697,8 +722,7 @@ Wave 1 (parallel):  E4 (N=8 regression) · D1-opt (RED)   [E3 + C1 + E4 closed; 
 Wave 2 (serial):    D1–D4 (duplexer full path)   [DONE 2026-10-03 — Type-I orders 2–8 + §V golden + Type-II §VI anchor, all gate-anchored]
 Wave 3 (parallel):  D2-opt [DONE 2026-10-04 — scale-δ + early-stop + chain-guess, both order-6 gates green] · D3-opt [DONE 2026-10-04 — CLI optimize/extract + Python extract, e2e-gated] · D4-opt [DONE 2026-10-04 — `benches/optimizer.rs` + noise regression + report §6] · C0 [DONE 2026-10-05 — design doc, route-α committed]
 Wave 4 (serial):    B1 [DONE 2026-10-04] → B2 [DONE 2026-10-04] → B3 [DONE 2026-10-04] → B4 [DONE 2026-10-04] (multiplexer; Wave 2 done — full wave complete)
-Wave 5:             E1 [INVESTIGATED 2026-10-05 — refuted: no valid passband-TZ prototype in the single-function form; approx now rejects |z|<1 typed; route-α does NOT need it] · E2 (Laurent) — needed by B3's fidelity work and
-                    by C2 (inter-band TZs); then C2 [UNBLOCKED] → C3
+Wave 5:             E1 [INVESTIGATED 2026-10-05 — refuted: no valid passband-TZ prototype in the single-function form; approx now rejects |z|<1 typed; route-α does NOT need it] · C2 [DONE 2026-10-05 — route-α approx + spec + engine reuse] → C3 [DONE 2026-10-05 — Fig. 25 anchor GREEN + example] · E2 (Laurent) — needed by B3's fidelity work
 ```
 
 Rationale: the duplexer full path (Wave 2) was the only item on the critical

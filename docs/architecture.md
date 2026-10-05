@@ -49,11 +49,13 @@ src/
 │   ├── complex_poly.rs     ComplexPolynomial with arithmetic, roots, evaluation
 │   ├── generalized_chebyshev.rs        Main approximation entry point
 │   ├── generalized_chebyshev_helpers.rs  E(s), F(s), P(s) construction
-│   └── generalized_ops.rs             Recursive Chebyshev operations
+│   ├── generalized_ops.rs             Recursive Chebyshev operations
+│   └── multi_band.rs            Multi-band (route-α) equiripple approximation
 ├── spec/               Filter specification types
 │   ├── mod.rs              Module facade
 │   ├── types.rs            FilterSpec, TransmissionZero
-│   └── builder.rs          FilterSpecBuilder with validation
+│   ├── builder.rs          FilterSpecBuilder with validation
+│   └── multi_band.rs        MultiBandSpec / BandSpec / RejectionSpec
 ├── matrix/             Coupling matrix representation and operations
 │   ├── mod.rs              Module facade and re-exports
 │   ├── core.rs             CouplingMatrix struct, topology, shape, accessors
@@ -170,6 +172,10 @@ Captures engineering intent with validation at construction time.
 - `FilterSpec` — order, return loss, transmission zeros, unloaded Q
 - `TransmissionZero` — finite (normalized value) or infinite
 - `FilterSpecBuilder` — fluent builder with field-level validation
+- `MultiBandSpec` / `BandSpec` / `RejectionSpec` — true multi-passband
+  specification (≥ 2 disjoint center-sorted bands, per-region rejection);
+  a separate type from `FilterSpec` (a K-band filter is not a K-channel
+  multiplexer)
 
 **Invariants enforced:**
 - Order ≥ 1
@@ -194,9 +200,9 @@ Separates physical frequency handling from normalized prototype math.
 - `BandStopMapping` — stopband center + width (`ω = -1/Ω_BPF(f)`); `f = f0` clamps to `-SINGULAR_CLAMP`
 - `MultiBandMapping` — disjoint, center-sorted passbands; piecewise forward
   map (nearest band by prototype-transform distance), band-local inverse.
-  The multi-band **synthesis** route is designed in
-  `docs/internal/multi-band-synthesis-design.md` (C0, route-α; E1
-  investigated 2026-10-05 and is **not** a blocker — gap TZs are stopband)
+  The multi-band **synthesis** route is shipped (C2/C3, 2026-10-05, route-α
+  in `docs/internal/multi-band-synthesis-design.md`; E1 investigated and is
+  **not** a blocker — gap TZs are stopband)
 - `FrequencyGrid` — uniform or custom frequency point sets
 
 ### `approx` — Polynomial Approximation
@@ -218,6 +224,13 @@ Implements the generalized Chebyshev approximation algorithm.
   conjugate-flipped non-roots — see the dedicated test in
   `approx::complex_poly`)
 - `GeneralizedChebyshevData` — helper polynomials (E_s, F_s, P_s) for synthesis
+- `multi_band_chebyshev_polynomials` — true multi-passband (route-α)
+  approximation: an LM equiripple solve for the positive-axis reflection
+  zeros, then the single-band Feldtkeller `E(s)`/`PolynomialSet` assembly
+  reused verbatim; output feeds `MatrixSynthesisEngine` unchanged.
+  K ≥ 3 requires the positive-axis passband union to be one contiguous
+  interval (a center band spanning the origin is rejected with
+  `MfsError::NotImplemented`).
 
 **Algorithm:**
 Recursive Chebyshev function generation with transmission zero injection,
@@ -567,6 +580,13 @@ let context = run_full_pipeline(request)?;
    (n = 1, b0 = 0) and Type-II are supported. See
    `docs/multiplexer-code-review.md`, `docs/internal/architecture-review-2026-09-25.md`,
    and `docs/continuation-plan.md` sections A and B.
+5. **Multi-band synthesis is dual-band (K = 2) only.** The route-α
+   equiripple solve (`multi_band_chebyshev_polynomials`) requires the
+   positive-axis passband union to be a single contiguous interval, which
+   holds for a symmetric dual-band design (e.g. `[-1,-0.35]` ∪ `[0.35,1]`)
+   but not for a center band spanning the origin (K ≥ 3); such a design is
+   rejected with a typed `MfsError::NotImplemented`. See
+   `docs/internal/multi-band-synthesis-design.md` (§Work Items, item 2).
 
 ## Future Roadmap
 
@@ -580,7 +600,8 @@ Worked plan with sequencing and acceptance criteria:
 | Done | Generalize the full spectral path to N-channel (multiplexer) mutual loading (B2, 2026-10-04) | — |
 | Done | Full Macchiarella spectral path converged for the duplexer (Type-I orders 2–8 + Type-II, gate-anchored, 2026-10-03) | — |
 | Later | Butterworth/Elliptic approximation families | Low |
-| Later | Multi-band synthesis (true multi-passband, scope-1) — **C0 design doc done 2026-10-05, route-α committed** (`docs/internal/multi-band-synthesis-design.md`); **unblocked** (E1 investigated 2026-10-05: gap TZs are stopband, so route-α needs no passband-TZ support) | Medium |
+| Done | Multi-band synthesis (true multi-passband, scope-1) — dual-band route-α shipped (C2/C3, 2026-10-05): `multi_band_chebyshev_polynomials` → `MatrixSynthesisEngine`, Fig. 25 anchor gate-anchored (`tests/multi_band.rs`) | — |
+| Later | Multi-band K ≥ 3 extension (multi-contiguous-interval equiripple solve) | Low |
 
 > Touchstone export, Python bindings, and criterion benchmarks are already
 > implemented (see `src/touchstone.rs`, `src/python.rs`, `benches/`).

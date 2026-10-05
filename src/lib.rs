@@ -90,7 +90,10 @@ pub use freq::{
 };
 pub use matrix::CouplingMatrixBuilder;
 pub use response::ResponseSolver;
-pub use spec::{FilterSpec, FilterSpecBuilder, TransmissionZero};
+pub use spec::{
+    BandSpec, FilterSpec, FilterSpecBuilder, MultiBandSpec, RejectionRegion, RejectionSpec,
+    TransmissionZero,
+};
 pub use synthesis::MatrixSynthesisMethod;
 pub use transform::TopologyKind;
 pub use verify::ResponseTolerance;

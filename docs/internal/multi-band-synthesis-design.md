@@ -5,7 +5,9 @@ synthesis, scope-1"). Written the way `docs/multiplexer-synthesis.md` was:
 route decision and math **before** any code, so the approximation and synthesis
 work items (C2) start from a fixed target.
 
-Status: **route committed (C-route-α), design complete, no code yet.**
+Status: **route committed (C-route-α), C2 + C3 done (2026-10-05)** — the
+Fig. 25 dual-band anchor is GREEN (`tests/multi_band.rs`), with the
+K ≥ 3 extension deferred.
 
 ---
 
@@ -303,14 +305,21 @@ checks the synthesized response against the fixture's $N+2$ matrix.
 
 ## Work Items (C2, C3)
 
-1. **C2a — `MultiBandSpec` + builder** in `spec` (constraints of §Specification).
-2. **C2b — multi-band approximation** (candidate `src/approx/multi_band.rs`)
-   producing a `PolynomialSet`; $K=2$ first, $K=3$ as the extension check.
-3. **C2c — synthesize** via `MatrixSynthesisEngine::synthesize` (no new engine).
-4. **C3 — verification surface:** per-band response equals each band's
-   standalone equiripple spec within ripple tolerance; gap rejection asserted;
-   an `examples/` rendering of the multi-band response; and the Fig. 25
-   fixture as the RED→GREEN anchor.
+1. **C2a — `MultiBandSpec` + builder** in `spec` — **done** (2026-10-05,
+   `src/spec/multi_band.rs`; constraints of §Specification).
+2. **C2b — multi-band approximation** (`src/approx/multi_band.rs`) — **done**
+   (2026-10-05); produces a `PolynomialSet`, $K=2$ first (the Fig. 25
+   fixture). **$K \ge 3$ deferred**: the equiripple solve requires the
+   positive-axis passband union to be a single contiguous interval, which a
+   center band spanning the origin violates — a documented
+   `MfsError::NotImplemented`, not a silent failure.
+3. **C2c — synthesize** via `MatrixSynthesisEngine::synthesize` — **done**
+   (2026-10-05); the output is consumed with **no engine changes**.
+4. **C3 — verification surface** — **done** (2026-10-05): `tests/multi_band.rs`
+   (the Fig. 25 fixture as the RED→GREEN anchor, asserted at the response
+   level: per-band equiripple at the spec RL, gap + outer rejection, unitarity,
+   TZ nulls, response invariance vs the printed matrix) +
+   `examples/multi_band_response.rs` rendering the multi-band response.
 
 ---
 
@@ -331,7 +340,15 @@ asserted · ⛔ blocked.
    trisection/extracted-zero sections; no new `MatrixTopology` variant.
 5. ✅ **First fixture identified** — `Cameron2011_10_5_dual_band_symmetric`
    (Fig. 25), in-repo, printed matrix.
-6. ⛔ **2-band design reproduces the fixture** — C3, gated on C2 (not on E1).
+6. ✅ **2-band design reproduces the fixture** — C3, gated on C2 (not on
+   E1). `tests/multi_band.rs` asserts the Fig. 25 design at the **response**
+   level (the synthesized transversal and the fixture's printed trisection
+   matrix are different topologies of the same network): response invariance
+   (max|ΔS11| 4.8e-4, max|ΔS21| 1.7e-4, both < 1e-3), per-band equiripple
+   (worst in-band |S11| = −22.00 dB = the RL spec, ±1), unitarity
+   (2.2e-15 < 1e-10), TZ nulls (−261.8 / −60.4 / −70.5 dB, all < −40), and
+   outer stopband (worst |S21| = −16.6 dB over |w|∈[1.10, 2.0], < −15).
+   `examples/multi_band_response.rs` renders the response.
 
 ---
 

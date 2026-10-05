@@ -13,6 +13,7 @@ mod complex_poly;
 mod generalized_chebyshev;
 mod generalized_chebyshev_helpers;
 mod generalized_ops;
+mod multi_band;
 mod polynomial;
 
 pub use complex_poly::{
@@ -21,6 +22,7 @@ pub use complex_poly::{
     ComplexRootSolver, DurandKernerRootSolver, FaerRootSolver,
 };
 pub use generalized_chebyshev::generalized_chebyshev_polynomials;
+pub use multi_band::multi_band_chebyshev_polynomials;
 pub use polynomial::{
     chebyshev_ripple_factor, monic_polynomial_from_real_roots, PolynomialSet, PolynomialSetParams,
 };
