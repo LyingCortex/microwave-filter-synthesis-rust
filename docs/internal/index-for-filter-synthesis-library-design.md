@@ -66,9 +66,11 @@ all six P3) was fixed and gate-anchored 2026-10-06; **P1-5 + P2-4 (the CT/CQ
 cascade) were fixed 2026-10-06** — `to_cascaded_trisections` now routes through
 the edge-capable `extract_triplet` primitive (reproduces Cameron 2011 Fig. 21; the
 earlier "refuted" note had tested the distinct internal-center-only
-`extract_trisection`), and `to_cascaded_quadruplets` through `extract_quadruplet`
-(CQ is now structurally distinct from the CT), each gated by a sparsity test
-(see review-findings-0.6.0.md P2-4 / P1-5 Status).
+`extract_trisection`), and `to_cascaded_quadruplets` through the verified
+`extract_cascade_quadruplets` primitive (source-side non-overlapping tiling,
+`order >= 4·num_pairs`; clean order-6 single quadruplet, reproduces the verified
+`CascadeQuartets` layout at order 8, CQ structurally distinct from the CT), each
+gated by a sparsity test (see review-findings-0.6.0.md P2-4 / P1-5 Status).
 
 ## Reading Paths
 

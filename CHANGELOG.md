@@ -80,13 +80,23 @@
     order-6 mainline-connectivity assert in `ct_synthesis_produces_valid_matrix`.
   - **P1-5 `to_cascaded_quadruplets` merge was a no-op** (`src/matrix/cascade.rs`):
     the old `diagonal_rotation_angle` merge vanished for symmetric ±ω₀ pairs, leaving
-    the CQ byte-identical to the CT. Now routes through the verified `extract_quadruplet`
-    (per zero pair, highest position first, `common_resonator = 4`). Order-4 single
-    pair → clean quadruplet (source→res 1 only, load→res 4 only, 2-skip M[1,4] present,
-    diagonals zeroed); order-6 two pairs → response preserved and structurally distinct
-    from the CT (max|ΔM| > 0.01, where the old no-op gave 0). New gates:
-    `cq_synthesis_single_quadruplet_structure` (order-4 quadruplet pattern) and the
-    CQ≠CT + mainline asserts in `cq_synthesis_with_symmetric_zeros`.
+    the CQ byte-identical to the CT. Now routes through the **verified
+    `extract_cascade_quadruplets`** primitive (the same path as the Python `cq`
+    binding) with a **source-side non-overlapping tiling**: pair *i* spans resonators
+    `4i-3..=4i` (cross coupling `M[4i-3,4i]`), so `order >= 4·num_pairs` is required —
+    otherwise a typed `PreconditionViolation` (use `to_cascaded_trisections` for denser
+    configs). Measured: order-4 single pair → clean quadruplet (source→res 1 only,
+    load→res 4 only, cross M[1,4] present, diagonals zeroed, max|ΔS21| 3e-15);
+    **order-6 single pair (2 zeros) → clean single quadruplet** (cross M[1,4] present,
+    mainline 1..=6 connected, source→res 1 / load→res 6, no other 2-skip,
+    max|ΔS21| 2e-14); **order-8 two pairs (4 zeros) → reproduces the verified
+    `CascadeQuartets` layout** `[[1,3],[1,4],[5,7],[5,8]]` (max|ΔS21| 1.4e-13,
+    structurally distinct from the CT, max|ΔM| > 0.05). The over-constrained
+    order-6 2-pair case (the earlier "~1e-2 residual" follow-up) is **topologically
+    impossible** to tile cleanly and is now rejected. Gates:
+    `cq_synthesis_single_quadruplet_structure`, `cq_synthesis_order6_single_quadruplet`,
+    `cq_synthesis_order8_two_quadruplets` (verified layout + CQ≠CT + mainline),
+    `cq_synthesis_rejects_too_small_order`.
 
 ## [0.6.0] — 2026-10-05
 

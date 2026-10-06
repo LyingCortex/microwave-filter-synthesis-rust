@@ -7,7 +7,7 @@
 **输入**：Transversal或Arrow耦合矩阵 + 传输零点列表 + 目标位置  
 **输出**：CT或CQ形式的耦合矩阵（特定稀疏模式）
 
-> ✅ **状态 (2026-10-06, 实测已修复)**：CT/CQ 已改走**边缘-capable** 的原语——`to_cascaded_trisections` 用 `extract_triplet`（其 `validate_triplet_center` 允许 center=1，即可产生 source 端连接的 S-1-2 trisection），`to_cascaded_quadruplets` 用 `extract_quadruplet`（尾部 pivot 旋转合并，取代原先对称零点下退化为 no-op 的 `diagonal_rotation_angle`）。按论文 Fig. 21 例子 (order 4, 22 dB, TZ 1.8082/1.3217) 实测：复现 fixture 幅值（|ΔM| ~ 1e-4，即 4 位打印量子），trident 稀疏模式 + 主链连通；order-6 主链连通；CQ 与 CT 结构可区分（dM > 0.01）。注意：早前 (2026-10-06) 对 `extract_trisection` 的实测"复现不了"结论针对的是**另一个**内部-center-only 的原语（`validate_trisection_positions` 要求 span=2），与本修复所用的 `extract_triplet` 不同。回归门：`ct_synthesis_reproduces_fig21_cameron2011`、`cq_synthesis_single_quadruplet_structure`、`ct_synthesis_produces_valid_matrix`（主链连通门）、`cq_synthesis_with_symmetric_zeros`（CQ≠CT 门）。
+> ✅ **状态 (2026-10-06, 实测已修复 + order-8 两 CQ 平铺已验证)**：CT/CQ 均改走**边缘-capable** 的已验证原语——`to_cascaded_trisections` 用 `extract_triplet`（`validate_triplet_center` 允许 center=1，产生 source 端连接的 S-1-2 trisection），`to_cascaded_quadruplets` 用 `extract_cascade_quadruplets`（与 Python `cq` 绑定同一条路径）。**CQ 平铺规则（关键）**：quadruplet 必须**互不重叠、自 source 侧起**平铺——第 *i* 个零点对占用谐振器 `4i-3..=4i`，因此需要 `order >= 4 × num_pairs`，否则返回 `PreconditionViolation`（密集情形请用 `to_cascaded_trisections`，其 3-谐振器 trisection 更省）。实测：order-4 单对 → 干净 quadruplet；**order-6 单对（2 零点）→ 干净单 quadruplet**（`M[1,4]` 交叉耦合存在、主链 1..=6 连通、source→res1/load→res6、无其他 2-skip、max|ΔS21| 2e-14）；**order-8 两对（4 零点）→ 复现已验证的 `CascadeQuartets` 布局** `[[1,3],[1,4],[5,7],[5,8]]`（source 侧非重叠平铺，max|ΔS21| 1.4e-13，与 CT 结构可区分 dM>0.05）。注意：**order-6 配两对（4 零点）在拓扑上不可能干净平铺**（两个 4-谐振器 quadruplet 无法互不重叠地放进 6 个谐振器），旧版尾部 peel 循环留下的 ~1e-2 skip 耦合不是 bug 而是这种越约束情形的固有残差。CT 按 Fig. 21 (order 4, 22 dB, TZ 1.8082/1.3217) 实测复现。回归门：`ct_synthesis_reproduces_fig21_cameron2011`、`cq_synthesis_single_quadruplet_structure`、`cq_synthesis_order6_single_quadruplet`、`cq_synthesis_order8_two_quadruplets`、`cq_synthesis_rejects_too_small_order`、`ct_synthesis_produces_valid_matrix`。
 
 ---
 
@@ -62,42 +62,34 @@ for each (Ωz, pos) in zip(zeros, positions):
 
 每次提取后Arrow结构缩短一列（已提取的trisection不再参与后续旋转）。
 
-### 3. Cascade Quadruplet (零点成对)
+### 3. Cascade Quadruplet (零点成对, source 侧非重叠平铺)
 
 **输入**: Arrow矩阵M, 零点对[(Ω1,Ω2), (Ω3,Ω4), ...], 位置列表  
 **输出**: 含quadruplet块的矩阵
 
+**平铺规则**（实测已验证）：每个 quadruplet 占 4 个谐振器，**互不重叠、自 source 侧起**平铺——第 *i* 个零点对（1-indexed）占用谐振器 `4i-3..=4i`，其交叉耦合为 `M[4i-3, 4i]`。因此必须满足 `order >= 4 × num_pairs`；否则（如 order-6 配两对）两个 4-谐振器块无法互不重叠地放入链中，旧版尾部 peel 会留下 ~1e-2 skip 耦合（拓扑不可能，非 bug）。
+
 **步骤**:
 ```
-i = 0
-position = 1
-while i < num_zeros - 1:
-    # Step A: 提取第一个trisection
-    M = extract_trisection(M, zeros[i], position)
-    
-    # Step B: 提取第二个trisection (紧邻位置)
-    M = extract_trisection(M, zeros[i+1], position+1)
-    
-    # Step C: 交叉旋转合并为quadruplet
-    # 消除 M[position, position+3] 使其变为box/quadruplet结构
-    M = merge_to_quadruplet(M, position)
-    
-    position += 4
-    i += 2
-
-# 剩余奇数零点作为单独trisection
-if i < num_zeros:
-    M = extract_trisection(M, zeros[i], position)
+# 前置校验：order >= 4 * num_pairs，否则拒绝（密集情形改用 CT）
+for i in 1..=num_pairs:
+    s = 4*(i-1) + 1              # 第 i 个 quadruplet 的 source 侧起点
+    # trisection partner: span 2, [s, s+2]
+    # quadruplet 对角: span 3, [s, s+3]
+    z_locs.push([s, s+2])
+    z_locs.push([s, s+3])
+M = extract_cascade_quadruplets(M, zeros, z_locs)
+# 内部按位置从尾向 source 逐个 extract_quadruplet 合并（common_res=4）
 ```
 
-**Quadruplet结果模式** (4个谐振器块):
+**Quadruplet 结果模式** (4 个谐振器块, 交叉耦合 `M14` 存在):
 ```
 [  0   M12   0   M14 ]
-[ M12   0   M23   0  ]
+[ M12   *   M23   *  ]    * = 谐振器对角(detuning, 一般非零)
 [  0   M23   0   M34 ]
-[ M14   0   M34   0  ]
+[ M14   *   M34   0  ]
 ```
-对角线M14是quadruplet的交叉耦合，实现一对传输零点。
+`M14` 是 quadruplet 的交叉耦合，实现一对传输零点。注意：order-4 单对情形谐振器对角被 peel 清零，但 order-8 两对情形对角保留 detuning（如 M[2,2]=-0.021），这是已验证参考布局的固有特征，不作为"必须清零"的门槛。
 
 ---
 

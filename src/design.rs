@@ -371,8 +371,9 @@ impl FilterDesign {
 
     /// Converts to Cascaded Quadruplet (CQ) topology.
     ///
-    /// Zero pairs are merged into quartet sections. For symmetric pairs (±ω),
-    /// the diagonal coupling within each quartet will be zero.
+    /// Each zero pair is realized as one 4-resonator quadruplet, tiled
+    /// non-overlappingly from the source side. Requires `order >= 4 *
+    /// zero_pairs.len()` (use [`to_ct`](Self::to_ct) for denser configurations).
     pub fn to_cq(&self, zero_pairs: &[(f64, f64)]) -> Result<CouplingMatrix> {
         self.matrix.to_cascaded_quadruplets(zero_pairs)
     }
