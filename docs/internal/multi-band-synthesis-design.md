@@ -314,7 +314,7 @@ $|K|$ has a local maximum at every band edge and between every pair of
 consecutive reflection zeros. For $M$ positive-axis passband intervals with
 $N/2$ reflection zeros, that is $2M$ edge maxima plus $(N/2 - M)$ between-zeros
 maxima $= N/2 + M$ peaks; equiripple sets them to one shared level (free
-during the solve, fixed by $\\varepsilon$ afterward), i.e. $N/2 + M - 1$
+during the solve, fixed by $\varepsilon$ afterward), i.e. $N/2 + M - 1$
 independent constraints on the $N/2$ unknown zero locations:
 
 | $M$ (positive-axis intervals) | constraints | unknowns | system |
