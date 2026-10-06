@@ -63,7 +63,11 @@ The 0.6.0 whole-crate code review (2026-10-05) is
 [review-findings-0.6.0.md](./review-findings-0.6.0.md) — 17 valid findings
 (6 P1 / 5 P2 / 6 P3). The "silent errors" wave (P1-1/2/3/4/6, P2-1/2/3/5,
 all six P3) was fixed and gate-anchored 2026-10-06; P1-5 + P2-4 (the CT/CQ
-cascade re-implementation) remain open.
+cascade re-implementation) remain open — **re-scoped 2026-10-06**: the original
+"route through the verified extract path" fix was **refuted by measurement** on
+the paper's Fig. 21 example (the extract path cannot produce edge-connected
+trisections S-1-2/3-4-L), so it is a real algorithm re-implementation, not a
+routing change (see review-findings-0.6.0.md P2-4 Status).
 
 ## Reading Paths
 

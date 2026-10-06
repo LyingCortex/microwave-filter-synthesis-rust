@@ -7,6 +7,8 @@
 **输入**：Transversal或Arrow耦合矩阵 + 传输零点列表 + 目标位置  
 **输出**：CT或CQ形式的耦合矩阵（特定稀疏模式）
 
+> ⚠️ **状态 (2026-10-06, 实测)**：本设计的 extract 路径已按论文 Fig. 21 例子 (order 4, 22 dB, TZ 1.8082/1.3217) 实测——**复现不了** Fig. 21 的 trisection 结构（trident S-2 / 3-L = 0.0000），而论文结构是 source/load 端连接的 trisection。根因：`extract_trisection` 在尾部 conditioning，`validate_trisection_positions` 只接受内部 span-2 中心，无法产生 S-1-2 / 3-4-L 这类边缘 trisection。下文算法步骤（尾部 conditioning + pull）**不足以覆盖边缘 trisection**，需补"拉到 source 端"的完整 pull 流程（论文 Fig. 22/23）。详细数据见 `docs/internal/review-findings-0.6.0.md` P2-4 Status。
+
 ---
 
 ## 算法详述
