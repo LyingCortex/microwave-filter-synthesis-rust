@@ -15,8 +15,8 @@
   overlapping-channel p0² (`machiarella.rs`), no-op CQ merge (`cascade.rs`),
   and a Python `tune()` length-check gap. Assessment only at review time;
   the "silent errors" wave (P1-1/2/3/4/6, P2-1/2/3/5, all six P3) is fixed
-  2026-10-06 (see Fixed below); P1-5 + P2-4 (the CT/CQ cascade
-  re-implementation) are the deferred second wave (doc §F.2).
+  2026-10-06 (see Fixed below); the CT/CQ cascade wave (P1-5 + P2-4, doc §F.2)
+  is fixed the same day (see Fixed below).
 
 ### Fixed
 
@@ -63,6 +63,30 @@
     spec error instead of a silent RL=20 fallback (P3-4),
     `PoleExpansionData::from_polynomials` y22 length check (P3-5), Givens step-2
     comment corrected (P3-6).
+- **0.6.0 "CT/CQ cascade" review wave (2026-10-06)** — P1-5 + P2-4
+  (review-findings-0.6.0.md §F.2), the deferred second wave:
+  - **P2-4 `to_cascaded_trisections` severs the mainline** (`src/matrix/cascade.rs`):
+    the old per-zero loop re-conditioned the tail on each pass and rotated on the
+    fixed load column, producing a dense folded/wheel matrix with a broken mainline.
+    Now routes through the edge-capable `extract_triplet` primitive
+    (`Arrow → extract_triplet(zeros[0], 1)`: condition-at-load-tail + peel-to-source),
+    which produces the source/load-connected trisections. Reproduces Cameron 2011
+    Fig. 21 (order 4, 22 dB, TZ 1.8082/1.3217): trident sparsity, max|ΔM| ~ 1e-4 vs
+    the 4-decimal printed fixture, max|ΔS21| ~ 2e-15; order-6 mainline connected.
+    Note: the earlier same-day note that "no path reproduces Fig. 21" had tested the
+    *distinct* internal-center-only `extract_trisection` primitive — `extract_triplet`
+    (center=1 allowed) is the correct edge-capable one. New gates:
+    `ct_synthesis_reproduces_fig21_cameron2011` (trident + value anchor) and the
+    order-6 mainline-connectivity assert in `ct_synthesis_produces_valid_matrix`.
+  - **P1-5 `to_cascaded_quadruplets` merge was a no-op** (`src/matrix/cascade.rs`):
+    the old `diagonal_rotation_angle` merge vanished for symmetric ±ω₀ pairs, leaving
+    the CQ byte-identical to the CT. Now routes through the verified `extract_quadruplet`
+    (per zero pair, highest position first, `common_resonator = 4`). Order-4 single
+    pair → clean quadruplet (source→res 1 only, load→res 4 only, 2-skip M[1,4] present,
+    diagonals zeroed); order-6 two pairs → response preserved and structurally distinct
+    from the CT (max|ΔM| > 0.01, where the old no-op gave 0). New gates:
+    `cq_synthesis_single_quadruplet_structure` (order-4 quadruplet pattern) and the
+    CQ≠CT + mainline asserts in `cq_synthesis_with_symmetric_zeros`.
 
 ## [0.6.0] — 2026-10-05
 

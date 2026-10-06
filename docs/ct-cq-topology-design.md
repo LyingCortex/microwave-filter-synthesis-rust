@@ -7,7 +7,7 @@
 **输入**：Transversal或Arrow耦合矩阵 + 传输零点列表 + 目标位置  
 **输出**：CT或CQ形式的耦合矩阵（特定稀疏模式）
 
-> ⚠️ **状态 (2026-10-06, 实测)**：本设计的 extract 路径已按论文 Fig. 21 例子 (order 4, 22 dB, TZ 1.8082/1.3217) 实测——**复现不了** Fig. 21 的 trisection 结构（trident S-2 / 3-L = 0.0000），而论文结构是 source/load 端连接的 trisection。根因：`extract_trisection` 在尾部 conditioning，`validate_trisection_positions` 只接受内部 span-2 中心，无法产生 S-1-2 / 3-4-L 这类边缘 trisection。下文算法步骤（尾部 conditioning + pull）**不足以覆盖边缘 trisection**，需补"拉到 source 端"的完整 pull 流程（论文 Fig. 22/23）。详细数据见 `docs/internal/review-findings-0.6.0.md` P2-4 Status。
+> ✅ **状态 (2026-10-06, 实测已修复)**：CT/CQ 已改走**边缘-capable** 的原语——`to_cascaded_trisections` 用 `extract_triplet`（其 `validate_triplet_center` 允许 center=1，即可产生 source 端连接的 S-1-2 trisection），`to_cascaded_quadruplets` 用 `extract_quadruplet`（尾部 pivot 旋转合并，取代原先对称零点下退化为 no-op 的 `diagonal_rotation_angle`）。按论文 Fig. 21 例子 (order 4, 22 dB, TZ 1.8082/1.3217) 实测：复现 fixture 幅值（|ΔM| ~ 1e-4，即 4 位打印量子），trident 稀疏模式 + 主链连通；order-6 主链连通；CQ 与 CT 结构可区分（dM > 0.01）。注意：早前 (2026-10-06) 对 `extract_trisection` 的实测"复现不了"结论针对的是**另一个**内部-center-only 的原语（`validate_trisection_positions` 要求 span=2），与本修复所用的 `extract_triplet` 不同。回归门：`ct_synthesis_reproduces_fig21_cameron2011`、`cq_synthesis_single_quadruplet_structure`、`ct_synthesis_produces_valid_matrix`（主链连通门）、`cq_synthesis_with_symmetric_zeros`（CQ≠CT 门）。
 
 ---
 
