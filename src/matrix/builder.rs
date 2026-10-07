@@ -57,7 +57,9 @@ impl CouplingMatrixBuilder {
     /// `set`, which would otherwise silently produce a matrix every downstream
     /// consumer (response solver, multiplication, section extraction) assumes
     /// is symmetric. Intended for the folded-mask gate fixtures, which build
-    /// a deliberately asymmetric matrix.
+    /// a deliberately asymmetric matrix. The symmetry check itself lives in
+    /// `CouplingMatrix::new_with_topology`; this flag routes the build to the
+    /// unchecked `new_with_topology_asymmetric` instead.
     pub fn allow_asymmetric(mut self, allowed: bool) -> Self {
         self.allow_asymmetric = allowed;
         self
@@ -66,23 +68,11 @@ impl CouplingMatrixBuilder {
     /// Finalizes the builder. By default it rejects a one-sided off-diagonal
     /// entry (an asymmetric coupling matrix); opt out with `allow_asymmetric`.
     pub fn build(self) -> Result<CouplingMatrix> {
-        if !self.allow_asymmetric {
-            let side = self.order + 2;
-            for i in 0..side {
-                for j in (i + 1)..side {
-                    let a = self.data[i * side + j];
-                    let b = self.data[j * side + i];
-                    if a != b {
-                        return Err(MfsError::PreconditionViolation(format!(
-                            "asymmetric coupling matrix: M[{i}][{j}] = {a} != \
-                             M[{j}][{i}] = {b} (use `set_symmetric` for \
-                             off-diagonal couplings, or `allow_asymmetric(true)`)"
-                        )));
-                    }
-                }
-            }
+        if self.allow_asymmetric {
+            CouplingMatrix::new_with_topology_asymmetric(self.order, self.topology, self.data)
+        } else {
+            CouplingMatrix::new_with_topology(self.order, self.topology, self.data)
         }
-        CouplingMatrix::new_with_topology(self.order, self.topology, self.data)
     }
 }
 

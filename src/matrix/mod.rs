@@ -312,8 +312,11 @@ mod tests {
 
         // Test case 2: Non-symmetric matrix (order 4)
         let data: Vec<f64> = (0..36).map(|i| (i as f64) * 0.1 - 1.5).collect();
-        let matrix_b =
-            super::CouplingMatrix::new_with_topology(4, MatrixTopology::Transversal, data)?;
+        let matrix_b = super::CouplingMatrix::new_with_topology_asymmetric(
+            4,
+            MatrixTopology::Transversal,
+            data,
+        )?;
 
         let nalgebra_result = matrix_b.transpose();
         let reference_result = reference_transpose(&matrix_b);
@@ -328,8 +331,11 @@ mod tests {
 
         // Test case 3: Larger matrix (order 6, side 8)
         let data: Vec<f64> = (0..64).map(|i| ((i as f64) * 0.37).sin()).collect();
-        let matrix_c =
-            super::CouplingMatrix::new_with_topology(6, MatrixTopology::Transversal, data)?;
+        let matrix_c = super::CouplingMatrix::new_with_topology_asymmetric(
+            6,
+            MatrixTopology::Transversal,
+            data,
+        )?;
 
         let nalgebra_result = matrix_c.transpose();
         let reference_result = reference_transpose(&matrix_c);

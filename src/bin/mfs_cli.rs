@@ -1755,6 +1755,31 @@ mod optimizer_tests {
     }
 
     #[test]
+    fn parse_matrix_json_rejects_one_sided_off_diagonal() {
+        // Order-2, side-4: source couplings 0.8 / 0.5, chain 0.6, load 0.7 / 0.4,
+        // but the chain pair is deliberately asymmetric (0.6 vs 0.9).
+        let data = [
+            0.0, 0.8, 0.5, 0.0,
+            0.8, 0.0, 0.6, 0.7,
+            0.5, 0.9, 0.0, 0.4,
+            0.0, 0.7, 0.4, 0.0,
+        ];
+        let json = serde_json::json!({
+            "order": 2,
+            "data": data,
+        });
+        let err = parse_matrix_json(&json.to_string()).unwrap_err();
+        assert!(
+            matches!(err, mfs::error::MfsError::PreconditionViolation(_)),
+            "a one-sided off-diagonal user matrix must be rejected, got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("asymmetric coupling matrix"),
+            "the error must say the matrix is asymmetric: {err}"
+        );
+    }
+
+    #[test]
     fn parse_response_json_samples() {
         let r = parse_response_json(
             r#"{"samples":[

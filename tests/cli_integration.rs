@@ -423,6 +423,64 @@ fn test_optimize_subcommand_recovers_perturbed_matrix() {
     assert!(value["recovered"]["samples"].is_array(), "recovered samples present");
 }
 
+/// E2E: a user-supplied matrix JSON whose off-diagonal pair is asymmetric
+/// (`M[1][2]=0.6`, `M[2][1]=0.9`) must be **rejected** by the CLI before the
+/// optimizer runs — it must not flow into the response solver, which assumes
+/// symmetry. The binary exits non-zero with a `precondition_violation` whose
+/// message names the matrix. This pins the `new_with_topology` invariant at
+/// the user-input boundary (the only path that can feed asymmetric data).
+#[test]
+fn test_optimize_rejects_asymmetric_user_matrix() {
+    let bin = require_bin();
+
+    let input = serde_json::json!({
+        "order": 2,
+        "topology": "transversal",
+        "data": [
+            0.0, 0.8, 0.5, 0.0,
+            0.8, 0.0, 0.6, 0.7,
+            0.5, 0.9, 0.0, 0.4,
+            0.0, 0.7, 0.4, 0.0,
+        ],
+        "samples": [
+            { "frequency_hz": -1.0, "s11_re": 0.1, "s11_im": -0.2, "s21_re": 0.9, "s21_im": 0.0 },
+            { "frequency_hz": 1.0,  "s11_re": 0.1, "s11_im": 0.2,  "s21_re": 0.9, "s21_im": 0.0 },
+        ],
+    });
+    let input_file = std::env::temp_dir().join("mfs_cli_test_asym_input.json");
+    std::fs::write(&input_file, input.to_string()).expect("write input");
+
+    let output = Command::new(&bin)
+        .arg("optimize")
+        .arg("--order")
+        .arg("2")
+        .arg("--input")
+        .arg(&input_file)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("execute optimize");
+    let _ = std::fs::remove_file(&input_file);
+
+    // The asymmetric matrix must be rejected before optimization.
+    assert!(
+        !output.status.success(),
+        "an asymmetric user matrix must not reach the optimizer"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr UTF-8");
+    let err: serde_json::Value =
+        serde_json::from_str(stderr.trim()).expect("stderr should be a JSON error object");
+    assert_eq!(
+        err["error_type"].as_str().unwrap_or(""),
+        "precondition_violation",
+        "an asymmetric user matrix must be a precondition violation, got: {err}"
+    );
+    assert!(
+        err["message"].as_str().unwrap_or("").contains("asymmetric coupling matrix"),
+        "the error must name the asymmetry: {err}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Test: `extract` subcommand — target → recovered response, end-to-end
 // ---------------------------------------------------------------------------

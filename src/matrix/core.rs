@@ -70,24 +70,59 @@ impl CouplingMatrix {
     }
 
     /// Creates a coupling matrix with an explicit topology label.
+    ///
+    /// Rejects a one-sided off-diagonal entry (`M[i][j]` set with `M[j][i]`
+    /// not equal): the response solver and every other consumer assume a
+    /// symmetric real matrix — `backend.rs` solves `A x = e_0` once and reads
+    /// the last *row* of A⁻¹ as the transpose of the last *column*, which
+    /// holds only for a symmetric A. An asymmetric matrix would produce a
+    /// silently wrong S21/S12, not a loud failure (the same silent-corruption
+    /// class the `flip_sign` diagonal bug was). Use
+    /// [`Self::new_with_topology_asymmetric`] for the deliberately asymmetric
+    /// matrices the folded-mask gate fixtures build.
     pub fn new_with_topology(
         order: usize,
         topology: MatrixTopology,
         data: Vec<f64>,
     ) -> Result<Self> {
-        if order == 0 {
-            return Err(MfsError::InvalidOrder { order });
+        let m = Self::new_with_topology_asymmetric(order, topology, data)?;
+        let side = m.side();
+        for i in 0..side {
+            for j in (i + 1)..side {
+                let a = m.data[i * side + j];
+                let b = m.data[j * side + i];
+                // Tolerance-based, scale-aware: a folded (Givens-rotated)
+                // matrix is symmetric only to within rounding (~1e-15), so
+                // exact `a != b` would false-reject legitimate rotated
+                // matrices. The threshold rejects a gross one-sided entry
+                // (the silent-corruption bug) while permitting the
+                // rotation/rounding asymmetry every rotated or perturbed
+                // matrix carries.
+                let tol = 1e-12 * 1.0_f64.max(a.abs().max(b.abs()));
+                if (a - b).abs() > tol {
+                    return Err(MfsError::PreconditionViolation(format!(
+                        "asymmetric coupling matrix: M[{i}][{j}] = {a} != \
+                         M[{j}][{i}] = {b} (coupling matrices are symmetric; \
+                         write both entries, or use new_with_topology_asymmetric \
+                         for a deliberately asymmetric matrix)"
+                    )));
+                }
+            }
         }
+        Ok(m)
+    }
 
-        let side = order + 2;
-        let expected = side * side;
-        if data.len() != expected {
-            return Err(MfsError::DimensionMismatch {
-                expected,
-                actual: data.len(),
-            });
-        }
-
+    /// Creates a coupling matrix with an explicit topology label, **without**
+    /// the symmetry check. For the deliberately asymmetric matrices the
+    /// folded-mask gate fixtures build to exercise `folded_mask_violations`.
+    /// Never use this on a matrix that feeds the response solver, multiplication,
+    /// or section extraction — those assume symmetry.
+    pub fn new_with_topology_asymmetric(
+        order: usize,
+        topology: MatrixTopology,
+        data: Vec<f64>,
+    ) -> Result<Self> {
+        let _side = validate_and_side(order, &data)?;
         Ok(Self {
             order,
             topology,
@@ -495,5 +530,87 @@ impl CouplingMatrix {
         let mut result = self.clone();
         result.apply_givens_similarity_inplace(pivot_a, pivot_b, cosine, sine);
         result
+    }
+}
+
+/// Validates order (non-zero) and data length (side²); returns the side.
+fn validate_and_side(order: usize, data: &[f64]) -> Result<usize> {
+    if order == 0 {
+        return Err(MfsError::InvalidOrder { order });
+    }
+    let side = order + 2;
+    let expected = side * side;
+    if data.len() != expected {
+        return Err(MfsError::DimensionMismatch {
+            expected,
+            actual: data.len(),
+        });
+    }
+    Ok(side)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A symmetric order-2 (side 4) matrix: source couplings 0.8 / 0.5, chain
+    /// 0.6, load couplings 0.7 / 0.4. All off-diagonal pairs equal.
+    fn symmetric_data() -> Vec<f64> {
+        // Order-2, side-4. Indices are row*4+col; every off-diagonal pair
+        // below is written twice with the same value (symmetric).
+        let mut d = vec![0.0_f64; 16];
+        // source couplings (row 0): M[0][k] == M[k][0]
+        d[1] = 0.8; d[4] = 0.8; // M[0][1]/M[1][0]
+        d[2] = 0.5; d[8] = 0.5; // M[0][2]/M[2][0]
+        // chain: M[1][2] == M[2][1]
+        d[6] = 0.6; d[9] = 0.6;
+        // load couplings (col 3): M[k][3] == M[3][k]
+        d[7] = 0.7; d[13] = 0.7; // M[1][3]/M[3][1]
+        d[11] = 0.4; d[14] = 0.4; // M[2][3]/M[3][2]
+        d
+    }
+
+    #[test]
+    fn new_with_topology_accepts_symmetric() -> Result<()> {
+        let m = CouplingMatrix::new_with_topology(2, MatrixTopology::Transversal, symmetric_data())?;
+        assert_eq!(m.order(), 2);
+        assert_eq!(m.topology(), MatrixTopology::Transversal);
+        assert!((m.at(1, 2).unwrap() - 0.6).abs() < 1e-15);
+        Ok(())
+    }
+
+    #[test]
+    fn new_with_topology_rejects_one_sided_off_diagonal() {
+        let mut d = symmetric_data();
+        d[9] = 0.9; // M[2][1] = 0.9 — one-sided: M[2][1] != M[1][2]=0.6
+        let err = CouplingMatrix::new_with_topology(2, MatrixTopology::Transversal, d).unwrap_err();
+        assert!(
+            matches!(err, MfsError::PreconditionViolation(_)),
+            "a one-sided off-diagonal entry must be rejected, got {err:?}"
+        );
+        // The error must name the offending pair so a user can find it.
+        assert!(
+            err.to_string().contains("M[1][2]") && err.to_string().contains("M[2][1]"),
+            "error must name both entries of the asymmetric pair: {err}"
+        );
+    }
+
+    #[test]
+    fn new_with_topology_asymmetric_permits_one_sided_off_diagonal() -> Result<()> {
+        let mut d = symmetric_data();
+        d[9] = 0.9; // M[2][1] = 0.9 (M[1][2] stays 0.6 — deliberately one-sided)
+        let m = CouplingMatrix::new_with_topology_asymmetric(2, MatrixTopology::Transversal, d)?;
+        assert!((m.at(1, 2).unwrap() - 0.6).abs() < 1e-15);
+        assert!((m.at(2, 1).unwrap() - 0.9).abs() < 1e-15);
+        Ok(())
+    }
+
+    #[test]
+    fn new_with_topology_accepts_diagonal_only() -> Result<()> {
+        // A diagonal-only (all-off-diagonal-zero) matrix is trivially symmetric.
+        let d = vec![0.0_f64; 9]; // order 1, side 3
+        let m = CouplingMatrix::new_with_topology(1, MatrixTopology::Transversal, d).unwrap();
+        assert_eq!(m.order(), 1);
+        Ok(())
     }
 }

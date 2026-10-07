@@ -244,8 +244,8 @@ Aberth), not Durand-Kerner alone.
 Dense (N+2)×(N+2) real-valued coupling matrix with source and load nodes.
 
 **Key types:**
-- `CouplingMatrix` — immutable matrix with topology metadata
-- `CouplingMatrixBuilder` — symmetric entry setting with bounds checking; `build()` rejects a one-sided off-diagonal `set` by default (every consumer assumes a symmetric matrix), opt out with `allow_asymmetric(true)`
+- `CouplingMatrix` — immutable matrix with topology metadata; `new_with_topology` (and `new`) rejects a grossly one-sided off-diagonal entry by default (tolerance-based `1e-12·max(1,|a|,|b|)` per pair, so rotated matrices within rounding are fine). Every consumer — including `response/backend.rs`, which exploits symmetry to cut a solve — assumes a symmetric matrix, so the invariant lives here at the primitive constructor, not the builder. `new_with_topology_asymmetric` is the explicit bypass for the deliberately asymmetric folded-mask fixtures.
+- `CouplingMatrixBuilder` — symmetric entry setting with bounds checking; `build()` routes to the strict constructor by default (a one-sided off-diagonal `set` is rejected at the constructor) and to the asymmetric bypass via `allow_asymmetric(true)`
 - `MatrixTopology` — Transversal, Folded, Arrow, Wheel (deprecated)
 - `BandPassScaledCouplingMatrix` — physical-frequency scaled matrix with external Q
 

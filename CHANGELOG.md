@@ -27,18 +27,39 @@
   carrier for an existing gate.
 
 ### Changed
-- **`CouplingMatrixBuilder::build()` now validates symmetry by default.**
-  A one-sided off-diagonal `set` (`M[i][j]` set without `M[j][i]`) silently
-  produced an asymmetric coupling matrix that every downstream consumer
-  (response solver, multiplication, section extraction) assumes is symmetric
-  — the same silent-corruption class the `flip_sign` diagonal bug was. `build()`
-  now rejects such a matrix with a typed `MfsError::PreconditionViolation`
-  naming the offending entries and the two fixes (`set_symmetric` or
-  `allow_asymmetric(true)`). The latter is a new opt-out used by the
-  deliberately asymmetric folded-mask gate fixtures in
-  `tests/benchmark_standard.rs`. Three new lib tests pin the invariant
-  (symmetric build, one-sided rejection, opt-out). Closes the open "builder
-  symmetry ergonomics" item.
+- **The coupling-matrix symmetry invariant now lives in the primitive
+  constructor, not the builder.** A one-sided off-diagonal entry
+  (`M[i][j]` set without `M[j][i]`) silently produced an asymmetric matrix
+  that every consumer assumes is symmetric — and `response/backend.rs`
+  *exploits* that symmetry to cut a solve (it reads the last row of A⁻¹ as the
+  transpose of the last column), so an asymmetric matrix yields a silently
+  wrong S21/S12, not a loud failure (the same silent-corruption class the
+  `flip_sign` diagonal bug was). `CouplingMatrix::new_with_topology` (and
+  `new`) now rejects such a matrix with a typed `PreconditionViolation` naming
+  the offending pair and the fix; `allow_asymmetric(true)` on the builder, or
+  the explicit `CouplingMatrix::new_with_topology_asymmetric` constructor,
+  routes around the check for the deliberately asymmetric folded-mask
+  fixtures in `tests/benchmark_standard.rs`.
+
+  Sinking it to the constructor — rather than the `build()`-only check this
+  work first shipped as — also closes the **CLI user-input bypass**:
+  `mfs_cli parse_matrix_json` builds from `new_with_topology` directly, so
+  a user-supplied asymmetric JSON matrix is now rejected before it reaches
+  the solver (pinned by the new e2e `test_optimize_rejects_asymmetric_user_matrix`).
+
+  The check is **tolerance-based and scale-aware** (`1e-12 * max(1, |a|, |b|)`
+  per pair): a folded (Givens-rotated) matrix is symmetric only to within
+  rounding (~1 uLP), so exact `a != b` would false-reject legitimate rotated
+  matrices (the default gate caught one in `optimizer_integration` at
+  `M[4][5]` vs `M[5][4]`, 1 uLP apart). The threshold still rejects a gross
+  one-sided entry while permitting rotation/rounding noise.
+
+  Four new lib tests pin the constructor invariant (symmetric accept,
+  one-sided rejection + error-naming, asymmetric bypass, diagonal-only
+  accept); the two `transpose()` tests that use deliberately asymmetric data
+  now route through `new_with_topology_asymmetric`; the builder keeps its
+  three tests (symmetric build, one-sided rejection, opt-out). Closes the open
+  "builder symmetry ergonomics" item.
 
 
 - **The D3-opt optimizer e2e gate is now live in CI** (it was dormant).
