@@ -176,6 +176,13 @@ fn rebuild_matrix(
 }
 
 /// Computes the residual vector: difference between current and target S-parameters.
+///
+/// The objective is the sum of squared residuals, so only `r_i^2` is
+/// observable — the sign convention of each component is not. The optimizer
+/// therefore fits the *s11* and *s21* response channels (four components per
+/// frequency sample) in a least-squares sense; it does not (and cannot) pin
+/// the per-component sign, and a sign flip on any single component is
+/// cost-neutral.
 fn compute_residuals(
     matrix: &CouplingMatrix,
     target: &SParameterResponse,
