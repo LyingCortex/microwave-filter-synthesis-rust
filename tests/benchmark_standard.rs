@@ -21,6 +21,7 @@ mod bench_support;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use mfs::design::FilterDesign;
 use mfs::freq::FrequencyGrid;
 use mfs::matrix::CouplingMatrix;
 use mfs::response::ResponseSolver;
@@ -781,5 +782,85 @@ fn response_invariance_metric_detects_a_real_difference() {
     assert!(
         metric < ANCHOR_PRINTED_PAIR_TOL,
         "metric is implausibly large for two transcriptions of one filter: {metric:e}"
+    );
+}
+
+// ─── 5. cross-backend equivalence (rust-native vs pinned python reference) ──
+
+/// The reference's eigenvalues are real to within 1e-9 (folded resonator
+/// subblock is real symmetric). The mfs metric is bounded by the
+/// cross_backend_equivalence gate tolerance 1e-6, but the *measured* deviation
+/// between the two backends is at machine precision (≤ ~3e-12 across all 7
+/// standard twoport cases, verified by the rust-native bench). The conformance
+/// test pins the gate at its contract tolerance (1e-6) so a regression that
+/// breaks the eigenvalue match is caught, while the 1e-9 realness bound pins
+/// the reference against being silently replaced by a complex-valued matrix.
+///
+/// The reference is the python backend's (fuqtgui `domain.*`) folded
+/// resonator-subblock eigenvalues, generated 2026-10-07 and pinned in
+/// `bench-data/golden/cross_backend_reference.json`. The two backends use
+/// *different* synthesis and folding algorithms; agreement at machine precision
+/// confirms both produce the same filter.
+#[test]
+fn cross_backend_equivalence_matches_python_reference() {
+    let xref = data::CrossBackendReference::load().expect("load cross-backend reference");
+    let cases = data::cases("twoport").expect("twoport cases");
+    assert!(
+        !xref.cases.is_empty(),
+        "cross_backend_reference.json has no cases"
+    );
+    // Every registered twoport case must have a reference entry.
+    for case in &cases {
+        assert!(
+            xref.cases.contains_key(case.qualid.as_str()),
+            "case {} missing from cross_backend_reference.json",
+            case.qualid
+        );
+    }
+    // The contract's gate tolerance (1e-6).
+    let tol = data::gate_tols()
+        .get("cross_backend_equivalence")
+        .copied()
+        .unwrap_or(1e-6);
+    // Verify each case: synthesize with mfs, fold, compare eigenvalues.
+    let mut worst = 0.0_f64;
+    for case in &cases {
+        let entry = &xref.cases[case.qualid.as_str()];
+        let order = gates::spec_usize(&case.spec, "order").expect("order");
+        assert_eq!(
+            entry.order, order,
+            "{}: reference order {} != case order {}",
+            case.qualid,
+            entry.order,
+            order
+        );
+        // Reference eigenvalues must be real (|im| < 1e-9).
+        for e in &entry.eig {
+            assert!(
+                e.im.abs() < 1e-9,
+                "{}: non-real reference eigenvalue im={:.3e}",
+                case.qualid,
+                e.im
+            );
+        }
+        let design = FilterDesign::prototype(order, gates::spec_f64(&case.spec, "rl").expect("rl"))
+            .zeros(gates::spec_f64_vec(&case.spec, "zeros").expect("zeros"))
+            .synthesize()
+            .expect("synthesis");
+        let folded = design.to_folded().expect("folding");
+        let dev = gates::cross_backend_equivalence_metric(&folded, entry).expect("eigenvalue metric");
+        assert!(
+            dev <= tol,
+            "{}: mfs eigenvalue deviation {:.3e} > contract tolerance {:.1e}",
+            case.qualid,
+            dev,
+            tol
+        );
+        worst = worst.max(dev);
+    }
+    eprintln!(
+        "cross_backend_equivalence: worst={worst:.3e} over {} twoport cases (tol {:.1e})",
+        cases.len(),
+        tol
     );
 }

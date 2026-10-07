@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`cross_backend_equivalence` gate carried by the rust-native synthesis bench**
+  (`benches/synthesis.rs`). The contract's fifth twoport gate — "the two
+  backends build the same filter" — now runs in CI without the sibling python
+  backend present. The reference is the **python backend's** folded
+  resonator-subblock eigenvalues, pinned in
+  `bench-data/golden/cross_backend_reference.json` (vendored from
+  `filter-bench/data/golden/`, the authoritative home). The mfs side computes
+  the same eigenvalues from its own folded matrix (real Schur, nalgebra/faer)
+  and compares sorted-paired at the contract tolerance (1e-6). Measured
+  deviation across all 7 standard twoport cases: **≤ 2.7e-12** (machine
+  precision), so the two independently-implemented backends produce the same
+  filter. The eigenvalue multiset is a similarity invariant — it absorbs the
+  folding convention, plane rotation, and global sign that make element-wise
+  comparison impossible. New typed accessor
+  `bench_support::data::CrossBackendReference` and metric
+  `bench_support::gates::cross_backend_equivalence_metric`; new conformance
+  test `cross_backend_equivalence_matches_python_reference` (pins the 1e-6
+  bound and the reference's real-valuedness) in `tests/benchmark_standard.rs`.
+  No `contract_version` bump: the gate, its metric, tolerance, and report
+  schema are unchanged — this adds authoritative data and a rust-native
+  carrier for an existing gate.
+
+
 ## [0.6.1] — 2026-10-07
 
 ### Added

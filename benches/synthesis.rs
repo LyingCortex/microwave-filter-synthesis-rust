@@ -141,6 +141,11 @@ fn bench_standard_cases(c: &mut Criterion) {
 
     let mut report = data::Report::new("rust-native", "rust", &data::platform());
 
+    // Pinned python-backend eigenvalue reference for the cross_backend_equivalence
+    // gate. Loaded once; a missing/corrupt file degrades the gate to SKIP, not a
+    // bench failure (the reference is authoritative data, not mfs state).
+    let xref = data::CrossBackendReference::load().ok();
+
     for case in &cases {
         let (order, rl, zeros) = case_inputs(case);
         let row = report.add_case(&case.qualid);
@@ -187,6 +192,7 @@ fn bench_standard_cases(c: &mut Criterion) {
         row.set_stage(&response_stage, resp_timing);
 
         set_twoport_gates(row, case, order, rl, &transversal, &folded, &grid);
+        set_cross_backend_gate(row, case, order, &folded, xref.as_ref());
     }
 
     report
@@ -194,10 +200,13 @@ fn bench_standard_cases(c: &mut Criterion) {
         .expect("write synthesis bench report");
 }
 
-/// The contract's four twoport gates on mfs's own synthesis + folding,
+/// The contract's twoport gates on mfs's own synthesis + folding,
 /// evaluated on the normalized prototype grid. Mirrors
 /// `fuqtgui/src/scripts/bench_synthesis.py::run_twoport_gates` so the Python and
 /// Rust reports carry the same gate set for a per-case diff.
+///
+/// The fifth gate, `cross_backend_equivalence`, is set by
+/// [`set_cross_backend_gate`], called separately from the loop.
 fn set_twoport_gates(
     row: &mut data::CaseResult,
     case: &Case,
@@ -330,6 +339,50 @@ fn set_twoport_gates(
             )),
         },
     );
+
+}
+
+/// The contract's fifth twoport gate, `cross_backend_equivalence` (soft, 1e-6):
+/// mfs's folded resonator-subblock eigenvalues vs the pinned python-backend
+/// reference (`bench-data/golden/cross_backend_reference.json`).
+///
+/// The python backend remains the authoritative source; this rust-native bench
+/// consumes it as a golden file (the `vendor.py` flow), so the gate runs in CI
+/// without the sibling backend present. A missing/corrupt reference degrades the
+/// gate to `SKIP`, never a bench failure (the reference is authoritative data,
+/// not mfs state).
+fn set_cross_backend_gate(
+    row: &mut data::CaseResult,
+    case: &Case,
+    order: usize,
+    folded: &CouplingMatrix,
+    xref: Option<&data::CrossBackendReference>,
+) {
+    let tols = data::gate_tols();
+    let tol_x = tols.get("cross_backend_equivalence").copied().unwrap_or(1e-6);
+    match xref.and_then(|r| r.cases.get(case.qualid.as_str())) {
+        None => row.set_gate(
+            "cross_backend_equivalence",
+            data::GateResult::skip("case absent from cross_backend_reference.json"),
+        ),
+        Some(ref_entry) => match gates::cross_backend_equivalence_metric(folded, ref_entry) {
+            Ok(dev) => row.set_gate(
+                "cross_backend_equivalence",
+                data::GateResult {
+                    status: if dev <= tol_x { "PASS" } else { "FAIL" }.to_string(),
+                    metric: Some(dev),
+                    tol: Some(tol_x),
+                    detail: Some(format!(
+                        "max sorted-paired |Δλ| folded resonator subblock (order {order}) vs python reference"
+                    )),
+                },
+            ),
+            Err(e) => row.set_gate(
+                "cross_backend_equivalence",
+                data::GateResult::skip(format!("eigenvalue comparison: {e}")),
+            ),
+        },
+    };
 }
 
 /// Case spec -> synthesis inputs (`order`, `rl`, normalized transmission zeros).

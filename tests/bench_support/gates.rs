@@ -8,6 +8,7 @@
 use mfs::freq::FrequencyGrid;
 use mfs::matrix::CouplingMatrix;
 use mfs::response::SParameterResponse;
+use nalgebra::DMatrix;
 
 use super::data::{self, Result};
 
@@ -74,6 +75,72 @@ pub fn channel_inputs(spec: &serde_json::Value) -> Result<Vec<(usize, f64, Vec<f
 }
 
 // ─── gates ───────────────────────────────────────────────────────────────────
+
+/// The resonator subblock (rows/cols `1..=order`) of a folded `(order+2)×(order+2)`
+/// coupling matrix, as a dense real matrix for eigenvalue analysis.
+///
+/// The folded resonator subblock is real symmetric, so its eigenvalues (the
+/// filter's "natural frequencies") are a similarity invariant: independent of
+/// the folding convention, plane rotation, and global sign. This is the
+/// quantity the contract's `cross_backend_equivalence` gate compares across
+/// backends.
+pub fn folded_resonator_subblock(folded: &CouplingMatrix) -> DMatrix<f64> {
+    let order = folded.order();
+    let mut out = DMatrix::<f64>::zeros(order, order);
+    for (i, row) in (1..=order).enumerate() {
+        for (j, col) in (1..=order).enumerate() {
+            out[(i, j)] = folded.at(row, col).expect("resonator subblock in range");
+        }
+    }
+    out
+}
+
+/// Sorted (by real part, then imaginary) complex eigenvalues of a folded
+/// resonator subblock, computed via real Schur (nalgebra's `faer` backend).
+pub fn folded_subblock_eigenvalues(folded: &CouplingMatrix) -> Vec<(f64, f64)> {
+    let sub = folded_resonator_subblock(folded);
+    let schur = sub.schur();
+    let mut eig: Vec<(f64, f64)> = schur
+        .complex_eigenvalues()
+        .iter()
+        .map(|c| (c.re, c.im))
+        .collect();
+    eig.sort_by(|a, b| {
+        a.0.partial_cmp(&b.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    eig
+}
+
+/// `cross_backend_equivalence` metric — the max sorted-paired deviation between
+/// the mfs folded resonator-subblock eigenvalues and a pinned python-backend
+/// reference entry (from `golden/cross_backend_reference.json`).
+pub fn cross_backend_equivalence_metric(
+    folded: &CouplingMatrix,
+    reference: &data::CrossBackendCase,
+) -> Result<f64> {
+    let mine = folded_subblock_eigenvalues(folded);
+    let theirs: Vec<(f64, f64)> = reference
+        .eig
+        .iter()
+        .map(|e| (e.re, e.im))
+        .collect();
+    if mine.len() != theirs.len() {
+        return Err(format!(
+            "eigenvalue count mismatch: mfs {} vs reference {}",
+            mine.len(),
+            theirs.len()
+        )
+        .into());
+    }
+    let worst = mine
+        .iter()
+        .zip(&theirs)
+        .map(|((mr, mi), (tr, ti))| (*mr - *tr).abs().max((*mi - *ti).abs()))
+        .fold(0.0_f64, f64::max);
+    Ok(worst)
+}
 
 /// `response_invariance` — max S-parameter deviation between two responses,
 /// `max|S11_a - S11_b|` or the sign-symmetric `min(max|S21_a-S21_b|, max|S21_a+S21_b|)`.

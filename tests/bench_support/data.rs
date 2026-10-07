@@ -128,6 +128,44 @@ pub fn anchors(family: &str) -> Result<serde_json::Value> {
     )
 }
 
+/// Pinned python-backend eigenvalue reference for the `cross_backend_equivalence`
+/// gate (`golden/cross_backend_reference.json`), keyed by global case id.
+///
+/// The value is the sorted (by real, then imaginary) complex eigenvalues of the
+/// python backend's folded resonator subblock — the similarity-invariant that
+/// the gate compares against.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CrossBackendReference {
+    pub cases: BTreeMap<String, CrossBackendCase>,
+}
+
+/// One case's pinned eigenvalue reference (sorted by real, then imaginary).
+#[derive(Debug, Clone, Deserialize)]
+pub struct CrossBackendCase {
+    pub order: usize,
+    pub rl: f64,
+    pub zeros: Vec<f64>,
+    /// Complex eigenvalues, each `{re, im}`, sorted ascending.
+    pub eig: Vec<ComplexEig>,
+}
+
+/// A complex eigenvalue (`re + i·im`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct ComplexEig {
+    pub re: f64,
+    pub im: f64,
+}
+
+impl CrossBackendReference {
+    /// Loads `golden/cross_backend_reference.json`.
+    pub fn load() -> Result<Self> {
+        let path = data_dir().join("golden").join("cross_backend_reference.json");
+        let doc: Self = serde_json::from_value(read_json(&path)?)
+            .map_err(|e| format!("invalid cross-backend reference {path:?}: {e}"))?;
+        Ok(doc)
+    }
+}
+
 // ─── Harness (timing / iteration policy) ─────────────────────────────────────
 
 /// Timing policy of one case.
