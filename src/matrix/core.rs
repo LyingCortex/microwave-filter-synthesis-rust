@@ -613,4 +613,36 @@ mod tests {
         assert_eq!(m.order(), 1);
         Ok(())
     }
+
+    /// Pins the *lower* side of the symmetry tolerance: a relative difference
+    /// of ~1e-13 — the level a Givens-rotated (folded) matrix legitimately
+    /// carries after rounding — must be **accepted**. If this test starts
+    /// failing, the tolerance has been over-tightened (e.g. back to exact
+    /// `a != b`), which would false-reject every rotated/perturbed matrix.
+    #[test]
+    fn new_with_topology_permits_rotation_level_asymmetry() -> Result<()> {
+        let mut d = symmetric_data();
+        // M[2][1] differs from M[1][2]=0.6 by a relative 1e-13.
+        d[9] = 0.6 * (1.0 + 1e-13);
+        let m = CouplingMatrix::new_with_topology(2, MatrixTopology::Transversal, d)?;
+        assert_eq!(m.order(), 2);
+        Ok(())
+    }
+
+    /// Pins the *upper* side of the symmetry tolerance: a relative difference
+    /// of ~1e-6 — far above rotation/rounding noise, but far below a gross
+    /// one-sided entry — must be **rejected**. The threshold
+    /// (`1e-12 * max(1,|a|,|b|)`) sits between the two boundary tests, so a
+    /// loosened tolerance that would let real asymmetry through is caught here.
+    #[test]
+    fn new_with_topology_rejects_relative_asymmetry_above_noise() {
+        let mut d = symmetric_data();
+        // M[2][1] differs from M[1][2]=0.6 by a relative 1e-6.
+        d[9] = 0.6 * (1.0 + 1e-6);
+        let err = CouplingMatrix::new_with_topology(2, MatrixTopology::Transversal, d).unwrap_err();
+        assert!(
+            matches!(err, MfsError::PreconditionViolation(_)),
+            "a relative-1e-6 asymmetric pair must be rejected, got {err:?}"
+        );
+    }
 }

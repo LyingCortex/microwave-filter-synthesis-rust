@@ -54,10 +54,12 @@
   `M[4][5]` vs `M[5][4]`, 1 uLP apart). The threshold still rejects a gross
   one-sided entry while permitting rotation/rounding noise.
 
-  Four new lib tests pin the constructor invariant (symmetric accept,
+  Six new lib tests pin the constructor invariant (symmetric accept,
   one-sided rejection + error-naming, asymmetric bypass, diagonal-only
-  accept); the two `transpose()` tests that use deliberately asymmetric data
-  now route through `new_with_topology_asymmetric`; the builder keeps its
+  accept, plus two boundary tests that pin the tolerance from both sides:
+  a relative ~1e-13 pair is accepted, a relative ~1e-6 pair is rejected).
+  The two `transpose()` tests that use deliberately asymmetric data now route
+  through `new_with_topology_asymmetric`; the builder keeps its
   three tests (symmetric build, one-sided rejection, opt-out). Closes the open
   "builder symmetry ergonomics" item.
 
