@@ -1,33 +1,34 @@
 # MFS TODO List
 
-**Status as of 0.6.0 (2026-10-05).** This file is maintained as the single
+**Status as of 0.6.1 (2026-10-07).** This file is maintained as the single
 open-item list. Closed items are listed with the version that closed them so
 history is traceable. Authoritative architecture/limitation references:
 `docs/architecture.md` (Known Limitations / Future Roadmap) and
 `docs/internal/architecture-review-2026-09-25.md`.
 
-## Current state (0.6.0, 2026-10-05)
+## Current state (0.6.1, 2026-10-07)
 
-Working tree clean; `master` head `33e8a79` (the multi-band K ≥ 3 DOF refutation).
+Working tree clean; `master` head `56253a1` (the fresh-eyes CT/CQ gate/doc fix).
 All CI-parity checks green on that head:
 
-- `cargo test --all-targets` — green (lib 250 passed + 19 integration
+- `cargo test --all-targets` — green (lib 256 passed + 19 integration
   binaries, 0 failed)
 - `cargo clippy --all-targets -- -D warnings` — zero warnings
 - `cargo doc --no-deps` — zero warnings
 
-0.6.0 closes the four active development areas end-to-end: the duplexer
-full Macchiarella spectral path (Wave 2), the N-channel multiplexer full path
-(B1–B4), true multi-band synthesis (C0/C2/C3, dual-band route-α) with
-K ≥ 3 refuted as a degrees-of-freedom wall, and the LM optimizer's
-integration/CLI/bench surface (D1–D4-opt). Passband transmission zeros are
-refuted as unrealizable in the single-function prototype (E1). The four
-previously-open core items (passband TZ, repeated poles / Laurent, N-channel
-generalization, multi-band scope-1) are now Closed below.
+0.6.1 closes the 0.6.0 whole-crate review end-to-end: the "silent errors"
+wave (P1-1/2/3/4/6 + P2-1/2/3/5 + all six P3, the "gate-green but wrong
+result" class) and the CT/CQ cascade wave (P1-5 + P2-4), plus the follow-up
+clean CQ quadruplet tiling (source-side non-overlapping, `order >= 4·pairs`,
+order-6 2-pair rejected as topologically impossible) and a fresh-eyes review
+that corrected the CQ load-port gate index and two doc/code contradictions.
+All 17 valid review findings are now fixed and gate-anchored. Passband
+transmission zeros remain refuted as unrealizable in the single-function
+prototype (E1, 0.6.0).
 
 The continuation plan for the four areas is
-[`docs/continuation-plan.md`](../continuation-plan.md); all of its Wave 1–5
-items are done (2026-09-29 → 2026-10-05). The Open sections below hold the
+[`docs/continuation-plan.md`](../continuation-plan.md); all of its Wave 1–6
+items are done (2026-09-29 → 2026-10-07). The Open sections below hold the
 remaining low-priority ecosystem items and the refuted passband-TZ work.
 
 ## Open
@@ -83,3 +84,4 @@ remaining low-priority ecosystem items and the refuted passband-TZ work.
 | N > 2 multiplexer full path (B1–B4) | 0.6.0 | true (N+1)-port response (B1), shared Macchiarella full path generalized to N channels (B2), convergence + fidelity gates at N = 3/4 (B3), per-gate cm/star unitarity gates (B4); `tests/multiplexer.rs` |
 | Multi-band synthesis (scope-1, dual-band route-α) | 0.6.0 | C0 design doc (route committed) + C2a/C2b/C2c (`multi_band_chebyshev_polynomials` → `MatrixSynthesisEngine`) + C3 (`tests/multi_band.rs` Fig. 25 anchor); K ≥ 3 refuted as a degrees-of-freedom wall (E1-style) |
 | Passband transmission zeros (`|zero| < 1`) | 0.6.0 (refuted) | E1: no valid in-band-null prototype in the single-function real-rooted form (Feldtkeller violation); `approx` rejects typed. Realizing them needs the multifunction characteristic (new research) |
+| 0.6.0 whole-crate review (17 findings) — "silent errors" wave + CT/CQ cascade + clean CQ tiling + fresh-eyes gate/doc fix | 0.6.1 | all 17 valid findings (6 P1 / 5 P2 / 6 P3) fixed and gate-anchored: `recovery.rs` rescale_d, `scaling.rs` denorm sign, `response/backend.rs` group-delay port nodes, `machiarella.rs` p0² rejection, `cascade.rs` CT (Fig. 21) + CQ (source-side tiling, `order ≥ 4·pairs`), `python.rs` length checks, CLI/schema/validator P2s, P3s; the CQ load-port gate index and two doc/code contradictions corrected by a fresh-eyes review (2026-10-07) |

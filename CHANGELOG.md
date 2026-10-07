@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-10-07
+
 ### Added
 
 - **Whole-crate code review of 0.6.0 (2026-10-05).**
@@ -97,6 +99,28 @@
     `cq_synthesis_single_quadruplet_structure`, `cq_synthesis_order6_single_quadruplet`,
     `cq_synthesis_order8_two_quadruplets` (verified layout + CQ≠CT + mainline),
     `cq_synthesis_rejects_too_small_order`.
+- **Fresh-eyes review of the CT/CQ work (2026-10-07)** — no wrong-result
+  (library) bug, but three gate/doc defects, all measured and fixed
+  (`src/matrix/cascade.rs`, `src/design.rs`):
+  - **CQ load-port gate never asserted the load column** (off-by-one). The load
+    port is row `side-1` (`side = order+2`), so order-6 load = row 7, order-8
+    load = row 9. The order-6 gate asserted `get(5,6)`/`get(4,6)` (the res5-res6
+    mainline and res4-res6 2-skip, both already gated below) mislabelled as
+    "load-res6/5"; the order-8 gate asserted `get(7,8)`. Since CQ is a
+    similarity transform, S21-invariance cannot catch a load-port regression, so
+    a wrong load coupling would have passed CI green. Corrected to the actual
+    load column: order-6 `get(7,6)` > 0.05 (res6-load, measured 1.06) +
+    `get(7,5)` < 1e-3 (res5-load, ~0); order-8 `get(9,8)` (res8-load, measured
+    1.0443).
+  - **CQ doc `common_resonator` corrected**: the source-side tiling pairs each
+    quadruplet with a trisection starting at the same resonator, so
+    `extract_cascade_quadruplets` selects `common_resonator = 1` on every
+    quadruplet (the `= 4` load-end branch is never reached) — the doc had said 4.
+  - **`to_ct` doc reconciled** with the single-`zeros[0]` implementation (the
+    remaining zeros are already encoded in the arrow form; only the count is
+    validated). Also fixed a `\\varepsilon` LaTeX typo in the multi-band DOF-wall
+    doc and a stale "load-res7 ~0.023" comment in the order-8 gate (the measured
+    inherent load couplings are load→res 2/4/6 = 0.010/0.035/0.020).
 
 ## [0.6.0] — 2026-10-05
 
