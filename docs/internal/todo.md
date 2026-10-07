@@ -8,11 +8,11 @@ history is traceable. Authoritative architecture/limitation references:
 
 ## Current state (0.6.1, 2026-10-07)
 
-Working tree clean; `master` head `56253a1` (the fresh-eyes CT/CQ gate/doc fix).
+Working tree clean; `master` head `ec4482c` (Wave 7: cross-backend gate).
 All CI-parity checks green on that head:
 
-- `cargo test --all-targets` — green (lib 256 passed + 19 integration
-  binaries, 0 failed)
+- `cargo test --all-targets` — green (lib 256 passed + 15 integration
+  test binaries, 0 failed)
 - `cargo clippy --all-targets -- -D warnings` — zero warnings
 - `cargo doc --no-deps` — zero warnings
 
@@ -27,8 +27,15 @@ transmission zeros remain refuted as unrealizable in the single-function
 prototype (E1, 0.6.0).
 
 The continuation plan for the four areas is
-[`docs/continuation-plan.md`](../continuation-plan.md); all of its Wave 1–6
-items are done (2026-09-29 → 2026-10-07). The Open sections below hold the
+[`docs/continuation-plan.md`](../continuation-plan.md); all of its Wave 1–7
+items are done (2026-09-29 → 2026-10-07). Wave 7 (2026-10-07, `ec4482c`)
+carries the standard's `cross_backend_equivalence` gate in the rust-native
+`synthesis` bench: a pinned python-backend eigenvalue reference
+(`bench-data/golden/cross_backend_reference.json`, vendored from
+`filter-bench/data/golden/`) is compared against mfs's folded
+resonator-subblock eigenvalues at the contract tolerance (1e-6); measured
+≤ 2.7e-12 across all 7 twoport cases, with a conformance test in
+`tests/benchmark_standard.rs`. The Open sections below hold the
 remaining low-priority ecosystem items and the refuted passband-TZ work.
 
 ## Open
@@ -44,12 +51,6 @@ remaining low-priority ecosystem items and the refuted passband-TZ work.
 
 ### Medium priority (engineering quality)
 
-- **Fold the duplexer synthesis into the multiplexer (N=2)** — the
-  duplicated `recover_filter_design` path is now a single
-  `synthesis::recover_channel_design` (closed), but `DuplexerSynthesis`
-  still carries its own 2-channel iteration loop; it could become an N=2
-  `MultiplexerSynthesis` call so the Macchiarella-Tamiazzo iteration is
-  maintained once.
 - **Builder symmetry ergonomics** — `CouplingMatrixBuilder::set` writes a
   single entry (symmetry is the caller's job; `set_symmetric` exists).
   Consider a symmetric-by-default builder for the public API.
@@ -85,3 +86,4 @@ remaining low-priority ecosystem items and the refuted passband-TZ work.
 | Multi-band synthesis (scope-1, dual-band route-α) | 0.6.0 | C0 design doc (route committed) + C2a/C2b/C2c (`multi_band_chebyshev_polynomials` → `MatrixSynthesisEngine`) + C3 (`tests/multi_band.rs` Fig. 25 anchor); K ≥ 3 refuted as a degrees-of-freedom wall (E1-style) |
 | Passband transmission zeros (`|zero| < 1`) | 0.6.0 (refuted) | E1: no valid in-band-null prototype in the single-function real-rooted form (Feldtkeller violation); `approx` rejects typed. Realizing them needs the multifunction characteristic (new research) |
 | 0.6.0 whole-crate review (17 findings) — "silent errors" wave + CT/CQ cascade + clean CQ tiling + fresh-eyes gate/doc fix | 0.6.1 | all 17 valid findings (6 P1 / 5 P2 / 6 P3) fixed and gate-anchored: `recovery.rs` rescale_d, `scaling.rs` denorm sign, `response/backend.rs` group-delay port nodes, `machiarella.rs` p0² rejection, `cascade.rs` CT (Fig. 21) + CQ (source-side tiling, `order ≥ 4·pairs`), `python.rs` length checks, CLI/schema/validator P2s, P3s; the CQ load-port gate index and two doc/code contradictions corrected by a fresh-eyes review (2026-10-07) |
+| Fold duplexer into multiplexer (N=2) | 0.6.1 | already satisfied: the full Macchiarella–Tamiazzo iteration (the item's stated goal) is maintained once in `src/synthesis/machiarella` and shared by both `DuplexerSynthesis` (full path) and `MultiplexerSynthesis` (N≥2, B2). The only non-shared loop is the *simplified* perturbation heuristic (duplexer bespoke 2-channel vs multiplexer N-channel), which the parity test `multiplexer_diplexer_parity_with_duplexer` documents as legitimately divergent (asserts band-placement + validity only, not value-identity). Measured 2026-10-07 (throwaway probe): forcing the fold would change the duplexer default path's recovered matrices by O(1–5) (ideal Type-I max ΔM 2.44, Type-II 5.54); the multiplexer's simplified N=2 path exhausts its 40-iter budget (conv_err 2.7e-3, unconverged) and leaves its recovered centers at the input, versus the duplexer's perturbed 15-iter convergence — a behavior change, not a dedup. Not folded. |
