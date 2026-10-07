@@ -58,9 +58,12 @@ impl CouplingMatrix {
     ///
     /// This routes through the verified `extract_cascade_quadruplets`
     /// primitive (the same path as the Python `cq` binding), which merges each
-    /// quadruplet's two neighboring trisections with the load-end
-    /// elimination formula (`common_resonator = 4`). The former manual
-    /// tail-peel loop left overlapping-quadruplet residues, and the original
+    /// quadruplet's two neighboring trisections. The source-side tiling pairs
+    /// each quadruplet with a trisection starting at the same resonator, so the
+    /// merge uses `common_resonator = 1` on every quadruplet (the `= 4`
+    /// load-end formula exists in the primitive but is not reached by this
+    /// tiling). The former manual tail-peel loop left
+    /// overlapping-quadruplet residues, and the original
     /// `diagonal_rotation_angle` merge was a no-op for symmetric pairs (CQ
     /// byte-identical to the CT, review P1-5).
     pub fn to_cascaded_quadruplets(&self, zero_pairs: &[(f64, f64)]) -> Result<Self> {
@@ -178,15 +181,17 @@ mod tests {
             cq.get(0, 1)
         );
         assert!(cq.get(0, 2).abs() < 1e-3, "CQ: source-res2 should be 0: {}", cq.get(0, 2));
+        // Load port (row side-1 = 7) couples to the last resonator (res 6)
+        // only — the mainline end. res 5 and the outer 2-skip are zero.
         assert!(
-            cq.get(5, 6).abs() > 0.05,
+            cq.get(7, 6).abs() > 0.05,
             "CQ: load-res6 missing: {}",
-            cq.get(5, 6)
+            cq.get(7, 6)
         );
         assert!(
-            cq.get(4, 6).abs() < 1e-3,
+            cq.get(7, 5).abs() < 1e-3,
             "CQ: load-res5 should be 0: {}",
-            cq.get(4, 6)
+            cq.get(7, 5)
         );
 
         // Mainline 1..=6 connected.
@@ -265,13 +270,14 @@ mod tests {
         );
         assert!(cq.get(0, 2).abs() < 1e-3, "CQ: source-res2 should be 0: {}", cq.get(0, 2));
         assert!(
-            cq.get(7, 8).abs() > 0.05,
+            cq.get(9, 8).abs() > 0.05,
             "CQ: load-res8 missing: {}",
-            cq.get(7, 8)
+            cq.get(9, 8)
         );
-        // The load-end elimination formula (common_res=4) leaves an inherent
-        // load-res7 coupling (~0.023 in the verified reference); this is part
-        // of the verified layout, not a defect, so it is not gated to zero.
+        // The load-end elimination (common_res=1, source-side tiling) leaves
+        // small inherent load->res 2/4/6 couplings (measured 0.010 / 0.035 /
+        // 0.020) — part of the verified `CascadeQuartets` layout, not a
+        // defect, so the load row is gated for the res-8 mainline end only.
 
         // Mainline 1..=8 connected.
         for i in 1..8 {

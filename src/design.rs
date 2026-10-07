@@ -363,8 +363,11 @@ impl FilterDesign {
 
     /// Converts to Cascaded Trisection (CT) topology.
     ///
-    /// Each transmission zero is realized by one trisection section.
-    /// The zeros are assigned from load end towards source end.
+    /// A single condition-at-load-tail + peel-to-source (`extract_triplet`)
+    /// reveals the full trisection cascade: `zeros[0]` conditions the peel and
+    /// becomes the source-side trisection's zero; the remaining zeros are
+    /// already encoded in the arrow form and are used only for the count
+    /// validation (`zeros.len() <= order - 2`).
     pub fn to_ct(&self, zeros: &[f64]) -> Result<CouplingMatrix> {
         self.matrix.to_cascaded_trisections(zeros)
     }
