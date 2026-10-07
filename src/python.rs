@@ -287,12 +287,12 @@ impl PyFilterDesign {
             "HZ" => FreqUnit::Hz,
             "KHZ" => FreqUnit::KHz,
             "MHZ" => FreqUnit::MHz,
-            "GHZ" | _ => FreqUnit::GHz,
+            _ => FreqUnit::GHz,
         };
         let df = match format.to_uppercase().as_str() {
             "MA" => DataFormat::MA,
             "DB" => DataFormat::DB,
-            "RI" | _ => DataFormat::RI,
+            _ => DataFormat::RI,
         };
         let ver = if version >= 2 {
             TouchstoneVersion::V2
@@ -396,6 +396,10 @@ impl PyFilterDesign {
     /// targets would be matched at the wrong normalized frequencies).
     ///
     /// Returns a dict with: matrix (2D list), cost (float), iterations (int), converged (bool).
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "pyo3 method: the 8th positional is the implicit `py: Python` receiver"
+    )]
     #[pyo3(signature = (freqs, target_s21_re, target_s21_im, target_s11_re, target_s11_im, max_iter=200))]
     fn tune(
         &self,
@@ -723,6 +727,10 @@ impl PyDuplexer {
 /// Returns:
 ///     Duplexer object
 #[pyfunction]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "flat pyo3 signature: 10 positional args is the natural duplexer surface"
+)]
 #[pyo3(signature = (tx_order, tx_rl, tx_center, tx_bw, rx_order, rx_rl, rx_center, rx_bw, tx_zeros=None, rx_zeros=None))]
 fn duplexer(
     tx_order: usize,

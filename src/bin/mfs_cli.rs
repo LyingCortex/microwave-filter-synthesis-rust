@@ -288,22 +288,22 @@ fn run(cli: &Cli) -> Result<(), CliRunError> {
         s2p,
     }) = &cli.command
     {
-        return run_design(
-            *order,
-            *return_loss,
-            *center,
-            *bandwidth,
-            *start,
-            *stop,
-            zeros.as_deref(),
-            *q,
+        let args = DesignArgs {
+            order: *order,
+            return_loss: *return_loss,
+            center: *center,
+            bandwidth: *bandwidth,
+            start: *start,
+            stop: *stop,
+            zeros: zeros.as_deref(),
+            q: *q,
             topology,
-            *points,
-            *resp_start,
-            *resp_stop,
-            s2p.as_deref(),
-            &cli.format,
-        );
+            points: *points,
+            resp_start: *resp_start,
+            resp_stop: *resp_stop,
+            s2p: s2p.as_deref(),
+        };
+        return run_design(&args, &cli.format);
     }
 
     if let Some(Command::Multiplexer {
@@ -406,26 +406,43 @@ fn run(cli: &Cli) -> Result<(), CliRunError> {
     Ok(())
 }
 
-/// Runs the quick `design` subcommand.
-fn run_design(
+/// Parameters for the `design` subcommand, grouped into a single value so
+/// [`run_design`] stays under clippy's argument-count limit.
+struct DesignArgs<'a> {
     order: usize,
     return_loss: f64,
     center: Option<f64>,
     bandwidth: Option<f64>,
     start: Option<f64>,
     stop: Option<f64>,
-    zeros: Option<&[f64]>,
+    zeros: Option<&'a [f64]>,
     q: Option<f64>,
-    topology: &str,
+    topology: &'a str,
     points: usize,
     resp_start: Option<f64>,
     resp_stop: Option<f64>,
-    s2p: Option<&std::path::Path>,
-    format: &OutputFormat,
-) -> Result<(), CliRunError> {
+    s2p: Option<&'a std::path::Path>,
+}
+
+/// Runs the quick `design` subcommand.
+fn run_design(args: &DesignArgs<'_>, format: &OutputFormat) -> Result<(), CliRunError> {
     use mfs::design::FilterDesign;
     use mfs::matrix::MatrixTopology;
     use mfs::touchstone::{self, DataFormat, FreqUnit, TouchstoneConfig, TouchstoneVersion};
+
+    let order = args.order;
+    let return_loss = args.return_loss;
+    let center = args.center;
+    let bandwidth = args.bandwidth;
+    let start = args.start;
+    let stop = args.stop;
+    let zeros = args.zeros;
+    let q = args.q;
+    let topology = args.topology;
+    let points = args.points;
+    let resp_start = args.resp_start;
+    let resp_stop = args.resp_stop;
+    let s2p = args.s2p;
 
     // Resolve center/bandwidth from either (center, bw) or (start, stop) notation
     let (resolved_center, resolved_bw) = match (center, bandwidth, start, stop) {
@@ -1204,16 +1221,11 @@ fn run_remaining_stages(ctx: &mut SynthesisContext) -> mfs::Result<()> {
         {
             continue;
         }
-        // Skip optional stages that lack required configuration
+        // Skip optional stages that lack required configuration. Every other
+        // stage (including response_evaluation) is always attempted when the
+        // matrix is available.
         match *stage_name {
-            "topology_transform" => {
-                if ctx.options.topology.is_none() {
-                    continue;
-                }
-            }
-            "response_evaluation" => {
-                // Always attempt response evaluation if matrix is available
-            }
+            "topology_transform" if ctx.options.topology.is_none() => continue,
             _ => {}
         }
         run_stage(ctx, stage_name)?;

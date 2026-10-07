@@ -36,6 +36,34 @@ jobs:
           toolchain: ${{ matrix.rust }}
       - run: cargo test --all-targets
 
+  # The `mfs_cli` binary is gated behind the `cli` feature (required-features),
+  # so the default `cargo test --all-targets` above never builds it and
+  # `tests/cli_integration.rs` compiles to zero tests. This job builds the
+  # binary and runs the black-box end-to-end gate on every OS — including the
+  # D3-opt optimizer subcommands (`optimize` / `extract`).
+  cli:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --features cli --bin mfs_cli
+      - run: cargo test --features cli --test cli_integration
+
+  # The `cli` and `python` features hide code behind required-features /
+  # optional deps that the default `clippy` job never compiles, so their
+  # lints would otherwise stay dormant. Lint both feature-enabled builds.
+  feature-lints:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy --features cli,python --all-targets -- -D warnings
+
   clippy:
     runs-on: ubuntu-latest
     steps:

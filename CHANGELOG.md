@@ -26,6 +26,28 @@
   schema are unchanged — this adds authoritative data and a rust-native
   carrier for an existing gate.
 
+### Changed
+
+- **The D3-opt optimizer e2e gate is now live in CI** (it was dormant).
+  `tests/cli_integration.rs` is `#[cfg(feature = "cli")]` and the `mfs_cli`
+  bin has `required-features = ["cli"]`, so the default `cargo test
+  --all-targets` / `clippy --all-targets` CI steps never built the binary —
+  the e2e test compiled to zero tests and the `cli`/`python` feature code was
+  never linted. `.github/workflows/ci.yml` gains a `cli` job (3-OS matrix:
+  `cargo build --features cli --bin mfs_cli` then `cargo test --features cli
+  --test cli_integration`, which builds the binary via `CARGO_BIN_EXE_mfs_cli`
+  and runs the 2 optimizer e2e gates — `optimize` order-4 folded recovery and
+  `extract` order-4 transversal — plus the 4 pipeline gates) and a
+  `feature-lints` job (`cargo clippy --features cli,python --all-targets
+  -- -D warnings`). Wiring the features surfaced lints the default gate had
+  been hiding, now fixed: `run_design` 14 args → grouped `DesignArgs` struct
+  and `run_remaining_stages` collapsible `match` arm (`mfs_cli.rs`); range
+  index loops → `iter().enumerate()` (`cli_integration.rs`); two redundant
+  `_` wildcard match arms and pyo3 `tune`/`duplexer` signatures with
+  `#[allow(clippy::too_many_arguments)]` (`python.rs`). The
+  `cli_integration.rs` binary-missing guard changed from a silent skip to a
+  hard `assert!` — a gate that cannot fail is no gate.
+
 
 ## [0.6.1] — 2026-10-07
 

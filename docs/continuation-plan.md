@@ -26,7 +26,7 @@ carries *what to do next and how to know it is done*.
 | Duplexer | Simplified frequency-offset perturbation (default); full Macchiarella–Tamiazzo spectral path behind `DuplexerSynthesis::full_iteration(true)` **converges at Type-I orders 2–8 and Type-II (incl. the §VI degree-40 GSM design), all gate-anchored** (2026-10-03) | High (publication-anchored, full path) / Medium (simplified default) |
 | Multiplexer (N-channel) | Independent per-channel synthesis + simplified perturbation (default); **full Macchiarella–Tamiazzo spectral path for N channels behind `MultiplexerSynthesis::full_iteration(true)`** (shared with the duplexer, `src/synthesis/machiarella.rs`; B2, 2026-10-04) converges at N = 3/4 order-4 (gate-anchored); response is the **true (N+1)-port admittance model** (B1) | High (publication-anchored, full path) / Medium (simplified default) |
 | Multi-band | **True multi-passband synthesis shipped (C2/C3, 2026-10-05)** — route-α multi-band Chebyshev: `MultiBandMapping` (C1) + `MultiBandSpec` (C2a) + `multi_band_chebyshev_polynomials` (C2b) → `MatrixSynthesisEngine` (C2c, unchanged) → Fig. 25 dual-band anchor; response invariance, per-band RL, TZ nulls, unitarity, outer-stopband all gate-anchored (C3, `tests/multi_band.rs`); **K ≥ 3 infeasible** for this characteristic (DOF wall: equiripple is square only for one positive-axis interval; M ≥ 2 overdetermined — measured, design doc "K ≥ 3: the DOF Wall") | High (publication-anchored, dual-band) |
-| Optimization | LM `tune_matrix` / `extract_matrix` (hand-rolled Gaussian elimination, **scale-aware FD Jacobian `δ = 1e-7·max(1,|x_i|)`** with halving retry, topology frozen to template; convergence on successive-iteration cost after accepted steps; singular trials rejected, not errors; **`extract_matrix` starts from a crude inline-chain guess**); 3 lib unit tests + **2 order-6 integration gates (synthesize→perturb→recover, extract-from-crude-guess) GREEN (D2-opt, 2026-10-04)** + **CLI `optimize`/`extract` subcommands and Python `extract`/`tune` (D3-opt, 2026-10-04), e2e-gated** + **`benches/optimizer.rs` & 0.1 dB-noise extraction regression (D4-opt, 2026-10-04)** | Medium (order ≤ 6 extraction/recovery gate-anchored; CLI/Python e2e-gated; benched; order-8 cold-start extraction and topology-bound recovery documented as limits, report §6) |
+| Optimization | LM `tune_matrix` / `extract_matrix` (hand-rolled Gaussian elimination, **scale-aware FD Jacobian `δ = 1e-7·max(1,|x_i|)`** with halving retry, topology frozen to template; convergence on successive-iteration cost after accepted steps; singular trials rejected, not errors; **`extract_matrix` starts from a crude inline-chain guess**); 3 lib unit tests + **2 order-6 integration gates (synthesize→perturb→recover, extract-from-crude-guess) GREEN (D2-opt, 2026-10-04)** + **CLI `optimize`/`extract` subcommands and Python `extract`/`tune` (D3-opt, 2026-10-04; e2e gate wired into CI 2026-10-07)** + **`benches/optimizer.rs` & 0.1 dB-noise extraction regression (D4-opt, 2026-10-04)** | Medium (order ≤ 6 extraction/recovery gate-anchored; CLI e2e CI-gated on 3 OS, python lint-gated; benched; order-8 cold-start extraction and topology-bound recovery documented as limits, report §6) |
 
 Known limitations that gate the areas below (full list in
 `docs/architecture.md` "Known Limitations"):
@@ -641,6 +641,26 @@ from the CLI/Python surfaces, with integration-level evidence.
      max|ΔS| < 1e-3), both asserting physical quantities, plus a `#[cfg(test)]`
      `optimizer_tests` module in the bin covering the JSON parsers (flat +
      nested) and the two optimizer cores.
+   - **E2e gate wired into CI (2026-10-07, completing D3-opt).** The
+     `tests/cli_integration.rs` gate is `#[cfg(feature = "cli")]` and the
+     `mfs_cli` bin has `required-features = ["cli"]`, so the default
+     `cargo test --all-targets` / `clippy --all-targets` CI steps never built
+     the binary — the e2e test compiled to zero tests (a dormant gate that
+     could not fail) and the `cli`/`python` feature code was never linted.
+     `.github/workflows/ci.yml` gains a `cli` job (3-OS matrix: `cargo build
+     --features cli --bin mfs_cli` + `cargo test --features cli --test
+     cli_integration`, which builds the binary via `CARGO_BIN_EXE_mfs_cli` and
+     runs the 2 optimizer e2e gates + 4 pipeline gates) and a `feature-lints`
+     job (`cargo clippy --features cli,python --all-targets -- -D warnings`).
+     Wiring the features surfaced lints the default gate had been hiding, now
+     fixed: `mfs_cli.rs` `run_design` 14 args → grouped `DesignArgs` struct
+     (`clippy::too_many_arguments`) + `run_remaining_stages` collapsible
+     `match` arm; `cli_integration.rs` range-index loops → `iter().enumerate()`
+     (`clippy::needless_range_loop`); `python.rs` two redundant `_` wildcard
+     match arms (`clippy::redundant_pattern`) + `tune`/`duplexer` pyo3
+     signatures with `#[allow(clippy::too_many_arguments)]`. The
+     `cli_integration.rs` binary-missing guard changed from a silent skip to a
+     hard `assert!` (`require_bin`) — a gate that cannot fail is no gate.
 4. **D4 (opt) — Bench + regression — DONE (2026-10-04).**
    - **Bench:** `benches/optimizer.rs` (Criterion, registered in `Cargo.toml`,
      `harness = false`). Times `tune` at orders 4/6/8 and `extract` at orders
@@ -754,7 +774,7 @@ Ordered by how much they block the areas above:
 ```
 Wave 1 (parallel):  E4 (N=8 regression) · D1-opt (RED)   [E3 + C1 + E4 closed; D1-opt RED gate committed 2026-09-29, GREEN 2026-10-04]
 Wave 2 (serial):    D1–D4 (duplexer full path)   [DONE 2026-10-03 — Type-I orders 2–8 + §V golden + Type-II §VI anchor, all gate-anchored]
-Wave 3 (parallel):  D2-opt [DONE 2026-10-04 — scale-δ + early-stop + chain-guess, both order-6 gates green] · D3-opt [DONE 2026-10-04 — CLI optimize/extract + Python extract, e2e-gated] · D4-opt [DONE 2026-10-04 — `benches/optimizer.rs` + noise regression + report §6] · C0 [DONE 2026-10-05 — design doc, route-α committed]
+Wave 3 (parallel):  D2-opt [DONE 2026-10-04 — scale-δ + early-stop + chain-guess, both order-6 gates green] · D3-opt [DONE 2026-10-04 — CLI optimize/extract + Python extract; e2e gate wired into CI 2026-10-07 (3-OS `cli` job + `feature-lints` job) — it was dormant until then] · D4-opt [DONE 2026-10-04 — `benches/optimizer.rs` + noise regression + report §6] · C0 [DONE 2026-10-05 — design doc, route-α committed]
 Wave 4 (serial):    B1 [DONE 2026-10-04] → B2 [DONE 2026-10-04] → B3 [DONE 2026-10-04] → B4 [DONE 2026-10-04] (multiplexer; Wave 2 done — full wave complete)
 Wave 5:             E1 [INVESTIGATED 2026-10-05 — refuted: no valid passband-TZ prototype in the single-function form; approx now rejects |z|<1 typed; route-α does NOT need it] · C2 [DONE 2026-10-05 — route-α approx + spec + engine reuse] → C3 [DONE 2026-10-05 — Fig. 25 anchor GREEN + example] · E2 (Laurent) [DONE 2026-10-05 — Laurent principal part + fast-path summation; transversal rejects repeated pole typed; gates green]
 Wave 6 (review):    0.6.0 whole-crate review "silent errors" wave (review-findings-0.6.0.md §F.1) [DONE 2026-10-06 — P1-1/2/3/4/6 + P2-1/2/3/5 + all six P3 fixed and gate-anchored] · CT/CQ cascade (§F.2) [DONE 2026-10-06 — P1-5 + P2-4 fixed: `to_cascaded_trisections` via the edge-capable `extract_triplet` (reproduces Cameron 2011 Fig. 21), `to_cascaded_quadruplets` via the verified `extract_cascade_quadruplets` with a **source-side non-overlapping tiling** (pair *i* spans resonators `4i-3..=4i`, `order >= 4·num_pairs` enforced) — clean order-6 single quadruplet, reproduces the verified `CascadeQuartets` `[[1,3],[1,4],[5,7],[5,8]]` at order 8, over-constrained order-6 2-pair rejected; gated by Fig-21 trident + value anchor, order-6 mainline, order-4/order-6/order-8 quadruplet patterns, CQ≠CT, order-rejection]. Note: an earlier same-day RE-SCOPED note claimed the fix was REFUTED because `extract_trisection` (internal-center-only) cannot produce edge trisections — that tested the *wrong* primitive; the fix uses the distinct `extract_triplet` (center=1 allowed), which does reproduce Fig. 21 (see review-findings-0.6.0.md P2-4 Status, both bullets). The earlier "order-6 two-pair ~1e-2 residual" follow-up is resolved as **topologically impossible** (two 4-resonator quadruplets cannot tile 6 resonators non-overlappingly), not a fixable bug — now rejected with a typed error.

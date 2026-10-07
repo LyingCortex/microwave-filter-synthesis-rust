@@ -47,6 +47,18 @@ fn cli_bin() -> std::path::PathBuf {
     path
 }
 
+/// The `mfs_cli` binary path, asserted to exist. A missing binary is a
+/// harness failure (the `cli` feature must build it), not a silent skip.
+fn require_bin() -> std::path::PathBuf {
+    let bin = cli_bin();
+    assert!(
+        bin.exists(),
+        "mfs_cli binary not found at {} (build with `cargo build --features cli`)",
+        bin.display()
+    );
+    bin
+}
+
 /// A valid minimal synthesis request JSON string.
 fn minimal_request_json() -> &'static str {
     r#"{"order": 4, "return_loss_db": 20.0}"#
@@ -74,11 +86,7 @@ fn invalid_request_json() -> &'static str {
 
 #[test]
 fn test_json_file_input_produces_json_stdout() {
-    let bin = cli_bin();
-    if !bin.exists() {
-        eprintln!("Skipping test: binary not found at {}", bin.display());
-        return;
-    }
+    let bin = require_bin();
 
     // Write a temporary JSON input file
     let tmp_dir = std::env::temp_dir();
@@ -132,11 +140,7 @@ fn test_json_file_input_produces_json_stdout() {
 
 #[test]
 fn test_stdin_input_produces_json_stdout() {
-    let bin = cli_bin();
-    if !bin.exists() {
-        eprintln!("Skipping test: binary not found at {}", bin.display());
-        return;
-    }
+    let bin = require_bin();
 
     let mut child = Command::new(&bin)
         .stdin(Stdio::piped())
@@ -187,11 +191,7 @@ fn test_stdin_input_produces_json_stdout() {
 
 #[test]
 fn test_stage_flag_produces_partial_output() {
-    let bin = cli_bin();
-    if !bin.exists() {
-        eprintln!("Skipping test: binary not found at {}", bin.display());
-        return;
-    }
+    let bin = require_bin();
 
     // Write a temporary JSON input file
     let tmp_dir = std::env::temp_dir();
@@ -254,11 +254,7 @@ fn test_stage_flag_produces_partial_output() {
 
 #[test]
 fn test_invalid_input_produces_structured_error_on_stderr() {
-    let bin = cli_bin();
-    if !bin.exists() {
-        eprintln!("Skipping test: binary not found at {}", bin.display());
-        return;
-    }
+    let bin = require_bin();
 
     let mut child = Command::new(&bin)
         .stdin(Stdio::piped())
@@ -365,11 +361,7 @@ fn build_optimize_input_json() -> String {
 
 #[test]
 fn test_optimize_subcommand_recovers_perturbed_matrix() {
-    let bin = cli_bin();
-    if !bin.exists() {
-        eprintln!("Skipping test: binary not found at {}", bin.display());
-        return;
-    }
+    let bin = require_bin();
 
     let original = mfs::design::FilterDesign::prototype(4, 20.0)
         .synthesize()
@@ -412,11 +404,15 @@ fn test_optimize_subcommand_recovers_perturbed_matrix() {
     let side = original.side();
     let recovered_rows: Vec<Vec<f64>> =
         serde_json::from_value(value["matrix"].clone()).expect("matrix is nested rows");
+    assert_eq!(
+        recovered_rows.len(),
+        side,
+        "recovered matrix must have {side} rows"
+    );
     let mut worst = 0.0_f64;
-    for i in 0..side {
-        for j in i..side {
+    for (i, row) in recovered_rows.iter().enumerate() {
+        for (j, r) in row.iter().enumerate().skip(i) {
             let o = original.at(i, j).unwrap_or(0.0);
-            let r = recovered_rows[i][j];
             if o.abs() > 1e-9 {
                 worst = worst.max((o - r).abs() / o.abs());
             }
@@ -433,11 +429,7 @@ fn test_optimize_subcommand_recovers_perturbed_matrix() {
 
 #[test]
 fn test_extract_subcommand_recovers_response() {
-    let bin = cli_bin();
-    if !bin.exists() {
-        eprintln!("Skipping test: binary not found at {}", bin.display());
-        return;
-    }
+    let bin = require_bin();
 
     let original = mfs::design::FilterDesign::prototype(4, 20.0)
         .synthesize()
