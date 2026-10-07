@@ -245,7 +245,7 @@ Dense (N+2)×(N+2) real-valued coupling matrix with source and load nodes.
 
 **Key types:**
 - `CouplingMatrix` — immutable matrix with topology metadata
-- `CouplingMatrixBuilder` — symmetric entry setting with bounds checking
+- `CouplingMatrixBuilder` — symmetric entry setting with bounds checking; `build()` rejects a one-sided off-diagonal `set` by default (every consumer assumes a symmetric matrix), opt out with `allow_asymmetric(true)`
 - `MatrixTopology` — Transversal, Folded, Arrow, Wheel (deprecated)
 - `BandPassScaledCouplingMatrix` — physical-frequency scaled matrix with external Q
 

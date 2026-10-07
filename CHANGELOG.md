@@ -27,6 +27,19 @@
   carrier for an existing gate.
 
 ### Changed
+- **`CouplingMatrixBuilder::build()` now validates symmetry by default.**
+  A one-sided off-diagonal `set` (`M[i][j]` set without `M[j][i]`) silently
+  produced an asymmetric coupling matrix that every downstream consumer
+  (response solver, multiplication, section extraction) assumes is symmetric
+  — the same silent-corruption class the `flip_sign` diagonal bug was. `build()`
+  now rejects such a matrix with a typed `MfsError::PreconditionViolation`
+  naming the offending entries and the two fixes (`set_symmetric` or
+  `allow_asymmetric(true)`). The latter is a new opt-out used by the
+  deliberately asymmetric folded-mask gate fixtures in
+  `tests/benchmark_standard.rs`. Three new lib tests pin the invariant
+  (symmetric build, one-sided rejection, opt-out). Closes the open "builder
+  symmetry ergonomics" item.
+
 
 - **The D3-opt optimizer e2e gate is now live in CI** (it was dormant).
   `tests/cli_integration.rs` is `#[cfg(feature = "cli")]` and the `mfs_cli`

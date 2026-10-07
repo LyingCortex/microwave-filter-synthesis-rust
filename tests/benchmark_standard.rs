@@ -603,6 +603,7 @@ fn folded_mask_gate_rejects_a_far_corner() {
         .expect("order")
         .set(2, 5, 0.25)
         .expect("far corner")
+        .allow_asymmetric(true)
         .build()
         .expect("build");
     assert!((gates::folded_mask_violations(&dirty) - 0.25).abs() < 1e-15);
@@ -611,6 +612,7 @@ fn folded_mask_gate_rejects_a_far_corner() {
         .expect("order")
         .set(2, 4, 0.0342)
         .expect("pivot")
+        .allow_asymmetric(true)
         .build()
         .expect("build");
     assert_eq!(

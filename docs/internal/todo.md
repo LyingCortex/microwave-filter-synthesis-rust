@@ -49,11 +49,6 @@ remaining low-priority ecosystem items and the refuted passband-TZ work.
   characteristic, which is genuine new approximation research, not a helper
   relaxation.
 
-### Medium priority (engineering quality)
-
-- **Builder symmetry ergonomics** — `CouplingMatrixBuilder::set` writes a
-  single entry (symmetry is the caller's job; `set_symmetric` exists).
-  Consider a symmetric-by-default builder for the public API.
 
 ### Low priority (ecosystem)
 
@@ -87,3 +82,4 @@ remaining low-priority ecosystem items and the refuted passband-TZ work.
 | Passband transmission zeros (`|zero| < 1`) | 0.6.0 (refuted) | E1: no valid in-band-null prototype in the single-function real-rooted form (Feldtkeller violation); `approx` rejects typed. Realizing them needs the multifunction characteristic (new research) |
 | 0.6.0 whole-crate review (17 findings) — "silent errors" wave + CT/CQ cascade + clean CQ tiling + fresh-eyes gate/doc fix | 0.6.1 | all 17 valid findings (6 P1 / 5 P2 / 6 P3) fixed and gate-anchored: `recovery.rs` rescale_d, `scaling.rs` denorm sign, `response/backend.rs` group-delay port nodes, `machiarella.rs` p0² rejection, `cascade.rs` CT (Fig. 21) + CQ (source-side tiling, `order ≥ 4·pairs`), `python.rs` length checks, CLI/schema/validator P2s, P3s; the CQ load-port gate index and two doc/code contradictions corrected by a fresh-eyes review (2026-10-07) |
 | Fold duplexer into multiplexer (N=2) | 0.6.1 | already satisfied: the full Macchiarella–Tamiazzo iteration (the item's stated goal) is maintained once in `src/synthesis/machiarella` and shared by both `DuplexerSynthesis` (full path) and `MultiplexerSynthesis` (N≥2, B2). The only non-shared loop is the *simplified* perturbation heuristic (duplexer bespoke 2-channel vs multiplexer N-channel), which the parity test `multiplexer_diplexer_parity_with_duplexer` documents as legitimately divergent (asserts band-placement + validity only, not value-identity). Measured 2026-10-07 (throwaway probe): forcing the fold would change the duplexer default path's recovered matrices by O(1–5) (ideal Type-I max ΔM 2.44, Type-II 5.54); the multiplexer's simplified N=2 path exhausts its 40-iter budget (conv_err 2.7e-3, unconverged) and leaves its recovered centers at the input, versus the duplexer's perturbed 15-iter convergence — a behavior change, not a dedup. Not folded. |
+| Builder symmetry ergonomics | 0.6.2 (unreleased) | `CouplingMatrixBuilder::build()` now rejects a one-sided off-diagonal `set` by default (typed `PreconditionViolation`), since every downstream consumer assumes a symmetric matrix; `allow_asymmetric(true)` opts out (used by the deliberately asymmetric folded-mask gate fixtures). 3 new lib tests pin the invariant. |
