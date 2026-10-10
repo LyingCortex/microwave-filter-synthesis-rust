@@ -86,18 +86,32 @@ impl CouplingMatrix {
         data: Vec<f64>,
     ) -> Result<Self> {
         let m = Self::new_with_topology_asymmetric(order, topology, data)?;
-        let side = m.side();
+        m.assert_symmetric()?;
+        Ok(m)
+    }
+
+    /// Rejects a one-sided off-diagonal entry (`M[i][j]` not equal to
+    /// `M[j][i]`).
+    ///
+    /// The response solver, multiplication, and section extraction all assume
+    /// a symmetric real matrix: `backend.rs` solves `A x = e_0` once and reads
+    /// the last *row* of A⁻¹ as the transpose of the last *column*, which
+    /// holds only for a symmetric A. An asymmetric matrix would produce
+    /// silently wrong S21/S12 and group delay, not a loud failure. This is the
+    /// consumer-side half of that invariant (the constructors enforce it via
+    /// [`Self::new_with_topology`]).
+    ///
+    /// Tolerance-based and scale-aware: a folded (Givens-rotated) matrix is
+    /// symmetric only to within rounding (~1e-15), so exact `a != b` would
+    /// false-reject legitimate rotated matrices. The threshold rejects a gross
+    /// one-sided entry (the silent-corruption bug) while permitting the
+    /// rotation/rounding asymmetry every rotated or perturbed matrix carries.
+    pub(crate) fn assert_symmetric(&self) -> Result<()> {
+        let side = self.side();
         for i in 0..side {
             for j in (i + 1)..side {
-                let a = m.data[i * side + j];
-                let b = m.data[j * side + i];
-                // Tolerance-based, scale-aware: a folded (Givens-rotated)
-                // matrix is symmetric only to within rounding (~1e-15), so
-                // exact `a != b` would false-reject legitimate rotated
-                // matrices. The threshold rejects a gross one-sided entry
-                // (the silent-corruption bug) while permitting the
-                // rotation/rounding asymmetry every rotated or perturbed
-                // matrix carries.
+                let a = self.data[i * side + j];
+                let b = self.data[j * side + i];
                 let tol = 1e-12 * 1.0_f64.max(a.abs().max(b.abs()));
                 if (a - b).abs() > tol {
                     return Err(MfsError::PreconditionViolation(format!(
@@ -109,7 +123,7 @@ impl CouplingMatrix {
                 }
             }
         }
-        Ok(m)
+        Ok(())
     }
 
     /// Creates a coupling matrix with an explicit topology label, **without**

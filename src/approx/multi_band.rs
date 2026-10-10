@@ -346,6 +346,17 @@ pub fn multi_band_chebyshev_polynomials(
             "multi-band approximation requires at least 2 passbands".to_string(),
         ));
     }
+    // Each finite transmission zero consumes one order unit (P-degree <= N), so
+    // more finite zeros than the order is invalid. Check it early, mirroring the
+    // single-band `pad_transmission_zeros`; otherwise the failure surfaces late
+    // as a misleading equiripple non-convergence (review P3 #5).
+    let finite_count = transmission_zeros.iter().filter(|z| z.is_finite()).count();
+    if finite_count > order {
+        return Err(MfsError::DimensionMismatch {
+            expected: order,
+            actual: finite_count,
+        });
+    }
     let n_rz = positive_rz_count(order)?;
 
     // Positive passband intervals: the part of each band lying in (0, +inf).
@@ -401,7 +412,6 @@ pub fn multi_band_chebyshev_polynomials(
     // Assemble the s-domain polynomials.
     let f_s = s_domain_from_positive_real(&rz)?;
     let p_s = s_domain_p(transmission_zeros)?;
-    let finite_count = transmission_zeros.iter().filter(|z| z.is_finite()).count();
 
     let (eps, eps_r) = find_eps(finite_count, &p_s, &f_s, return_loss_db, order)?;
     let e_stage = build_e_polynomial_stage(&f_s, &p_s, eps, eps_r)?;
@@ -469,6 +479,21 @@ mod tests {
                 "RZ {got} far from oracle {want}"
             );
         }
+    }
+
+    /// More finite transmission zeros than the order is rejected early with a
+    /// typed `DimensionMismatch`, mirroring the single-band `pad_transmission_
+    /// zeros` guard; without it the failure surfaces late as a misleading
+    /// equiripple non-convergence (review P3 #5).
+    #[test]
+    fn more_finite_zeros_than_order_is_a_dimension_error() {
+        // order 2 with 3 finite zeros (order < finite count).
+        let err = multi_band_chebyshev_polynomials(BANDS, 2, 20.0, &[0.5, 1.2, -2.0])
+            .unwrap_err();
+        assert!(
+            matches!(err, MfsError::DimensionMismatch { .. }),
+            "order < finite zero count must be a typed DimensionMismatch, got {err:?}"
+        );
     }
 
     #[test]

@@ -73,6 +73,39 @@ pub struct ResponseComparison {
     pub max_s21_magnitude_deviation: f64,
     /// Largest observed group-delay deviation.
     pub max_group_delay_deviation: f64,
+    /// Whether group delay was actually measured at **any** sample pair. When
+    /// both responses leave `group_delay = None` everywhere (the pole-expansion
+    /// fast path), the group-delay deviation is a silent no-op (0.0) and this
+    /// stays `false`, so a tolerance that demands a finite group delay fails
+    /// rather than passing on an unmeasured value (review P2-5). Group delay is
+    /// legitimately `None` at individual samples (transmission zeros, where it
+    /// diverges); a partial measurement still counts as compared.
+    pub group_delay_compared: bool,
+}
+
+/// The result of a response-invariance check. Skipped is kept distinct from
+/// Pass so a workflow that never ran the electrical check is not reported as a
+/// passing one (review P3 #2: `passes()` used to conflate "not checked" with
+/// "passed").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckOutcome {
+    /// The response check was not performed.
+    Skipped,
+    /// The response check ran and met the requested tolerance.
+    Pass,
+    /// The response check ran and exceeded the requested tolerance.
+    Fail,
+}
+
+impl std::fmt::Display for CheckOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            CheckOutcome::Skipped => "skipped",
+            CheckOutcome::Pass => "pass",
+            CheckOutcome::Fail => "fail",
+        };
+        f.write_str(s)
+    }
 }
 
 /// Optional response-check summary that can be embedded in transform reports.
@@ -106,6 +139,16 @@ impl ResponseCheckReport {
     pub fn passes(&self) -> bool {
         self.invariant.unwrap_or(true)
     }
+
+    /// Returns the three-state outcome of the response check, keeping a skipped
+    /// check distinct from a passing one (review P3 #2).
+    pub fn outcome(&self) -> CheckOutcome {
+        match self.invariant {
+            Some(true) => CheckOutcome::Pass,
+            Some(false) => CheckOutcome::Fail,
+            None => CheckOutcome::Skipped,
+        }
+    }
 }
 
 /// Summary of structural checks performed for an extracted section workflow.
@@ -131,6 +174,13 @@ impl SectionVerificationReport {
 impl ResponseComparison {
     /// Returns whether all tracked deviations fall within the supplied tolerance.
     pub fn passes(&self, tolerance: ResponseTolerance) -> bool {
+        // P2-5: when the tolerance constrains group delay (finite bound), the
+        // comparison must have actually measured it. A response path that left
+        // `group_delay = None` makes the deviation a silent no-op (0.0), which
+        // must not satisfy a finite group-delay bound.
+        if tolerance.group_delay.is_finite() && !self.group_delay_compared {
+            return false;
+        }
         self.max_frequency_hz_deviation <= tolerance.frequency_hz
             && self.max_normalized_omega_deviation <= tolerance.normalized_omega
             && self.max_s11_magnitude_deviation <= tolerance.s11_magnitude
@@ -157,6 +207,12 @@ pub fn compare_responses(
         max_s11_magnitude_deviation: 0.0,
         max_s21_magnitude_deviation: 0.0,
         max_group_delay_deviation: 0.0,
+        // P2-5: set to true once at least one sample pair has a measurable
+        // group delay on both sides. Stays `false` when group delay is
+        // absent everywhere (the pole-expansion fast path leaves every
+        // sample `None`), which makes the group-delay deviation a silent
+        // no-op that `passes()` must not treat as 0.0 (review P2-5).
+        group_delay_compared: false,
     };
 
     for (left, right) in lhs.samples.iter().zip(rhs.samples.iter()) {
@@ -172,10 +228,14 @@ pub fn compare_responses(
         comparison.max_s21_magnitude_deviation = comparison.max_s21_magnitude_deviation.max(
             (magnitude(left.s21_re, left.s21_im) - magnitude(right.s21_re, right.s21_im)).abs(),
         );
-        // Group delay is only compared where both samples have it (the
-        // pole-expansion fast path leaves it None); mixed/missing values are
-        // skipped rather than treated as a zero deviation.
+        // Group delay is only compared where both samples have it. It is
+        // legitimately `None` at transmission zeros (where it diverges) and on
+        // the pole-expansion fast path (which leaves it `None` everywhere).
+        // Compare at every available pair and remember that at least one was
+        // measured, so an entirely-unmeasured comparison is surfaced by
+        // `passes()` rather than passing on a silent 0.0 (review P2-5).
         if let (Some(l), Some(r)) = (left.group_delay, right.group_delay) {
+            comparison.group_delay_compared = true;
             comparison.max_group_delay_deviation =
                 comparison.max_group_delay_deviation.max((l - r).abs());
         }
@@ -386,9 +446,13 @@ mod tests {
 
     #[test]
     fn response_check_report_tracks_skipped_and_checked_states() -> Result<()> {
+        // A skipped check is `true` for the legacy boolean `passes()` but must
+        // report as `Skipped`, not `Pass` (review P3 #2).
         let skipped = ResponseCheckReport::skipped();
         assert!(skipped.passes());
+        assert_eq!(skipped.outcome(), CheckOutcome::Skipped);
 
+        // A measured comparison that meets the tolerance is a genuine Pass.
         let lhs = SParameterResponse {
             samples: vec![sample(1.0, -1.0, 0.2, 0.9)],
         };
@@ -398,6 +462,19 @@ mod tests {
             ResponseCheckReport::from_comparison(comparison, ResponseTolerance::default());
         assert_eq!(checked.invariant, Some(true));
         assert!(checked.passes());
+        assert_eq!(checked.outcome(), CheckOutcome::Pass);
+
+        // The same comparison against an impossible tolerance is a Fail.
+        let failing = ResponseCheckReport::from_comparison(
+            compare_responses(&lhs, &rhs)?,
+            ResponseTolerance {
+                frequency_hz: -1.0,
+                ..ResponseTolerance::default()
+            },
+        );
+        assert_eq!(failing.invariant, Some(false));
+        assert!(!failing.passes());
+        assert_eq!(failing.outcome(), CheckOutcome::Fail);
         Ok(())
     }
 
@@ -413,6 +490,49 @@ mod tests {
         let comparison = compare_responses(&lhs, &rhs)?;
         assert!(comparison.max_s11_magnitude_deviation > 0.0);
         assert!(!comparison.passes(ResponseTolerance::default()));
+        Ok(())
+    }
+
+    /// Regression for review P2-5: the pole-expansion fast path leaves
+    /// `group_delay = None`, so without the `group_delay_compared` flag a
+    /// transform that preserves magnitudes but shifts group delay would pass a
+    /// strict tolerance on an unmeasured (0.0) deviation. A finite group-delay
+    /// bound must fail when the group delay was never actually compared.
+    #[test]
+    fn compare_responses_uncompared_group_delay_fails_finite_tolerance() -> Result<()> {
+        fn sample_none_group_delay() -> ResponseSample {
+            ResponseSample {
+                frequency_hz: 1.0,
+                normalized_omega: -1.0,
+                group_delay: None,
+                s11_re: 0.2,
+                s11_im: 0.0,
+                s21_re: 0.9,
+                s21_im: 0.0,
+            }
+        }
+        let lhs = SParameterResponse {
+            samples: vec![sample_none_group_delay()],
+        };
+        let rhs = lhs.clone();
+
+        let comparison = compare_responses(&lhs, &rhs)?;
+        assert!(!comparison.group_delay_compared);
+        // A finite group-delay bound must NOT be satisfied by an unmeasured
+        // group delay.
+        assert!(
+            !comparison.passes(ResponseTolerance::default()),
+            "finite group-delay tolerance must fail when group delay was not compared"
+        );
+
+        // When the tolerance does not constrain group delay (infinite bound),
+        // the unmeasured comparison is tolerated and the (identical)
+        // magnitudes pass.
+        let lax = ResponseTolerance {
+            group_delay: f64::INFINITY,
+            ..ResponseTolerance::default()
+        };
+        assert!(comparison.passes(lax));
         Ok(())
     }
 

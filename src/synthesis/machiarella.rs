@@ -451,6 +451,18 @@ fn compute_s_product(
         }
         JunctionType::TypeII { c0 } => {
             let d_lead = d_poly.leading_coefficient();
+            // Guard the monic normalization: `spectral.rs::monic` leaves a
+            // degenerate factor (|lead| < 1e-15) unnormalized, and dividing by
+            // such a tiny coefficient would scale the polynomial across ~200
+            // decades and produce catastrophic roots. Surface a typed error
+            // instead (review round-2, new defect 1).
+            if d_lead.norm() < 1e-15 {
+                return Err(MfsError::NumericalFailure(
+                    "Type-II junction: spectral factor D(s) has a near-zero \
+                     leading coefficient; cannot monic-normalize"
+                        .into(),
+                ));
+            }
             let d_monic = d_poly.scale(Complex64::new(1.0, 0.0) / d_lead)?;
             d_monic.sub(n_poly)?.scale(Complex64::new(c0 / 2.0, 0.0))
         }
@@ -716,4 +728,33 @@ pub fn junction_response(
         antenna_s11_db,
         channel_s21_db,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::approx::ComplexPolynomial;
+
+    #[test]
+    fn type_ii_s_product_rejects_degenerate_leading_coefficient() {
+        // A near-zero leading coefficient (the degenerate path
+        // `spectral.rs::monic` leaves unnormalized) must be rejected rather
+        // than divided into — that division would scale the polynomial across
+        // ~200 decades and produce catastrophic roots (review round-2, new
+        // defect 1).
+        let d = ComplexPolynomial::new(vec![
+            Complex64::new(1.0, 0.0),
+            Complex64::new(1.0, 0.0),
+            Complex64::new(1e-20, 0.0),
+        ])
+        .unwrap();
+        let n =
+            ComplexPolynomial::new(vec![Complex64::new(1.0, 0.0), Complex64::new(1.0, 0.0)]).unwrap();
+        let err = compute_s_product(JunctionType::TypeII { c0: 1.0 }, &n, &d).unwrap_err();
+        assert!(
+            matches!(err, MfsError::NumericalFailure(_)),
+            "expected NumericalFailure, got {err:?}"
+        );
+        assert!(err.to_string().contains("leading coefficient"));
+    }
 }

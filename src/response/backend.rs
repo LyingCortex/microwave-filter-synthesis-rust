@@ -23,6 +23,12 @@ pub(super) fn evaluate_response(
     settings: ResponseSettings,
 ) -> Result<SParameterResponse> {
     validate_settings(settings)?;
+    // Consumer-side half of the symmetry invariant (the constructors enforce
+    // it via `new_with_topology`): the group-delay numerator reuses the last
+    // *column* of A⁻¹ as the last *row*, which holds only for symmetric A.
+    // A deliberately asymmetric matrix (public opt-out constructors) would
+    // otherwise yield silently wrong group delay (review P1-3).
+    matrix.assert_symmetric()?;
     if frequencies_hz.len() != normalized_omegas.len() {
         return Err(MfsError::DimensionMismatch {
             expected: frequencies_hz.len(),

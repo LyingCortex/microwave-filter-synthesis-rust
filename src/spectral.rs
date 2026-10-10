@@ -342,6 +342,39 @@ fn select_lhp_roots(all_roots: &[Complex64], target_count: usize) -> Vec<Complex
 // Combined spectral factorization: tries cepstrum first, companion as fallback
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/// Checks the para-product identity `D(jω)·D̃(jω) = R(jω)` (= `|D(jω)|² = R(jω)`
+/// on the jω axis) at 8 axis points and returns `true` when the worst-case
+/// relative residual is below `0.01`.
+///
+/// This is a **magnitude** check: it verifies `D` is a correct spectral factor of
+/// `R` (the right S-parameter response), not a grossly mis-factored or mis-scaled
+/// one. It does **not** by itself enforce minimum-phase — for a real `R`, the
+/// minimum-phase factor and its maximum-phase anti-factor share `|D(jω)|²`, so
+/// both pass (a single point `s = j` would pass even more wrong factors, so 8
+/// points are sampled). Minimum-phase *selection* is `select_lhp_roots`' LHP
+/// bias; this check is the backstop that rejects a factor whose magnitude
+/// response is wrong, which would otherwise silently corrupt the downstream
+/// Machiarella coupling matrices (review round-2 C2).
+fn para_product_verified(
+    r_poly: &ComplexPolynomial,
+    d: &ComplexPolynomial,
+) -> bool {
+    let mut worst = 0.0_f64;
+    for k in 1..=8usize {
+        let omega = 0.375 * k as f64 * (r_poly.degree() as f64 + 2.0).sqrt();
+        let s_j = Complex64::new(0.0, omega);
+        let r_val = r_poly.evaluate(s_j);
+        let product = d.evaluate(s_j).norm_sqr();
+        let rel_err = if r_val.norm() > 1e-10 {
+            (product - r_val).norm() / r_val.norm()
+        } else {
+            product.abs()
+        };
+        worst = worst.max(rel_err);
+    }
+    worst < 0.01
+}
+
 /// Robust spectral factorization using cepstrum method with companion matrix fallback.
 ///
 /// Given R(s) = sum of polynomial products, finds D(s) such that D(s)D*(-s) = R(s)
@@ -352,36 +385,30 @@ pub fn spectral_factor(
 ) -> Result<ComplexPolynomial> {
     // Try cepstrum method first (most robust for well-conditioned problems)
     if let Ok(d) = cepstrum_spectral_factor(r_poly, target_degree) {
-        // Verify the para-product identity D(v)·D̃(v) = R(v) at several
-        // axis points. A single-point check (e.g. only at s = j) can pass
-        // for a factor whose LHP root set is wrong; the identity must hold
-        // for every v, so sampling several points on the jω axis exposes
-        // a mis-factored result. On the axis D̃(jω) = conj(D(jω)), so the
-        // product is |D(jω)|².
-        let mut worst = 0.0_f64;
-        for k in 1..=8usize {
-            let omega = 0.375 * k as f64 * (r_poly.degree() as f64 + 2.0).sqrt();
-            let s_j = Complex64::new(0.0, omega);
-            let r_val = r_poly.evaluate(s_j);
-            let d_val = d.evaluate(s_j);
-            let product = d_val.norm_sqr();
-            let rel_err = if r_val.norm() > 1e-10 {
-                (product - r_val).norm() / r_val.norm()
-            } else {
-                product.abs()
-            };
-            worst = worst.max(rel_err);
-        }
-
-        if worst < 0.01 {
+        if para_product_verified(r_poly, &d) {
             return monic(d);
         }
         // Fall through to companion matrix if the cepstrum result is poor,
         // and likewise when the cepstrum method errors out.
     }
 
-    // Fallback: companion matrix (adaptive, faer-gated) approach
-    companion_spectral_factor(r_poly, target_degree).and_then(monic)
+    // Fallback: companion matrix (adaptive, faer-gated) approach. The result
+    // must also pass the para-product verification. `select_lhp_roots` can admit
+    // a right-half-plane root when the LHP count is short (its last-resort fill
+    // has no sign check); a wrong-magnitude factor — the kind that corrupts the
+    // downstream coupling matrices — only the `|D(jω)|² = R(jω)` identity check
+    // distinguishes from a correct one. (Minimum-phase *selection* is the LHP
+    // bias in `select_lhp_roots`; the verification is the magnitude backstop.)
+    let d = companion_spectral_factor(r_poly, target_degree)?;
+    if !para_product_verified(r_poly, &d) {
+        return Err(MfsError::NumericalFailure(
+            "spectral factorization: companion-matrix factor failed para-product \
+             verification (|D(jω)|² ≠ R(jω)); factorization does not reproduce \
+             R's magnitude response"
+                .to_string(),
+        ));
+    }
+    monic(d)
 }
 
 /// Rotates a spectral factor by a unit phase so its leading (highest-degree)
@@ -545,6 +572,81 @@ mod tests {
                 "para-product identity violated at ω={omega}: |{lhs} - {rhs}|",
             );
         }
+        Ok(())
+    }
+
+    /// C2 regression: the shared para-product verification is a **magnitude**
+    /// check. It accepts the correct spectral factor of R and rejects a
+    /// same-degree factor with a *different* jω-axis magnitude — the kind of
+    /// wrong-magnitude root set `select_lhp_roots` can admit when its
+    /// last-resort fill has no `re < 0` check (it can pull in an RHP root whose
+    /// jω-axis magnitude differs from the true LHP root). This is the backstop
+    /// that keeps the companion fallback from returning a grossly wrong-magnitude
+    /// factor.
+    ///
+    /// It is **not** a minimum-phase enforcer: for a real R, the min-phase and
+    /// max-phase anti-factors share `|D(jω)|²`, so both pass. That limitation is
+    /// pinned explicitly below (the test uses a complex R for the reject case,
+    /// where a single reflected root *does* change the magnitude).
+    #[test]
+    fn para_product_verification_checks_magnitude_not_min_phase() -> Result<()> {
+        // --- Accept + reject on a complex R (where root placement changes |.|²) ---
+        // True LHP factor: D(s) = (s - (-1+0.5j))(s - (-1-0.5j)).
+        let true_roots: Vec<Complex64> = vec![
+            Complex64::new(-1.0, 0.5),
+            Complex64::new(-1.0, -0.5),
+        ];
+        let d_true = ComplexPolynomial::from_complex_roots(&true_roots)?;
+        let d_true_conj = d_true.alternating_conjugate()?;
+        let r = d_true.multiply(&d_true_conj)?;
+        assert!(
+            para_product_verified(&r, &d_true),
+            "the correct factor must pass verification"
+        );
+
+        // A wrong same-degree factor: reflect one root to the RHP
+        // (-1+0.5j → 1-0.5j). Its jω-axis magnitude differs, so it must be
+        // rejected.
+        let wrong_roots: Vec<Complex64> = vec![
+            Complex64::new(1.0, -0.5),
+            Complex64::new(-1.0, -0.5),
+        ];
+        let d_wrong = ComplexPolynomial::from_complex_roots(&wrong_roots)?;
+        assert!(
+            !para_product_verified(&r, &d_wrong),
+            "a wrong-magnitude factor must be rejected"
+        );
+
+        // --- Document the limitation: for a real R, the max-phase anti-factor
+        //     passes too (it has the same |D(jω)|²). The verification is a
+        //     magnitude check, not a min-phase enforcer.
+        // R = s⁴ + 4 = (s²+2s+2)(s²-2s+2); min-phase factor s²+2s+2 (roots
+        // -1±j), max-phase anti-factor s²-2s+2 (roots +1±j). Both pass.
+        let r_real = ComplexPolynomial::new(vec![
+            Complex64::new(4.0, 0.0),
+            Complex64::new(0.0, 0.0),
+            Complex64::new(0.0, 0.0),
+            Complex64::new(0.0, 0.0),
+            Complex64::new(1.0, 0.0),
+        ])?;
+        let d_min = ComplexPolynomial::new(vec![
+            Complex64::new(2.0, 0.0),
+            Complex64::new(2.0, 0.0),
+            Complex64::new(1.0, 0.0),
+        ])?;
+        let d_max = ComplexPolynomial::new(vec![
+            Complex64::new(2.0, 0.0),
+            Complex64::new(-2.0, 0.0),
+            Complex64::new(1.0, 0.0),
+        ])?;
+        assert!(
+            para_product_verified(&r_real, &d_min),
+            "min-phase factor of real R must pass"
+        );
+        assert!(
+            para_product_verified(&r_real, &d_max),
+            "max-phase anti-factor of real R ALSO passes (magnitude is identical)"
+        );
         Ok(())
     }
 

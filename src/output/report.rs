@@ -170,7 +170,9 @@ pub fn render_terminal_synthesis_report(
                 ),
                 (
                     "response_check_passed",
-                    transform.report.response.passes().to_string(),
+                    // Three-state outcome: a skipped check is not a pass
+                    // (review P3 #2).
+                    transform.report.response.outcome().to_string(),
                 ),
                 ("overall_passed", transform.report.passes().to_string()),
             ],
@@ -509,7 +511,7 @@ pub fn render_markdown_synthesis_report(
         transform.report.source_topology,
         transform.report.result_topology,
         transform.report.pattern_verified,
-        transform.report.response.passes(),
+        transform.report.response.outcome(),
         transform.report.passes(),
         transform.report.notes,
         format_box_table(&format_matrix_table_data(transformed)),

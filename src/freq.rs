@@ -461,7 +461,7 @@ impl MultiBandMapping {
             .map(|&(f1_hz, f2_hz)| {
                 if !f1_hz.is_finite() || !f2_hz.is_finite() || f1_hz <= 0.0 || f2_hz <= f1_hz {
                     return Err(MfsError::InvalidFrequency(format!(
-                        "band edges must satisfy 0 < f1 <= f2, got f1={f1_hz}, f2={f2_hz}"
+                        "band edges must satisfy 0 < f1 < f2 (strictly ordered), got f1={f1_hz}, f2={f2_hz}"
                     )));
                 }
                 Ok(edges_to_center_bandwidth(f1_hz, f2_hz))
@@ -572,11 +572,20 @@ impl MultiBandMapping {
 
 /// Returns the `(lower, upper)` physical edges of a band-pass mapping with
 /// geometric-mean center `center_hz` and bandwidth `bandwidth_hz`.
-fn band_edge_pair(center_hz: f64, bandwidth_hz: f64) -> (f64, f64) {
+///
+/// The single source of truth for passband edges (geometric-mean convention);
+/// consumers that need the Ω=±1 edges derive them from this rather than the
+/// arithmetic `center ∓ bandwidth/2`.
+pub fn band_edge_pair(center_hz: f64, bandwidth_hz: f64) -> (f64, f64) {
     let spread = (bandwidth_hz * bandwidth_hz + 4.0 * center_hz * center_hz).sqrt();
     let lower = (-bandwidth_hz + spread) / 2.0;
     (lower, lower + bandwidth_hz)
 }
+
+/// Upper bound on the response-evaluation grid point count (review P2-11).
+/// A single `points` value is a linear allocation; 100k samples keeps a
+/// hostile request bounded without touching legitimate dense grids.
+pub const MAX_GRID_POINTS: usize = 100_000;
 
 /// Concrete frequency samples used when evaluating a synthesized response.
 #[derive(Debug, Clone, PartialEq)]
@@ -588,6 +597,9 @@ impl FrequencyGrid {
     /// Builds an evenly spaced grid from `start_hz` to `stop_hz`, inclusive.
     pub fn linspace(start_hz: f64, stop_hz: f64, points: usize) -> Result<Self> {
         if points < 2 {
+            return Err(MfsError::InvalidGridSize { points });
+        }
+        if points > MAX_GRID_POINTS {
             return Err(MfsError::InvalidGridSize { points });
         }
         if !start_hz.is_finite() || !stop_hz.is_finite() || stop_hz <= start_hz {
@@ -962,6 +974,17 @@ mod tests {
             .is_err());
         assert!(mapping.map_band_hz_to_normalized(1, -1.0e9).is_err());
         Ok(())
+    }
+
+    #[test]
+    fn linspace_rejects_points_above_max() {
+        // P2-11: the choke point must reject an OOM-hostile point count for
+        // every entry (not just the JSON validator).
+        let error = FrequencyGrid::linspace(1.0, 2.0, MAX_GRID_POINTS + 1)
+            .expect_err("points above MAX_GRID_POINTS must be rejected");
+        assert!(matches!(error, MfsError::InvalidGridSize { .. }));
+        // The boundary itself is still accepted.
+        assert!(FrequencyGrid::linspace(1.0, 2.0, MAX_GRID_POINTS).is_ok());
     }
 
 }

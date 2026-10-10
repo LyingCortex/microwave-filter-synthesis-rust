@@ -334,17 +334,23 @@ impl FilterDesign {
     }
 
     /// Lower passband edge in Hz (if band-pass design).
+    ///
+    /// The band-pass mapping uses a geometric-mean center, so the Ω=±1 edges
+    /// are `√(c²+bw²)−c` / `√(c²+bw²)+c` (the `band_edge_pair` convention),
+    /// **not** the arithmetic-mean `c ± bw/2` (review P2-2).
     pub fn f_start_hz(&self) -> Option<f64> {
         match (self.center_hz, self.bandwidth_hz) {
-            (Some(c), Some(bw)) => Some(c - bw / 2.0),
+            (Some(c), Some(bw)) => Some(crate::freq::band_edge_pair(c, bw).0),
             _ => None,
         }
     }
 
     /// Upper passband edge in Hz (if band-pass design).
+    ///
+    /// See [`Self::f_start_hz`] for the geometric-mean edge convention.
     pub fn f_stop_hz(&self) -> Option<f64> {
         match (self.center_hz, self.bandwidth_hz) {
-            (Some(c), Some(bw)) => Some(c + bw / 2.0),
+            (Some(c), Some(bw)) => Some(crate::freq::band_edge_pair(c, bw).1),
             _ => None,
         }
     }
@@ -405,28 +411,40 @@ impl FilterDesign {
 
         let grid = FrequencyGrid::linspace(start, stop, points)?;
 
-        // Try pole expansion first (fast path)
+        // Try pole expansion first (fast path). Verify it against LU at a few
+        // sample points before trusting it: the fast path is numerically
+        // unreliable near a network pole, so any error (or a check grid that
+        // compared no valid points) falls back to LU rather than returning a
+        // wrong/unverified response (P3 #1, #9).
         if let Ok(pole_data) = PoleExpansionData::from_matrix(&self.matrix) {
-            let pole_response = pole_data.evaluate_normalized(&grid)?;
-
-            // Verify against LU at a few sample points
             let check_grid = FrequencyGrid::linspace(start, stop, 5.min(points))?;
             let lu_check = ResponseSolver.evaluate_normalized(&self.matrix, &check_grid)?;
-            let pole_check = pole_data.evaluate_normalized(&check_grid)?;
+            let pole_check = match pole_data.evaluate_normalized(&check_grid) {
+                Ok(r) => r,
+                Err(_) => return ResponseSolver.evaluate_normalized(&self.matrix, &grid),
+            };
 
+            // Deep-stopband check points (|S21| at the noise floor) are skipped,
+            // so count how many were actually compared; an all-skipped grid
+            // means the fast path was never verified.
             let mut max_diff = 0.0_f64;
+            let mut compared = 0usize;
             for (p, l) in pole_check.samples.iter().zip(lu_check.samples.iter()) {
                 let p_mag = p.s21_mag();
                 let l_mag = l.s21_mag();
                 if l_mag > 1e-10 {
                     let rel_diff = ((p_mag - l_mag) / l_mag).abs();
                     max_diff = max_diff.max(rel_diff);
+                    compared += 1;
                 }
             }
 
-            // If pole expansion matches LU within 0.1% relative error, use it
-            if max_diff < 1e-3 {
-                return Ok(pole_response);
+            if compared > 0 && max_diff < 1e-3 {
+                // Verified fast path; a near-singular full-grid point still
+                // falls back to LU.
+                return pole_data
+                    .evaluate_normalized(&grid)
+                    .or_else(|_| ResponseSolver.evaluate_normalized(&self.matrix, &grid));
             }
         }
 
@@ -501,28 +519,41 @@ impl FilterDesign {
         let mapping = BandPassMapping::new(center_hz, bandwidth_hz)?;
         let grid = FrequencyGrid::linspace(start_hz, stop_hz, points)?;
 
-        // Try pole expansion first (fast path)
+        // Try pole expansion first (fast path). Verify it against LU at a few
+        // sample points before trusting it: the fast path is numerically
+        // unreliable near a network pole, so any error (or a check grid that
+        // compared no valid points) falls back to LU rather than returning a
+        // wrong/unverified response (P3 #1, #9).
         if let Ok(pole_data) = PoleExpansionData::from_matrix(&self.matrix) {
-            let pole_response = pole_data.evaluate_bandpass(&grid, &mapping)?;
-
-            // Verify at a few sample points
             let n_check = 5.min(points);
             let check_grid = FrequencyGrid::linspace(start_hz, stop_hz, n_check)?;
             let lu_check = ResponseSolver.evaluate(&self.matrix, &check_grid, &mapping)?;
-            let pole_check = pole_data.evaluate_bandpass(&check_grid, &mapping)?;
+            let pole_check = match pole_data.evaluate_bandpass(&check_grid, &mapping) {
+                Ok(r) => r,
+                Err(_) => return ResponseSolver.evaluate(&self.matrix, &grid, &mapping),
+            };
 
+            // Deep-stopband check points (|S21| at the noise floor) are skipped,
+            // so count how many were actually compared; an all-skipped grid
+            // means the fast path was never verified.
             let mut max_diff = 0.0_f64;
+            let mut compared = 0usize;
             for (p, l) in pole_check.samples.iter().zip(lu_check.samples.iter()) {
                 let p_mag = p.s21_mag();
                 let l_mag = l.s21_mag();
                 if l_mag > 1e-10 {
                     let rel_diff = ((p_mag - l_mag) / l_mag).abs();
                     max_diff = max_diff.max(rel_diff);
+                    compared += 1;
                 }
             }
 
-            if max_diff < 1e-3 {
-                return Ok(pole_response);
+            if compared > 0 && max_diff < 1e-3 {
+                // Verified fast path; a near-singular full-grid point still
+                // falls back to LU.
+                return pole_data
+                    .evaluate_bandpass(&grid, &mapping)
+                    .or_else(|_| ResponseSolver.evaluate(&self.matrix, &grid, &mapping));
             }
         }
 
@@ -575,6 +606,9 @@ impl FilterDesign {
     ) -> Result<SParameterResponse> {
         use crate::response::ResponseSettings;
 
+        // P2-4: the backend drops a non-finite or non-positive Q silently
+        // (lossless response for a "lossy" request); reject it here. ∞ = lossless.
+        validate_unloaded_q(unloaded_q)?;
         let center = self.center_hz.ok_or_else(|| {
             crate::error::MfsError::PreconditionViolation(
                 "response_lossy() requires band-pass parameters".into(),
@@ -612,6 +646,8 @@ impl FilterDesign {
     ) -> Result<SParameterResponse> {
         use crate::response::ResponseSettings;
 
+        // P2-4: reject non-finite / non-positive Q (∞ = lossless is allowed).
+        validate_unloaded_q(unloaded_q)?;
         let grid = FrequencyGrid::linspace(start, stop, points)?;
         let settings = ResponseSettings {
             source_resistance: 1.0,
@@ -703,6 +739,7 @@ impl FilterDesign {
             start_hz: None,
             stop_hz: None,
             points: None,
+            range_normalized: false,
         }
     }
 
@@ -726,8 +763,8 @@ impl FilterDesign {
     /// Cascades this design with `other` (port 2 → port 1) into a single
     /// 2-port `touchstone::Network`, both referenced to 50 Ω.
     ///
-    /// Both designs are evaluated on their default response grid
-    /// (`center ± 1.5·bw`, 201 points), so the call returns a typed error
+    /// Both designs are evaluated on their default response grid (passband
+    /// edges padded by 0.5·bw, 201 points), so the call returns a typed error
     /// when the two grids differ — use `build_network` + `touchstone::cascade`
     /// with explicit `resample` for non-default grids.
     ///
@@ -747,9 +784,16 @@ impl FilterDesign {
 
     pub(crate) fn default_response(&self) -> Result<SParameterResponse> {
         if let (Some(center), Some(bw)) = (self.center_hz, self.bandwidth_hz) {
-            // Default range: center ± 1.5*bw covers passband + nearby stopband
-            let start = center - 1.5 * bw;
-            let stop = center + 1.5 * bw;
+            // Default range: the passband (geometric-mean `band_edge_pair`
+            // edges) padded by half a bandwidth on each side. This mirrors the
+            // former `center ± 1.5·bw` window for narrowband designs, but is
+            // derived from the *edges* so a wideband design (fbw > 2/3, where
+            // `center − 1.5·bw < 0`) still yields a positive window instead of
+            // a grid that fails in `map_hz_to_normalized` (review P2-3).
+            let (lower_edge, upper_edge) = crate::freq::band_edge_pair(center, bw);
+            let pad = 0.5 * bw;
+            let start = (lower_edge - pad).max(1e-9 * center);
+            let stop = upper_edge + pad;
             self.response_bandpass(center, bw, start, stop, 201)
         } else {
             self.response_normalized(-3.0, 3.0, 201)
@@ -780,6 +824,26 @@ impl FilterDesign {
     }
 }
 
+/// Validates a user-supplied unloaded Q for the lossy-response APIs.
+///
+/// The response backend silently drops a non-finite or non-positive Q (it
+/// only applies the dissipation term when `is_finite() && > 0.0`), which
+/// would return a *lossless* response for a "lossy" request with no warning
+/// (review P2-4). `f64::INFINITY` is the documented lossless sentinel and is
+/// allowed through; everything else must be a finite positive value.
+fn validate_unloaded_q(unloaded_q: f64) -> Result<()> {
+    if unloaded_q == f64::INFINITY {
+        return Ok(());
+    }
+    if !unloaded_q.is_finite() || unloaded_q <= 0.0 {
+        return Err(crate::error::MfsError::InvalidFrequency(format!(
+            "unloaded_q must be a positive finite value (or f64::INFINITY for \
+             lossless), got {unloaded_q}"
+        )));
+    }
+    Ok(())
+}
+
 /// Builder for configuring Touchstone export.
 pub struct TouchstoneBuilder<'a> {
     design: &'a FilterDesign,
@@ -787,6 +851,10 @@ pub struct TouchstoneBuilder<'a> {
     start_hz: Option<f64>,
     stop_hz: Option<f64>,
     points: Option<usize>,
+    /// When set, `start_hz`/`stop_hz`/`points` are a *normalized ω* range
+    /// (review P3 #4: a physical-Hz `freq_range` on a prototype design must
+    /// not be silently reinterpreted as ω).
+    range_normalized: bool,
 }
 
 impl<'a> TouchstoneBuilder<'a> {
@@ -814,11 +882,36 @@ impl<'a> TouchstoneBuilder<'a> {
         self
     }
 
-    /// Sets the frequency range for the export.
+    /// Sets a **physical Hz** frequency range for the export.
+    ///
+    /// Only meaningful for band-pass designs (which carry a center/bandwidth).
+    /// A prototype design has no physical frequency axis, so `build`/`save`
+    /// return a typed error rather than silently treating these values as
+    /// normalized ω (review P3 #4). Use [`Self::freq_range_normalized`] for a
+    /// prototype.
     pub fn freq_range(mut self, start_hz: f64, stop_hz: f64, points: usize) -> Self {
         self.start_hz = Some(start_hz);
         self.stop_hz = Some(stop_hz);
         self.points = Some(points);
+        self.range_normalized = false;
+        self
+    }
+
+    /// Sets a **normalized ω** frequency range for the export.
+    ///
+    /// This is the explicit way to sweep a prototype design (no center/bw);
+    /// it also works on a band-pass design if a prototype-domain sweep is
+    /// wanted. The exported frequency column carries the ω values.
+    pub fn freq_range_normalized(
+        mut self,
+        start_omega: f64,
+        stop_omega: f64,
+        points: usize,
+    ) -> Self {
+        self.start_hz = Some(start_omega);
+        self.stop_hz = Some(stop_omega);
+        self.points = Some(points);
+        self.range_normalized = true;
         self
     }
 
@@ -846,10 +939,25 @@ impl<'a> TouchstoneBuilder<'a> {
 
     fn get_response(&self) -> Result<SParameterResponse> {
         if let (Some(start), Some(stop), Some(pts)) = (self.start_hz, self.stop_hz, self.points) {
-            if let (Some(center), Some(bw)) = (self.design.center_hz, self.design.bandwidth_hz) {
-                self.design.response_bandpass(center, bw, start, stop, pts)
-            } else {
-                self.design.response_normalized(start, stop, pts)
+            if self.range_normalized {
+                // Explicit normalized-ω range: valid for any design.
+                return self.design.response_normalized(start, stop, pts);
+            }
+            // Physical-Hz range: requires band-pass parameters. A prototype
+            // design has no physical frequency axis, so error out instead of
+            // silently reinterpreting Hz as ω (review P3 #4).
+            match (self.design.center_hz, self.design.bandwidth_hz) {
+                (Some(center), Some(bw)) => {
+                    self.design.response_bandpass(center, bw, start, stop, pts)
+                }
+                _ => Err(crate::error::MfsError::PreconditionViolation(
+                    "freq_range(start_hz, stop_hz) takes physical Hz and requires a \
+                     band-pass design (center/bandwidth); this is a prototype design \
+                     with no physical frequency axis. Use freq_range_normalized(\
+                     start_omega, stop_omega, points) to sweep in the normalized \
+                     prototype domain."
+                        .into(),
+                )),
             }
         } else {
             self.design.default_response()
@@ -869,6 +977,31 @@ mod tests {
     fn prototype_all_pole() -> Result<()> {
         let d = FilterDesign::prototype(4, 20.0).synthesize()?;
         assert_eq!(d.order(), 4);
+        Ok(())
+    }
+
+    /// A physical-Hz `freq_range` on a prototype design (no center/bw) must
+    /// be rejected, not silently reinterpreted as normalized ω (review P3
+    /// #4); `freq_range_normalized` is the explicit prototype-domain path.
+    #[test]
+    fn touchstone_freq_range_hz_on_prototype_is_rejected() -> Result<()> {
+        use crate::error::MfsError;
+        let d = FilterDesign::prototype(4, 20.0).synthesize()?;
+        let err = d
+            .to_touchstone()
+            .freq_range(6.5e9, 7.0e9, 51)
+            .build()
+            .unwrap_err();
+        assert!(
+            matches!(err, MfsError::PreconditionViolation(_)),
+            "a physical-Hz range on a prototype design must be a typed error, got {err:?}"
+        );
+        // The explicit normalized-ω range must work and sweep that domain.
+        let r = d
+            .to_touchstone()
+            .freq_range_normalized(-2.0, 2.0, 51)
+            .build()?;
+        assert!(r.contains("# "), "touchstone output empty");
         Ok(())
     }
 
@@ -906,8 +1039,10 @@ mod tests {
         let d2 = FilterDesign::bandpass_edges(4, 20.0, f_start, f_stop).synthesize()?;
         assert_eq!(d2.center_hz(), Some(center));
         assert_eq!(d2.bandwidth_hz(), Some(bw));
-        assert_eq!(d2.f_start_hz(), Some(center - bw / 2.0));
-        assert_eq!(d2.f_stop_hz(), Some(center + bw / 2.0));
+        // P2-2: the edges must round-trip to the *input* edges (geometric-
+        // mean convention), not the arithmetic-mean `c ± bw/2`.
+        assert!((d2.f_start_hz().unwrap() - f_start).abs() < 1e-6);
+        assert!((d2.f_stop_hz().unwrap() - f_stop).abs() < 1e-6);
         // Coupling matrices should be identical
         let m1 = d1.matrix();
         let m2 = d2.matrix();
@@ -929,9 +1064,26 @@ mod tests {
         let d = FilterDesign::bandpass(4, 20.0, 6.75e9, 300e6).synthesize()?;
         let r = d.response_default()?;
         assert_eq!(r.samples.len(), 201);
-        // First point should be at center - 1.5*bw = 6.75e9 - 450e6 = 6.3e9
-        let expected_start = 6.75e9 - 1.5 * 300e6;
+        // P2-3: the window is the geometric passband edges padded by 0.5·bw,
+        // which stays positive even for wideband designs (fbw > 2/3).
+        let (lower_edge, upper_edge) = crate::freq::band_edge_pair(6.75e9, 300e6);
+        let expected_start = (lower_edge - 0.5 * 300e6).max(1e-9 * 6.75e9);
+        let expected_stop = upper_edge + 0.5 * 300e6;
         assert!((r.samples[0].frequency_hz - expected_start).abs() < 1.0);
+        assert!((r.samples[200].frequency_hz - expected_stop).abs() < 1.0);
+        Ok(())
+    }
+
+    /// Regression for review P2-3: a wideband design (fbw > 2/3, where the
+    /// old `center − 1.5·bw` window went below 0 Hz) must still produce a
+    /// valid default response with an all-positive window.
+    #[test]
+    fn response_default_wideband_positive_window() -> Result<()> {
+        // fbw = bw/center = 1.5 > 2/3, so the old window went negative.
+        let d = FilterDesign::bandpass(4, 20.0, 1.0e9, 1.5e9).synthesize()?;
+        let r = d.response_default()?;
+        assert!(r.samples[0].frequency_hz > 0.0, "window must stay positive");
+        assert!(r.samples[0].frequency_hz <= 1.0e9, "window must start in/near the passband region");
         Ok(())
     }
 

@@ -24,8 +24,8 @@ use clap::Parser;
 use serde::Serialize;
 
 use mfs::pipeline::{
-    context_from_request, load_context, run_from_json, run_full_pipeline, run_stage,
-    SynthesisContext, SynthesisRequest,
+    context_from_request, load_context, run_from_json, run_full_pipeline, run_remaining_stages,
+    run_stage, SynthesisContext, SynthesisRequest,
 };
 
 /// MFS — Microwave Filter Synthesis CLI
@@ -110,11 +110,11 @@ enum Command {
         #[arg(long, default_value = "201")]
         points: usize,
 
-        /// Response frequency range start (Hz). Defaults to center - 1.5*bw.
+        /// Response frequency range start (Hz). Defaults to 0.5·bw below the outermost passband lower edge.
         #[arg(long)]
         resp_start: Option<f64>,
 
-        /// Response frequency range stop (Hz). Defaults to center + 1.5*bw.
+        /// Response frequency range stop (Hz). Defaults to 0.5·bw above the outermost passband upper edge.
         #[arg(long)]
         resp_stop: Option<f64>,
 
@@ -263,7 +263,19 @@ fn main() {
                 context: None,
             };
             let json = serde_json::to_string(&cli_error)
-                .unwrap_or_else(|_| format!(r#"{{"error_type":"internal","message":"{}"}}"#, e));
+                .unwrap_or_else(|_| {
+                    // Last-resort fallback: build the JSON object via the
+                    // serializer so the message is escaped correctly (the
+                    // previous hand-formatted string could emit invalid JSON
+                    // when the message contained quotes or backslashes).
+                    let value = serde_json::json!({
+                        "error_type": "internal",
+                        "message": e.to_string(),
+                        "context": null,
+                    });
+                    serde_json::to_string(&value)
+                        .unwrap_or_else(|_| r#"{"error_type":"internal","message":"serialization failed"}"#.into())
+                });
             eprintln!("{json}");
             process::exit(1);
         }
@@ -520,15 +532,26 @@ fn run_design(args: &DesignArgs<'_>, format: &OutputFormat) -> Result<(), CliRun
     let topo = match topology.to_lowercase().as_str() {
         "arrow" => MatrixTopology::Arrow,
         "transversal" => MatrixTopology::Transversal,
-        _ => MatrixTopology::Folded,
+        "folded" => MatrixTopology::Folded,
+        // P2-13: reject unknown values instead of silently degrading to Folded
+        // (the no-silent-degradation policy; `parse_matrix_json` already does
+        // this for topology in the JSON path).
+        other => {
+            return Err(CliRunError::ArgValidation(format!(
+                "unknown topology '{other}'; expected 'transversal', 'folded', or 'arrow'"
+            )))
+        }
     };
     let matrix = design.to_topology(topo).map_err(CliRunError::Pipeline)?;
 
     // Get response
     let response = if let (Some(c), Some(bw)) = (resolved_center, resolved_bw) {
-        // Default response range: center ± 1.5*bw (covers passband + nearby stopband)
-        let r_start = resp_start.unwrap_or(c - 1.5 * bw);
-        let r_stop = resp_stop.unwrap_or(c + 1.5 * bw);
+        // Default response range: the geometric passband edges padded by
+        // 0.5·bw — stays positive for wideband designs where the old
+        // `c ± 1.5·bw` window went below 0 Hz (P2-3).
+        let (lower_edge, upper_edge) = mfs::freq::band_edge_pair(c, bw);
+        let r_start = resp_start.unwrap_or((lower_edge - 0.5 * bw).max(1e-9 * c));
+        let r_stop = resp_stop.unwrap_or(upper_edge + 0.5 * bw);
         if let Some(q_val) = q {
             design
                 .response_lossy(r_start, r_stop, points, q_val)
@@ -1180,19 +1203,32 @@ fn run_extract(
     Ok(())
 }
 /// Chooses a response frequency range, defaulting to the outer channel bands.
+///
+/// The default window spans from `0.5·bw` below the outermost passband lower
+/// edge to `0.5·bw` above the outermost passband upper edge, where the edges
+/// are the geometric-mean `band_edge_pair` values (review P2-3, matching
+/// `FilterDesign::default_response`). This mirrors the former `center ∓
+/// 1.5·bw` window for narrowband designs but is derived from the *edges*, so a
+/// wideband channel (fbw > 2/3, where `center − 1.5·bw < 0`) still yields a
+/// positive window instead of one that fails in `map_hz_to_normalized`.
 fn resolve_multiplexer_range(
     channels: &[mfs::design::FilterDesign],
     resp_start: Option<f64>,
     resp_stop: Option<f64>,
 ) -> (f64, f64) {
-    let lo = channels
-        .iter()
-        .map(|ch| ch.center_hz().unwrap_or(0.0) - 1.5 * ch.bandwidth_hz().unwrap_or(0.0))
-        .fold(f64::INFINITY, f64::min);
-    let hi = channels
-        .iter()
-        .map(|ch| ch.center_hz().unwrap_or(0.0) + 1.5 * ch.bandwidth_hz().unwrap_or(0.0))
-        .fold(f64::NEG_INFINITY, f64::max);
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    for ch in channels.iter() {
+        if let (Some(center), Some(bw)) = (ch.center_hz(), ch.bandwidth_hz()) {
+            let (lower, upper) = mfs::freq::band_edge_pair(center, bw);
+            let pad = 0.5 * bw;
+            // Each channel's default window (per `default_response`): passband
+            // edges padded by half a bandwidth, floored so wideband channels
+            // (fbw > 2/3) stay positive.
+            lo = lo.min((lower - pad).max(1e-9 * center));
+            hi = hi.max(upper + pad);
+        }
+    }
     (resp_start.unwrap_or(lo), resp_stop.unwrap_or(hi))
 }
 
@@ -1202,36 +1238,6 @@ fn min_db(values: &[f64]) -> f64 {
 
 fn max_db(values: &[f64]) -> f64 {
     values.iter().copied().fold(f64::NEG_INFINITY, f64::max)
-}
-
-/// Determines which stages haven't been executed yet and runs them in order.
-fn run_remaining_stages(ctx: &mut SynthesisContext) -> mfs::Result<()> {
-    let all_stages = [
-        "approximation",
-        "matrix_synthesis",
-        "topology_transform",
-        "response_evaluation",
-    ];
-
-    for stage_name in &all_stages {
-        if ctx
-            .metadata
-            .stages_executed
-            .contains(&stage_name.to_string())
-        {
-            continue;
-        }
-        // Skip optional stages that lack required configuration. Every other
-        // stage (including response_evaluation) is always attempted when the
-        // matrix is available.
-        match *stage_name {
-            "topology_transform" if ctx.options.topology.is_none() => continue,
-            _ => {}
-        }
-        run_stage(ctx, stage_name)?;
-    }
-
-    Ok(())
 }
 
 /// Outputs only the artifact produced by the specified stage.
@@ -1627,6 +1633,8 @@ enum CliRunError {
     InputRead(String),
     /// Failed to parse input JSON.
     InputParse(String),
+    /// A command-line argument is invalid (e.g. an unknown enum value).
+    ArgValidation(String),
     /// Pipeline execution error.
     Pipeline(mfs::MfsError),
     /// Serialization error.
@@ -1652,6 +1660,7 @@ impl std::fmt::Display for CliRunError {
         match self {
             Self::InputRead(msg) => write!(f, "{msg}"),
             Self::InputParse(msg) => write!(f, "invalid input JSON: {msg}"),
+            Self::ArgValidation(msg) => write!(f, "invalid argument: {msg}"),
             Self::Pipeline(err) => write!(f, "{err}"),
             Self::Serialization(msg) => write!(f, "serialization error: {msg}"),
             Self::Touchstone(msg) => write!(f, "touchstone error: {msg}"),
@@ -1663,6 +1672,7 @@ fn error_type_name(err: &CliRunError) -> String {
     match err {
         CliRunError::InputRead(_) => "io_error".to_string(),
         CliRunError::InputParse(_) => "parse_error".to_string(),
+        CliRunError::ArgValidation(_) => "invalid_argument".to_string(),
         CliRunError::Pipeline(mfs_err) => match mfs_err {
             mfs::MfsError::InvalidOrder { .. } => "invalid_order".to_string(),
             mfs::MfsError::InvalidReturnLoss { .. } => "invalid_return_loss".to_string(),
@@ -1733,14 +1743,15 @@ mod optimizer_tests {
 
     #[test]
     fn parse_matrix_json_flat_and_nested() {
-        // Flat row-major with order + topology.
-        let m = parse_matrix_json(r#"{"order":1,"data":[0,0.7,0.7,0,0.7,0,0,0,0]}"#).unwrap();
+        // Flat row-major with order + topology. Order-1 (side-3) ladder:
+        // source->res 0.7, res->load 0.7 (symmetric).
+        let m = parse_matrix_json(r#"{"order":1,"data":[0,0.7,0,0.7,0,0.7,0,0.7,0]}"#).unwrap();
         assert_eq!(m.order(), 1);
         assert!((m.at(0, 1).unwrap() - 0.7).abs() < 1e-12);
         assert_eq!(m.topology(), mfs::matrix::MatrixTopology::Transversal);
 
         // Folded topology honored.
-        let m = parse_matrix_json(r#"{"order":1,"topology":"folded","data":[0,0.7,0.7,0,0.7,0,0,0,0]}"#)
+        let m = parse_matrix_json(r#"{"order":1,"topology":"folded","data":[0,0.7,0,0.7,0,0.7,0,0.7,0]}"#)
             .unwrap();
         assert_eq!(m.topology(), mfs::matrix::MatrixTopology::Folded);
 
@@ -1750,7 +1761,7 @@ mod optimizer_tests {
         assert!((m.at(1, 2).unwrap() - 1.0).abs() < 1e-12);
 
         // Order / side mismatch is a typed dimension error.
-        let err = parse_matrix_json(r#"{"order":2,"data":[0,0.7,0.7,0,0.7,0,0,0,0]}"#).unwrap_err();
+        let err = parse_matrix_json(r#"{"order":2,"data":[0,0.7,0,0.7,0,0.7,0,0.7,0]}"#).unwrap_err();
         assert!(matches!(err, mfs::error::MfsError::DimensionMismatch { .. }));
     }
 
@@ -1850,5 +1861,51 @@ mod optimizer_tests {
                 .max((a.s21_im - b.s21_im).abs());
         }
         assert!(max_dev < 1e-3);
+    }
+
+    /// The default multiplexer response window is derived from the passband
+    /// *edges* (geometric-mean `band_edge_pair`) padded by 0.5·bw, floored at
+    /// `1e-9·center` — not the old arithmetic `center ∓ 1.5·bw`, which goes
+    /// negative for wideband channels (fbw > 2/3) and fails in
+    /// `map_hz_to_normalized` (review round-2, matching P2-3).
+    #[test]
+    fn multiplexer_default_range_is_edge_based_and_positive() {
+        // Two bandpass channels: the default window is the geometric-mean
+        // `band_edge_pair` edges padded by 0.5·bw on each side (the same
+        // formula as `FilterDesign::default_response`).
+        let ch0 = FilterDesign::bandpass(2, 20.0, 6.75e9, 0.3e9).synthesize().unwrap();
+        let ch1 = FilterDesign::bandpass(2, 20.0, 6.95e9, 0.3e9).synthesize().unwrap();
+        let (lo, hi) = resolve_multiplexer_range(&[ch0.clone(), ch1.clone()], None, None);
+
+        // The outer edges come from the outermost channels (ch0's lower edge,
+        // ch1's upper edge); pad is each channel's own 0.5·bw.
+        let (l0, _u0) = mfs::freq::band_edge_pair(
+            ch0.center_hz().unwrap(),
+            ch0.bandwidth_hz().unwrap(),
+        );
+        let (_l1, u1) = mfs::freq::band_edge_pair(
+            ch1.center_hz().unwrap(),
+            ch1.bandwidth_hz().unwrap(),
+        );
+        let expect_lo = l0 - 0.5 * ch0.bandwidth_hz().unwrap();
+        let expect_hi = u1 + 0.5 * ch1.bandwidth_hz().unwrap();
+        assert!((lo - expect_lo).abs() < 1e-6 * lo, "lo {lo} vs {expect_lo}");
+        assert!((hi - expect_hi).abs() < 1e-6 * hi, "hi {hi} vs {expect_hi}");
+        assert!(lo > 0.0);
+
+        // Wideband channel (fbw = 1.2 > 2/3): the old arithmetic window
+        // `center - 1.5·bw` is negative and would fail in
+        // `map_hz_to_normalized`; the edge-based floor keeps the start positive.
+        let wide = FilterDesign::bandpass(2, 20.0, 1.0e9, 1.2e9).synthesize().unwrap();
+        let (wlo, _whi) = resolve_multiplexer_range(std::slice::from_ref(&wide), None, None);
+        let wc = wide.center_hz().unwrap();
+        let wbw = wide.bandwidth_hz().unwrap();
+        let (wlower, _wupper) = mfs::freq::band_edge_pair(wc, wbw);
+        assert!(
+            wlower - 0.5 * wbw < 1e-9 * wc,
+            "wideband lower edge minus pad must need the positive floor"
+        );
+        assert!(wlo > 0.0, "wideband window start must stay positive, got {wlo}");
+        assert!((wlo - 1e-9 * wc).abs() < 1e-3 * wc, "lo {wlo} vs floor {}", 1e-9 * wc);
     }
 }

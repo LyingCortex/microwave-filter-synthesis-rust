@@ -49,6 +49,94 @@ remaining low-priority ecosystem items and the refuted passband-TZ work.
   characteristic, which is genuine new approximation research, not a helper
   relaxation.
 
+- **Lossy (Q > 0) pole-expansion response path** — `design.response()` /
+  `response_normalized()` / `response_bandpass()` have the lossless
+  `PoleExpansionData` fast path (transversal partial fraction, O(N) per
+  point) with a 5-point LU verification fallback
+  (`src/design.rs:419-448`). `response_lossy()` / `response_lossy_normalized()`
+  go straight to `ResponseSolver` per-point LU (`src/design.rs:636/58`) —
+  no fast path. The lossy math supports the same expansion with a one-line
+  change: finite-Q loss is a *uniform* resonator-diagonal shift — the
+  prototype-domain response matrix is `A(ω) = M + ω·I_r − jR − (j/Qu)·I_r`
+  (`src/response/backend.rs:129-138`, `dissipation = 1/Qu` added identically
+  to every resonator diagonal, real-ω convention, `ω` carried as
+  `Complex64::new(omega, 0.0)` at `pole_expansion.rs:177`) — so every pole
+  shifts from `−B_k` to `−B_k + j/Qu` while the residues are unchanged
+  (they are pure coupling products `M_Sk² / M_Sk·M_kL / M_kL²`,
+  `src/response/pole_expansion.rs:96-107`). Concretely: add a
+  `q: Option<f64>` (or `shift: f64`) parameter to
+  `PoleExpansionData::from_matrix` and `evaluate_at` so the pole offset
+  becomes `−B_k + j/Qu`; `evaluate_at` sums `r_k / (ω − (−B_k + j/Qu))`.
+  The existing 5-point LU verification gate is reusable unchanged
+  (evaluate both sides with the lossy `ResponseSettings`). This matters
+  because the GUI's Python binding (`fuqtgui:
+  src/domain/synthesis_engine.py:246-249`) takes `response_lossy` whenever
+  `q > 0` (GUI default `Q = 1000`), so the lossy path is the one the
+  default GUI actually exercises. Scale: ~30–60 lines in Rust + tests.
+  Measured on the same machine: lossless 201 points 0.043–0.085 ms (fast
+  path) vs lossless-LU 0.23–0.55 ms; the lossy 1801-point sweep was ~13 ms
+  in the fuqtgui serve path (`fuqtgui: docs/roadmap/maintenance-backlog.md`
+  §9.0 table), which is where this optimization pays off.
+  (Logged 2026-10-10. Math **verified** same day, throwaway script — no
+  production code touched: numpy re-derivation of the 2×2 Schur
+  partial-fraction `evaluate_at` formula, lossless and
+  `−B_k + j/Qu`-shifted, against the real `mfs` crate's own
+  `response` / `response_lossy` outputs (the exact slow path this fast
+  path would replace): prototype-domain golden cases 4-4 / 6-3 / 8-3,
+  Q=1000, 201 points → max |ΔS21| ≤ 6.5e-13 dB, |ΔS11| ≤ 1.3e-11 dB
+  (machine precision, incl. the all-pole 4-4 case with complex M_SL).
+  Physical-domain BPF (order 8, 3.5 GHz / 200 MHz, 401 Hz-grid points,
+  zeros mapped via the standard L→BP transform, physical Q = 1000) →
+  1.2e-8 / 6.1e-9 dB (LU-vs-partial-fraction floating-point rounding only).
+  **Pitfall found during verification:** the bandpass physical domain
+  normalizes the physical Q at response time,
+  `Qu_norm = Q·bw/center` (`src/design.rs:629`) — the lossy fast path's
+  pole offset must use `Qu_norm`, not the raw physical Q (using Q=1000
+  directly where Qu≈57.1 is correct produces 24–40 dB errors at the
+  transmission zeros). Same-basis numpy magnitude: per-point LU (n=10)
+  3–5 ms vs partial-fraction 0.17–0.22 ms over 401 points (~20×).)
+
+- **Pole-expansion fast path vs per-point LU — scope, not a second solver.**
+  Two distinct things; don't conflate them:
+  - **Fast path is the sole source of the Rust speedup.** 1801-pt sweep:
+    ~0.05 ms (fast) vs ~13 ms (per-point LU) vs ~100 ms (Python skrf). The
+    bench `response` stage (`benches/synthesis.rs:187`, the 12×–39× headline
+    over Python) times per-point LU, *not* the fast path — the Rust response
+    advantage only materializes when the fast path is taken; forcing LU
+    shrinks it to a language-only gap.
+  - **LU is the correctness fallback + the fast path's verification anchor.**
+    Only path that covers non-transversal (folded/arrow, complex coupling)
+    and lossy matrices, and the ground truth the fast path verifies against
+    on a 5-point grid before being trusted (`src/design.rs:419-448`).
+  - **Fast-path group delay — implemented (2026-10-11).**
+    `PoleExpansionData::evaluate_at` now returns `(s11, s21, group_delay)` and
+    emits a finite group delay at O(N)/point: group delay = `−Im(d/dω ln S21)`,
+    and S21 is a known rational function of ω in the Schur 2×2 form
+    (`src/response/pole_expansion.rs:150-254`), so its log-derivative is a
+    per-pole partial-fraction sum (one extra O(N) sum alongside the existing
+    S-parameter sum). It is `None` exactly at a transmission zero
+    (`|S21| → 0`, `inv_10` degenerate), mirroring the LU backend's
+    `denominator.norm_sqr() <= 1e-18` guard — explicit undefined, not a fake 0.
+    Both the normalized and bandpass fast-path callers
+    (`evaluate_normalized` / `evaluate_bandpass`) forward it, so
+    `design.response()` / `response_bandpass()` now deliver engine-native
+    group delay. **Verification (three independent algorithms agree):**
+    (1) fast vs LU on a 3-zero filter, full band, to 1e-7 (the cross-algorithm
+    guarantee — `group_delay_matches_across_fast_and_lu_backends`, Check 1);
+    (2) fast vs an all-pole-ladder central difference of the S21 phase, the
+    value anchor (Check 2); (3) cross-language, the new mfs fast-path value
+    converted to seconds via the exact BP chain rule
+    `dω/df = (1/FB)(1/fc + fc/f²)` matches **both** skrf `group_delay` (the
+    same third-party engine the GUI uses for its group-delay plots) and an
+    independent central difference of the S21 phase to **16.6 ps** over 268
+    points of a 2 GHz / 200 MHz band. The 16.6 ps is the 2nd-order
+    central-difference's own O(h²) truncation (Δf = 0.9 MHz) — skrf uses the
+    identical `−dφ/dω` central difference on the same S21, so it agrees with
+    the FD reference to machine precision (0.000 ps) and sits 16.6 ps from the
+    analytic fast path on both sides. Measured O(N): 1801-pt sweep
+    **2.0 µs/pt** (prototype) / **2.2 µs/pt** (bandpass) with the derivative
+    active, release build.
+
 
 ### Low priority (ecosystem)
 

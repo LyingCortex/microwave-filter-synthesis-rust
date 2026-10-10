@@ -96,10 +96,7 @@ pub use spec::{
 };
 pub use synthesis::MatrixSynthesisMethod;
 pub use transform::TopologyKind;
-pub use verify::ResponseTolerance;
-
-/// Default unloaded Q used by `filter_spec` when none is specified.
-pub const DEFAULT_UNLOADED_Q: f64 = 2000.0;
+pub use verify::{CheckOutcome, ResponseTolerance};
 
 #[deprecated(note = "use FilterDesign::bandpass()/prototype() or FilterSpec::builder()")]
 pub fn filter_spec<T>(
@@ -111,11 +108,18 @@ pub fn filter_spec<T>(
 where
     T: IntoIterator<Item = f64>,
 {
-    let transmission_zeros = zeros.into().into_iter().flat_map(|iter| iter.into_iter());
-    let spec = FilterSpec::new(order, return_loss_db)?
-        .with_normalized_transmission_zeros(transmission_zeros)
-        .with_unloaded_q(unloaded_q.into().unwrap_or(DEFAULT_UNLOADED_Q));
-    Ok(spec)
+    // P3 #8: align with the new builder APIs — an absent `unloaded_q` stays
+    // `None` (lossless) rather than defaulting to a magic value, so the legacy
+    // shim and the `FilterDesign`/`FilterSpec` builders agree on the metadata.
+    crate::synthesis::build_filter_spec(
+        order,
+        return_loss_db,
+        &zeros
+            .into()
+            .map(|iter| iter.into_iter().collect::<Vec<_>>())
+            .unwrap_or_default(),
+        unloaded_q.into(),
+    )
 }
 
 #[deprecated(note = "use mfs::freq::LowPassMapping::new")]

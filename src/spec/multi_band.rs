@@ -47,6 +47,11 @@ impl BandSpec {
     /// `f1_hz < f2_hz`, using the crate's geometric-mean convention
     /// ([`edges_to_center_bandwidth`](crate::freq::edges_to_center_bandwidth)).
     pub fn from_edges(f1_hz: f64, f2_hz: f64, return_loss_db: f64) -> Result<Self> {
+        if !f1_hz.is_finite() || !f2_hz.is_finite() || f1_hz <= 0.0 || f2_hz <= f1_hz {
+            return Err(MfsError::InvalidFrequency(format!(
+                "band edges must satisfy 0 < f1 < f2 (strictly ordered), got f1={f1_hz}, f2={f2_hz}"
+            )));
+        }
         let (center_hz, bandwidth_hz) = crate::freq::edges_to_center_bandwidth(f1_hz, f2_hz);
         Self::new(center_hz, bandwidth_hz, return_loss_db)
     }
@@ -139,7 +144,10 @@ impl MultiBandSpec {
                 bands.len()
             )));
         }
-        if order == 0 {
+        if order == 0 || order > super::MAX_ORDER {
+            // The order sizes an `(order+2)²` coupling matrix; an unbounded
+            // order is an OOM vector (review P2-11). Matches the single-band
+            // `FilterSpec::new` bound (round-2: MultiBandSpec bypassed it).
             return Err(MfsError::InvalidOrder { order });
         }
 
@@ -168,9 +176,30 @@ impl MultiBandSpec {
     }
 
     /// Adds a rejection requirement.
-    pub fn with_rejection(mut self, rejection: impl IntoIterator<Item = RejectionSpec>) -> Self {
-        self.rejection = rejection.into_iter().collect();
-        self
+    ///
+    /// Validates each `InterBand { index }` against the band layout: the
+    /// documented invariant `index < band_count - 1` (an inter-band gap only
+    /// exists between `bands[index]` and `bands[index + 1]`) is enforced here,
+    /// at the one place the band count is known (review P3 #6).
+    pub fn with_rejection(
+        mut self,
+        rejection: impl IntoIterator<Item = RejectionSpec>,
+    ) -> Result<Self> {
+        let rejection: Vec<RejectionSpec> = rejection.into_iter().collect();
+        for spec in &rejection {
+            if let RejectionRegion::InterBand { index } = spec.region {
+                if index >= self.bands.len().saturating_sub(1) {
+                    return Err(MfsError::PreconditionViolation(format!(
+                        "rejection region InterBand {{ index: {index} }} is out of range: \
+                         index must be < band_count - 1 ({} - 1 = {})",
+                        self.bands.len(),
+                        self.bands.len().saturating_sub(1)
+                    )));
+                }
+            }
+        }
+        self.rejection = rejection;
+        Ok(self)
     }
 
     /// Sets the normalized-prototype transmission zeros.
@@ -280,6 +309,47 @@ mod tests {
         assert!(MultiBandSpec::new(one, 6).is_err());
     }
 
+    /// The total order is bounded by `MAX_ORDER` (an OOM vector otherwise);
+    /// this matches the single-band `FilterSpec::new` bound that
+    /// `MultiBandSpec::new` previously bypassed (review round-2).
+    #[test]
+    fn multi_band_spec_order_is_bounded_by_max_order() {
+        let bands = two_bands();
+        assert!(MultiBandSpec::new(bands.clone(), 0).is_err());
+        assert!(MultiBandSpec::new(bands.clone(), crate::spec::MAX_ORDER).is_ok());
+        let err = MultiBandSpec::new(bands, crate::spec::MAX_ORDER + 1).unwrap_err();
+        assert!(matches!(err, MfsError::InvalidOrder { .. }));
+    }
+
+    /// An `InterBand { index }` region must satisfy `index < band_count - 1`;
+    /// the invariant is enforced at `with_rejection` (review P3 #6).
+    #[test]
+    fn interband_rejection_index_is_validated() -> Result<()> {
+        use crate::error::MfsError;
+        let spec = MultiBandSpec::new(two_bands(), 6)?;
+        // index 0 is the valid gap between the 2 bands.
+        assert!(spec
+            .clone()
+            .with_rejection([RejectionSpec::new(
+                RejectionRegion::InterBand { index: 0 },
+                20.0
+            )?])
+            .is_ok());
+        // index 1 is out of range (would need bands[1] and bands[2]).
+        let err = spec
+            .with_rejection([RejectionSpec::new(
+                RejectionRegion::InterBand { index: 1 },
+                20.0
+            )?])
+            .unwrap_err();
+        assert!(
+            matches!(err, MfsError::PreconditionViolation(_)),
+            "out-of-range InterBand index must be a typed error, got {err:?}"
+        );
+        assert!(err.to_string().contains("out of range"));
+        Ok(())
+    }
+
     #[test]
     fn multi_band_spec_rejects_overlapping_bands() {
         let overlapping = vec![
@@ -297,7 +367,7 @@ mod tests {
                 RejectionSpec::new(RejectionRegion::OuterLower, 30.0)?,
                 RejectionSpec::new(RejectionRegion::InterBand { index: 0 }, 20.0)?,
                 RejectionSpec::new(RejectionRegion::OuterUpper, 30.0)?,
-            ]);
+            ])?;
 
         assert_eq!(spec.band_count(), 2);
         assert_eq!(spec.order(), 6);

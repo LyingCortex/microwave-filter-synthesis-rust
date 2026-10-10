@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
+use crate::freq::MAX_GRID_POINTS;
+use crate::spec::MAX_ORDER;
+
 /// Error type shared across synthesis, mapping, and response evaluation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MfsError {
@@ -28,14 +31,17 @@ pub enum MfsError {
 impl Display for MfsError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidOrder { order } => write!(f, "filter order must be positive, got {order}"),
+            Self::InvalidOrder { order } => {
+                write!(f, "filter order must be at least 1 and at most {MAX_ORDER}, got {order}")
+            }
             Self::InvalidReturnLoss { return_loss_db } => {
                 write!(f, "return loss must be positive, got {return_loss_db}")
             }
             Self::InvalidFrequency(message) => write!(f, "invalid frequency: {message}"),
-            Self::InvalidGridSize { points } => {
-                write!(f, "frequency grid requires at least 2 points, got {points}")
-            }
+            Self::InvalidGridSize { points } => write!(
+                f,
+                "frequency grid requires between 2 and {MAX_GRID_POINTS} points, got {points}"
+            ),
             Self::InvalidTransmissionZero(message) => {
                 write!(f, "invalid transmission zero: {message}")
             }

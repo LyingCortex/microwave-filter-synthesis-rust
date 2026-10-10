@@ -12,9 +12,27 @@ pub struct ResponseSample {
     pub frequency_hz: f64,
     /// Matching normalized frequency used internally by the solver.
     pub normalized_omega: f64,
-    /// Approximate group delay derived from the solved response matrix.
-    /// `None` when the solver cannot compute it (e.g. the pole-expansion
-    /// fast path) — never a silent 0.0.
+    /// Group delay in **normalized-prototype** units: `dτ/dω` where ω is the
+    /// normalized coordinate (the sibling `normalized_omega`), i.e.
+    /// `−Im(d/dω ln S21)` with the derivative w.r.t. that normalized axis —
+    /// **not** per hertz and **not** per radian (angular) frequency. Both
+    /// solver paths (LU and the O(N) pole-expansion fast path) return these
+    /// same units.
+    ///
+    /// **Converting to seconds** (physical group delay τ = −dφ/d(2πf)):
+    /// chain `dτ/d(2πf) = (dτ/dω)·(dω/d(2πf))`. For the band-pass mapping
+    /// `ω = (1/FB)(f/fc − fc/f)` (`freq.rs`, `FB = bw/fc`), `dω/df =
+    /// (1/FB)(1/fc + fc/f²)`, so seconds = `group_delay·(1/FB)(1/fc + fc/f²)/(2π)`.
+    /// **Trap (recorded 2026-10-11):** a numerical `−d(phase)/df` reference is
+    /// per-hertz, i.e. `2π`× the seconds value. Compare it against
+    /// `group_delay·dω/df`, or divide the per-hertz derivative by `2π` before
+    /// comparing to the seconds value. A 2π slip is invisible in a magnitude
+    /// check but shows up as an `(2π−1)·gd` offset that *grows with |S21|* and
+    /// *does not shrink when the grid is refined* — those two symptoms rule out
+    /// truncation error and point at a units/convention mismatch, not an
+    /// algorithm bug.
+    /// `None` only where the expression is numerically degenerate (e.g. a
+    /// transmission zero) — never a silent 0.0.
     pub group_delay: Option<f64>,
     /// Real part of the reflection coefficient.
     pub s11_re: f64,
@@ -38,13 +56,28 @@ impl ResponseSample {
     }
 
     /// S11 magnitude in dB.
+    ///
+    /// A zero magnitude (a transmission/reflection null) maps to a finite
+    /// floor of −300 dB instead of `−∞`, so the value stays serializable as
+    /// JSON (review P2-10: a sample taken exactly at a transmission zero
+    /// would otherwise produce `log10(0) = −inf` and fail `serde_json`).
     pub fn s11_db(&self) -> f64 {
-        20.0 * self.s11_mag().log10()
+        let mag = self.s11_mag();
+        if mag <= 0.0 {
+            return -300.0;
+        }
+        20.0 * mag.log10()
     }
 
     /// S21 magnitude in dB.
+    ///
+    /// See [`Self::s11_db`] for the zero-magnitude (−300 dB) convention.
     pub fn s21_db(&self) -> f64 {
-        20.0 * self.s21_mag().log10()
+        let mag = self.s21_mag();
+        if mag <= 0.0 {
+            return -300.0;
+        }
+        20.0 * mag.log10()
     }
 
     /// S11 phase in degrees.
@@ -204,29 +237,100 @@ mod tests {
         Ok(())
     }
 
-    /// T4.3: group delay must be explicit per solver path, never a silent 0.0.
-    /// The LU backend computes it (`Some`); the pole-expansion fast path does
-    /// not and marks it `None`.
+    /// Group delay is computed by *both* solver paths and must agree: the
+    /// pole-expansion fast path (O(N) analytic derivative of ln S21) and the
+    /// per-point LU backend both reduce to −Im(d/dω ln S21).
+    ///
+    /// **Check 1 — cross-algorithm (fast vs LU):** a real synthesized filter
+    /// with transmission zeros (the fast path's supported domain). The two
+    /// independent analytic implementations agree to f64 round-off.
+    ///
+    /// **Check 2 — value anchor (vs a genuinely independent algorithm):** an
+    /// independent central difference of the S21 phase. A coarse central
+    /// difference is a poor value anchor near a transmission zero (the phase
+    /// is steep and |S21| is small — measured FD error up to O(0.3) there),
+    /// so it runs on an all-pole ladder (no zeros → moderate phase slope
+    /// everywhere), matching the established `lu_group_delay_matches_s21_
+    /// phase_derivative` convention. There it is reliable and catches a
+    /// sign/convention error in either implementation (T4.3).
     #[test]
-    fn group_delay_is_explicit_per_solver_path() -> Result<()> {
-        let matrix = CouplingMatrixBuilder::new(2)?
-            .set_symmetric(0, 1, 0.5)?
-            .set_symmetric(1, 2, 0.7)?
-            .set_symmetric(2, 3, 0.5)?
-            .build()?;
-        let grid = FrequencyGrid::linspace(-2.0, 2.0, 5)?;
+    fn group_delay_matches_across_fast_and_lu_backends() -> Result<()> {
+        use crate::design::FilterDesign;
+        use num_complex::Complex64;
 
-        let lu = ResponseSolver.evaluate_normalized(&matrix, &grid)?;
-        assert!(
-            lu.samples[0].group_delay.is_some(),
-            "LU backend must provide a group delay"
-        );
-
-        let pole = crate::response::pole_expansion::PoleExpansionData::from_matrix(&matrix)?;
+        // --- Check 1: fast vs LU on a 3-zero filter (full band) ------------
+        let d = FilterDesign::prototype(6, 23.0)
+            .zeros([-2.0, -1.2, 1.5])
+            .synthesize()?;
+        let matrix = d.matrix();
+        let grid = FrequencyGrid::linspace(-3.0, 3.0, 401)?;
+        let lu = ResponseSolver.evaluate_normalized(matrix, &grid)?;
+        let pole =
+            crate::response::pole_expansion::PoleExpansionData::from_matrix(matrix)?;
         let pe = pole.evaluate_normalized(&grid)?;
+        let s21c = |i: usize| Complex64::new(lu.samples[i].s21_re, lu.samples[i].s21_im);
+        let mut checked = 0usize;
+        for i in 1..lu.samples.len() - 1 {
+            let s21 = s21c(i);
+            let fast_mag = (pe.samples[i].s21_re * pe.samples[i].s21_re
+                + pe.samples[i].s21_im * pe.samples[i].s21_im)
+                .sqrt();
+            // Near a transmission zero the ln-S21 derivative is ill-conditioned
+            // (large-near-cancellation in ds01/s01 − ddet/det); the gap is
+            // bounded by O(ε·gd) not a true divergence, so skip it — the
+            // established phase-derivative test uses the same convention.
+            if s21.norm_sqr() < 1e-6 || fast_mag < 1e-3 {
+                continue;
+            }
+            let lu_gd = lu.samples[i].group_delay.expect("LU group delay present");
+            let pe_gd = pe.samples[i].group_delay.expect("fast-path group delay present");
+            checked += 1;
+            assert!(
+                (pe_gd - lu_gd).abs() < 1e-7 * (1.0 + lu_gd.abs()),
+                "group delay at ω={}: fast {pe_gd} vs LU {lu_gd}",
+                lu.samples[i].normalized_omega
+            );
+        }
+        assert!(checked > 100, "expected many interior points, checked {checked}");
+
+        // --- Check 2: FD phase-derivative value anchor on an all-pole ladder
+        // (no zeros → no steep phase; the FD is a reliable independent
+        // reference here). Both solver paths are checked against it.
+        let dp = FilterDesign::prototype(6, 23.0).synthesize()?;
+        let matp = dp.matrix();
+        let gridp = FrequencyGrid::linspace(-2.0, 2.0, 801)?;
+        let step = 4.0 / 800.0;
+        let lup = ResponseSolver.evaluate_normalized(matp, &gridp)?;
+        let polep =
+            crate::response::pole_expansion::PoleExpansionData::from_matrix(matp)?;
+        let pep = polep.evaluate_normalized(&gridp)?;
+        let s21p = |i: usize| Complex64::new(lup.samples[i].s21_re, lup.samples[i].s21_im);
+        let mut checkedp = 0usize;
+        for i in 1..lup.samples.len() - 1 {
+            let s21 = s21p(i);
+            if s21.norm_sqr() < 1e-6 {
+                continue;
+            }
+            // S21' ≈ (S21[i+1] − S21[i−1]) / 2h  →  τ = −Im(S21'/S21).
+            let ds21 = (s21p(i + 1) - s21p(i - 1)) / (2.0 * step);
+            let numerical = -(ds21 / s21).im;
+            checkedp += 1;
+            let lu_gd = lup.samples[i].group_delay.expect("LU group delay present");
+            let pe_gd = pep.samples[i].group_delay.expect("fast-path group delay present");
+            assert!(
+                (lu_gd - numerical).abs() < 1e-2 + 1e-3 * numerical.abs(),
+                "LU group delay at ω={}: {lu_gd} vs S21 phase derivative {numerical}",
+                lup.samples[i].normalized_omega
+            );
+            assert!(
+                (pe_gd - numerical).abs() < 1e-2 + 1e-3 * numerical.abs(),
+                "fast group delay at ω={}: {pe_gd} vs S21 phase derivative {numerical}",
+                lup.samples[i].normalized_omega
+            );
+        }
         assert!(
-            pe.samples.iter().all(|s| s.group_delay.is_none()),
-            "pole-expansion fast path must mark group_delay None, not a silent 0.0"
+            checkedp > 100,
+            "expected many interior points, checked {checkedp}"
         );
         Ok(())
     }
@@ -311,4 +415,6 @@ mod tests {
         }
         Ok(())
     }
+
+
 }

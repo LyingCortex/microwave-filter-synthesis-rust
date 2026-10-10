@@ -459,6 +459,12 @@ impl DuplexerSynthesis {
     }
 
     /// Sets the junction type and parameters.
+    ///
+    /// The simplified (default) synthesis path only implements the ideal
+    /// Type-I junction (`n = 1`, `b0 = 0`). Requesting a non-ideal Type-I or a
+    /// Type-II junction without `.full_iteration(true)` is a typed
+    /// `PreconditionViolation` — the parameters are never silently ignored
+    /// (review P2-7).
     pub fn junction(mut self, junction: JunctionType) -> Self {
         self.junction = junction;
         self
@@ -570,8 +576,26 @@ impl DuplexerSynthesis {
         // junction-level 3-port response.
         let mut conv_common: Option<crate::synthesis::JunctionCommon> = None;
 
-        // Full Macchiarella spectral iteration is opt-in via `.full_iteration(true)`
-        // (default: the simplified frequency-offset perturbation).
+        // P2-7: the simplified perturbation only implements the ideal Type-I
+        // junction (n = 1, b0 = 0). Requesting a non-ideal Type-I or a
+        // Type-II junction without `.full_iteration(true)` is a hard error —
+        // the parameters must never be silently ignored (no-silent-parameter-
+        // ignore policy; the full path consumes them exactly).
+        if !self.full_iteration {
+            let ideal = match self.junction {
+                JunctionType::TypeI { n, b0 } => (n - 1.0).abs() <= 1e-9 && b0.abs() <= 1e-9,
+                JunctionType::TypeII { .. } => false,
+            };
+            if !ideal {
+                return Err(MfsError::PreconditionViolation(format!(
+                    "the simplified junction synthesis path only supports the ideal \
+                     Type-I junction (n = 1, b0 = 0); got {:?}. Use .full_iteration(true) \
+                     for a non-ideal Type-I or a Type-II junction, which consumes the \
+                     parameters exactly.",
+                    self.junction
+                )));
+            }
+        }
         if self.full_iteration {
             // Full Macchiarella–Tamiazzo spectral iteration, shared with the
             // N-channel multiplexer (`crate::synthesis::machiarella`). The
@@ -616,15 +640,22 @@ impl DuplexerSynthesis {
             converged = state.converged;
             conv_common = state.common;
         } else {
-            // Fallback: simplified perturbation (frequency-offset aware)
+            // Simplified perturbation (frequency-offset aware). The
+            // pre-check above guarantees this branch only runs with the
+            // ideal Type-I junction, so `n_sq` is 1 and `b0` is 0.
             for iter in 0..self.max_iterations {
                 iterations = iter + 1;
                 let s_tx_current = ComplexPolynomial::from_complex_roots(&s_tx_roots)?;
                 let s_rx_current = ComplexPolynomial::from_complex_roots(&s_rx_roots)?;
 
-                let (n_sq, _) = match self.junction {
-                    JunctionType::TypeI { n, b0 } => (n * n, b0),
-                    JunctionType::TypeII { .. } => (1.0, 0.0),
+                // The junction is the ideal Type-I (enforced by the P2-7
+                // pre-check above); `n_sq` is the transformer ratio squared
+                // feeding `alpha`.
+                let n_sq = match self.junction {
+                    JunctionType::TypeI { n, .. } => n * n,
+                    // Unreachable: the pre-check rejects non-ideal junctions
+                    // before this branch.
+                    JunctionType::TypeII { .. } => 1.0,
                 };
                 let alpha = n_sq * 0.3 / (1.0 + 0.3 * iter as f64);
 
@@ -725,10 +756,10 @@ impl DuplexerSynthesis {
             b: common.b,
         });
 
-        // Full path: D = S − F⁰ is already in S's monic normalization (no
-        // rescale). Simplified path: D = (E − F)/2, rescale to S's
-        // normalization (historical behavior).
-        let rescale_d = !self.full_iteration;
+        // Both paths supply D already in S's normalization (full: D = S − F⁰
+        // with the channel's fixed reflection zeros; simplified: D =
+        // (Eᵢ − Fᵢ)/2 from the initial synthesis), so the recovery rebuilds
+        // E = S + D, F = S − D exactly (review P1-1).
         let tx_design = crate::synthesis::recover_channel_design(
             &s_tx_roots,
             &d_tx_recover,
@@ -737,7 +768,6 @@ impl DuplexerSynthesis {
             self.tx_rl,
             self.tx_center,
             self.tx_bw,
-            rescale_d,
         )?;
         let rx_design = crate::synthesis::recover_channel_design(
             &s_rx_roots,
@@ -747,7 +777,6 @@ impl DuplexerSynthesis {
             self.rx_rl,
             self.rx_center,
             self.rx_bw,
-            rescale_d,
         )?;
 
         Ok(DuplexerSynthesisResult {
@@ -872,17 +901,44 @@ mod tests {
 
     #[test]
     fn macchiarella_type_ii_junction() -> Result<()> {
-        // Type-II junction (coaxial)
+        // Type-II junction (coaxial) — the full spectral path consumes the
+        // junction capacitance exactly (P2-7).
         let result = DuplexerSynthesis::new()
             .tx(4, 20.0, 1.95e9, 1.97e9)
             .rx(4, 20.0, 2.11e9, 2.13e9)
             .junction(JunctionType::TypeII { c0: 5.0 })
+            .full_iteration(true)
             .synthesize()?;
 
         assert_eq!(result.tx.order(), 4);
         assert_eq!(result.rx.order(), 4);
 
         Ok(())
+    }
+
+    #[test]
+    fn simplified_path_rejects_non_ideal_junction() {
+        // P2-7: the simplified path only implements the ideal Type-I
+        // junction; a non-ideal Type-I or a Type-II junction must be a typed
+        // error, never silently ignored.
+        let junctions = [
+            JunctionType::TypeI { n: 1.47, b0: -0.171 },
+            JunctionType::TypeI { n: 1.0, b0: -0.171 },
+            JunctionType::TypeI { n: 1.47, b0: 0.0 },
+            JunctionType::TypeII { c0: 2.0 / 3.0 },
+        ];
+        for junction in junctions {
+            let err = DuplexerSynthesis::new()
+                .tx(4, 22.0, 14.9e9, 15.1e9)
+                .rx(4, 22.0, 15.15e9, 15.35e9)
+                .junction(junction)
+                .synthesize()
+                .expect_err("non-ideal junction must be rejected on the simplified path");
+            assert!(
+                matches!(err, MfsError::PreconditionViolation(_)),
+                "expected PreconditionViolation for {junction:?}, got: {err:?}"
+            );
+        }
     }
 
     #[test]

@@ -216,13 +216,17 @@ impl Serialize for SynthesisContext {
         let spec_summary = SpecSummary {
             order: self.spec.order,
             return_loss_db: self.spec.return_loss_db,
+            // P2-10: a zero at infinity (`f64::INFINITY`) is `None` so the
+            // JSON stays finite and parseable (serde_json rejects `inf`).
             transmission_zeros: self
                 .spec
                 .transmission_zeros
                 .iter()
-                .map(|tz| tz.value)
+                .map(|tz| tz.value.is_finite().then_some(tz.value))
                 .collect(),
-            unloaded_q: self.spec.unloaded_q,
+            // P2-10: a finite-only Q so the JSON stays parseable (a lossless
+            // `inf` Q would otherwise be rejected by `serde_json`).
+            unloaded_q: self.spec.unloaded_q.filter(|q| q.is_finite()),
         };
         state.serialize_field("spec", &spec_summary)?;
         state.serialize_field("options", &self.options)?;
@@ -233,7 +237,14 @@ impl Serialize for SynthesisContext {
                 order: polys.order,
                 epsilon: polys.eps,
                 epsilon_r: polys.eps_r,
-                transmission_zeros_normalized: polys.transmission_zeros_normalized.clone(),
+                // P2-10 (round-2 follow-up): a normalized zero at infinity
+                // (`f64::INFINITY`) becomes `null` — same convention as the
+                // spec summary above, so the output matches the schema.
+                transmission_zeros_normalized: polys
+                    .transmission_zeros_normalized
+                    .iter()
+                    .map(|&z| z.is_finite().then_some(z))
+                    .collect(),
             };
             state.serialize_field("polynomials", &poly_summary)?;
         }
@@ -266,8 +277,12 @@ impl Serialize for SynthesisContext {
                 .iter()
                 .map(|s| ResponseSampleSummary {
                     frequency_hz: s.frequency_hz,
-                    s11_db: 10.0 * (s.s11_re.powi(2) + s.s11_im.powi(2)).log10(),
-                    s21_db: 10.0 * (s.s21_re.powi(2) + s.s21_im.powi(2)).log10(),
+                    // P2-10: the hand-rolled `10·log10(re²+im²)` produced
+                    // `−inf` at a zero magnitude (a transmission/reflection
+                    // null), which `serde_json` rejects. Route through the
+                    // clamped `s*_db()` helpers (−300 dB floor).
+                    s11_db: s.s11_db(),
+                    s21_db: s.s21_db(),
                 })
                 .collect();
             state.serialize_field("response", &samples)?;
@@ -282,7 +297,8 @@ impl Serialize for SynthesisContext {
 struct SpecSummary {
     order: usize,
     return_loss_db: f64,
-    transmission_zeros: Vec<f64>,
+    /// Normalized transmission-zero values; a zero at infinity is `null`.
+    transmission_zeros: Vec<Option<f64>>,
     unloaded_q: Option<f64>,
 }
 
@@ -292,7 +308,10 @@ struct PolynomialsSummary {
     order: usize,
     epsilon: f64,
     epsilon_r: f64,
-    transmission_zeros_normalized: Vec<f64>,
+    /// Normalized transmission-zero values; a zero at infinity is `null`
+    /// (same convention as `SpecSummary::transmission_zeros` — serde_json
+    /// cannot round-trip a non-finite `f64`).
+    transmission_zeros_normalized: Vec<Option<f64>>,
 }
 
 /// Serializable summary of the coupling matrix.

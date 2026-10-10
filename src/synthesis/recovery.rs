@@ -3,9 +3,8 @@
 //!
 //! Both iterative syntheses converge a shared diplexer S polynomial and then
 //! must rebuild each channel's `FilterDesign` from its updated S roots:
-//! E = S + D, F = S − D (D rescaled to S's normalization on the simplified
-//! path, used as-is on the full path — see `rescale_d`), then re-run the
-//! matrix synthesis engine.
+//! E = S + D, F = S − D (D is supplied in S's normalization by every caller),
+//! then re-run the matrix synthesis engine.
 
 use crate::approx::{pad_polynomial, ComplexPolynomial, PolynomialSet};
 use crate::design::FilterDesign;
@@ -17,13 +16,12 @@ use num_complex::Complex64;
 /// iteration has updated the channel's S-polynomial roots.
 ///
 /// `s_roots` are the converged S-polynomial roots (left half-plane);
-/// `d_original` is the D polynomial from the channel's initial synthesis;
-/// `original_polys` is the channel's initial `PolynomialSet`. The perturbed
-/// E/F are written into both the plain `e`/`f` fields and
+/// `d_original` is the channel's D polynomial, already expressed in S's
+/// normalization; `original_polys` is the channel's initial `PolynomialSet`.
+/// The perturbed E/F are written into both the plain `e`/`f` fields and
 /// `generalized.e_s`/`f_s` — the synthesis engine reads `generalized.e_s/f_s`
 /// (not `.e/.f`), so writing only the plain fields silently drops the loading
 /// correction (see architecture-review P1).
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn recover_channel_design(
     s_roots: &[Complex64],
     d_original: &ComplexPolynomial,
@@ -32,40 +30,26 @@ pub(crate) fn recover_channel_design(
     return_loss_db: f64,
     center_hz: f64,
     bandwidth_hz: f64,
-    rescale_d: bool,
 ) -> Result<FilterDesign> {
-    // 8 args: the review-mandated `rescale_d` flag (P1-1) pushed an
-    // already-at-limit function over the clippy 7-arg ceiling. The four
-    // scalars (order/rl/center/bandwidth) pass straight through to
-    // `FilterDesign::from_polynomials_and_matrix`, so grouping them would not
-    // reduce the real arity at either end.
-    // Build S polynomial from converged roots
+    // Build S polynomial from converged roots (always monic, degree n).
     let s_poly = ComplexPolynomial::from_complex_roots(s_roots)?;
 
-    // E = S + D,  F = S - D.
-    // Simplified path: `d_original = (E − F)/2` from the initial synthesis,
-    // whose leading coefficient cancels to ~0; when it is numerically
-    // non-negligible it is rescaled to S's normalization (the historical
-    // behavior). Full path: `d_original = S − F⁰` with the channel's *fixed*
-    // reflection zeros F⁰; it is already expressed in S's monic
-    // normalization (degree n − 1, non-monic leading coefficient), and
-    // rescaling it corrupts the exact reconstruction F = S − D (the WIP
-    // branch's rescale_d flag, re-added after commit 818d38c dropped it on
-    // the false premise that S − F⁰ is monic).
-    let d_scaled = if rescale_d {
-        let s_leading = s_poly.leading_coefficient();
-        let d_leading = d_original.leading_coefficient();
-        if d_leading.norm() > 1e-15 {
-            let scale_factor = s_leading / d_leading;
-            d_original.scale(scale_factor)?
-        } else {
-            d_original.clone()
-        }
-    } else {
-        d_original.clone()
-    };
-
-    let d_padded = pad_polynomial(&d_scaled, s_poly.coefficients.len())?;
+    // E = S + D,  F = S − D, with `d_original` used as-is.
+    //
+    // Every call site now supplies D already in S's normalization, so no
+    // rescaling is applied:
+    //   - full path: D = S − F⁰ with the channel's *fixed* reflection zeros
+    //     F⁰; degree n − 1 with a non-monic leading coefficient.
+    //   - simplified path: D = (Eᵢ − Fᵢ)/2 from the initial synthesis.
+    //     `ComplexPolynomial::sub` trims the cancelled degree-n term, so the
+    //     stored D is genuinely degree n − 1 with an O(1) leading coefficient.
+    //     In the zero-perturbation limit `S + D = Eᵢ` and `S − D = Fᵢ` hold
+    //     *exactly* with no rescale; the previous `rescale_d` branch rescaled
+    //     D to monic (its `d_leading.norm() > 1e-15` guard always fired because
+    //     the trimmed leading coefficient is O(1), not ~0), which changed F's
+    //     roots and systematically destroyed the passband return loss
+    //     (review P1-1). Using D as-is restores the exact reconstruction.
+    let d_padded = pad_polynomial(d_original, s_poly.coefficients.len())?;
 
     let e_poly = s_poly.add(&d_padded)?;
     let f_poly = s_poly.sub(&d_padded)?;

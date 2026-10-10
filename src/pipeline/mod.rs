@@ -21,7 +21,7 @@ pub use context::{
     GridConfig, MappingConfig, PipelineMetadata, PipelineOptions, ResponseToleranceConfig,
     SynthesisContext,
 };
-pub use execution::{load_context, run_stage, save_context};
+pub use execution::{load_context, run_remaining_stages, run_stage, save_context};
 pub use request::{
     context_from_request, run_from_json, run_full_pipeline, SynthesisRequest, ValidationError,
     ValidationErrors,

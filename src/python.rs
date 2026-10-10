@@ -165,8 +165,8 @@ impl PyFilterDesign {
     ///
     /// Returns (frequencies, s21_db, s11_db) as three lists.
     ///
-    /// If start/stop are None, uses default range (center ± 1.5*bw for bandpass,
-    /// or -3 to +3 for prototype).
+    /// If start/stop are None, uses the default range (passband edges padded by
+    /// 0.5·bw on each side for bandpass, or -3 to +3 for prototype).
     ///
     /// For bandpass designs: `response(start_hz, stop_hz, points)`
     /// For prototype designs: `response(start, stop, points)`
@@ -417,6 +417,9 @@ impl PyFilterDesign {
         use pyo3::types::PyDict;
 
         let n = freqs.len();
+        if n == 0 {
+            return Err(PyValueError::new_err("freqs must not be empty"));
+        }
         for (name, v) in [
             ("target_s21_re", &target_s21_re),
             ("target_s21_im", &target_s21_im),

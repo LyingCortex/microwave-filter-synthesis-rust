@@ -154,6 +154,18 @@ impl MultiplexerSynthesis {
             }
         }
 
+        // P2-6: the simplified path computes the junction coupling as
+        // `1/(1 − c0)` (multiplexer.rs), so a non-finite / non-positive c0
+        // yields NaN/Inf and silently poisons every S-root. The full path
+        // validates c0 in `machiarella` and the duplexer validates it at its
+        // entry; the simplified multiplexer path was the gap.
+        if let JunctionType::TypeII { c0 } = self.junction {
+            if !c0.is_finite() || c0 <= 0.0 {
+                return Err(MfsError::PreconditionViolation(
+                    "Type-II junction capacitance c0 must be finite and positive".into(),
+                ));
+            }
+        }
         // Full Macchiarella–Tamiazzo spectral iteration, shared with the
         // duplexer (`crate::synthesis::machiarella`): the exact common-domain
         // bandpass transform, per-iteration spectral factorization, and the
@@ -185,7 +197,6 @@ impl MultiplexerSynthesis {
                     ch.return_loss_db,
                     ch.center_hz,
                     ch.bandwidth_hz,
-                    false, // full path: D = S − F⁰, already in S's monic normalization
                 )?;
                 channels.push(design);
             }
@@ -329,6 +340,9 @@ impl MultiplexerSynthesis {
         }
 
         // (e) Recover each channel's FilterDesign from its updated S roots.
+        // D = (Eᵢ − Fᵢ)/2 from the initial synthesis is already in S's
+        // normalization (degree n − 1, non-monic leading coefficient); the
+        // recovery rebuilds E = S + D, F = S − D exactly (review P1-1).
         let mut channels = Vec::with_capacity(n);
         for i in 0..n {
             let design = crate::synthesis::recover_channel_design(
@@ -339,7 +353,6 @@ impl MultiplexerSynthesis {
                 self.channels[i].return_loss_db,
                 centers[i],
                 bandwidths[i],
-                true, // simplified path: D = (E − F)/2, rescale to S's normalization
             )?;
             channels.push(design);
         }
@@ -508,6 +521,26 @@ mod tests {
         Ok(())
     }
 
+    /// Regression for review P2-6: the simplified (non-full-iteration) path
+    /// computes the Type-II junction coupling as `1/(1 − c0)`, so a
+    /// non-finite or non-positive `c0` would produce NaN/Inf and silently
+    /// poison every S-root. The full path and the duplexer both validate `c0`;
+    /// the simplified multiplexer entry must reject it too.
+    #[test]
+    fn multiplexer_type_ii_rejects_nonpositive_capacitance() {
+        for c0 in [0.0_f64, -1.0, f64::NAN] {
+            let err = MultiplexerSynthesis::new()
+                .channels([spec(5, 10.0e9), spec(5, 10.2e9)])
+                .junction(JunctionType::TypeII { c0 })
+                .synthesize()
+                .expect_err("non-positive c0 must be rejected");
+            assert!(
+                matches!(err, MfsError::PreconditionViolation(_)),
+                "expected PreconditionViolation, got: {err:?}"
+            );
+        }
+    }
+
     /// The junction parameters must actually influence the synthesis. A
     /// non-zero Type-I susceptance `b₀` changes the mutual-loading coupling, so
     /// the converged S-roots must differ from the ideal `b₀ = 0` case.
@@ -534,6 +567,111 @@ mod tests {
         assert!(
             differ,
             "non-zero junction susceptance b0 must change the synthesized S-roots"
+        );
+        Ok(())
+    }
+
+    /// Regression for review P1-1: the channel-recovery step must reconstruct
+    /// each channel's E and F polynomials exactly, not corrupt them. Before the
+    /// fix, the simplified path called `recover_channel_design` with
+    /// `rescale_d = true`, which forced D to monic (its `d_leading.norm() >
+    /// 1e-15` guard always fired, because `sub` trims the cancelled degree-n
+    /// term so the stored D is genuinely degree n−1 with an O(1) leading
+    /// coefficient). That changed F = S − D's leading coefficient and moved the
+    /// reflection zeros, degrading the passband return-loss spec (review:
+    /// −20.52 dB → −2.53 dB on the §5 golden spec, the 40-iteration path).
+    ///
+    /// This guard runs the synthesis at the zero-perturbation limit
+    /// (`max_iterations(0)`): no perturbation is applied, so the recovered
+    /// S-roots are exactly the initial S = (Eᵢ + Fᵢ)/2 and the recovery must
+    /// rebuild E = S + D = Eᵢ and F = S − D = Fᵢ exactly — the limit the P1-1
+    /// fix targets (see `recovery.rs`). Isolating the recovery from the
+    /// perturbation loop matters for two reasons: the loop is the approximate
+    /// Macchiarella loading model, whose passband quality depends on band
+    /// separation, and the rescale's effect on the ripple floor is masked at
+    /// this limit — it moves the reflection zeros, a band-edge/stopband effect.
+    /// So the test asserts the invariant directly (E and F equal the
+    /// standalone channel's) rather than through a loose passband-S11 reading.
+    ///
+    /// The spec is order-4 / RL 22 / 6.75+6.95 GHz / 300 MHz — the review's
+    /// confirmed-bite case (stored-D leading coefficient 1.1711, rescale factor
+    /// 0.8539). Other specs (e.g. order-5 / RL 20) have D leading ≈ 1, where
+    /// the monic rescale is a no-op and would not catch a regression.
+    #[test]
+    fn multiplexer_recovered_channel_preserves_return_loss() -> crate::error::Result<()> {
+        let order = 4;
+        let rl_db = 22.0;
+        let bw = 300e6;
+        let result = MultiplexerSynthesis::new()
+            .channels([
+                ChannelSpec { order, return_loss_db: rl_db, zeros: Vec::new(), center_hz: 6.75e9, bandwidth_hz: bw },
+                ChannelSpec { order, return_loss_db: rl_db, zeros: Vec::new(), center_hz: 6.95e9, bandwidth_hz: bw },
+            ])
+            .junction(JunctionType::TypeI { n: 1.0, b0: 0.0 })
+            .max_iterations(0)
+            .synthesize()?;
+
+        let ch = &result.channels[0];
+        let center = ch.center_hz().unwrap();
+        let bw = ch.bandwidth_hz().unwrap();
+        // Standalone synthesis of the identical spec: the reference E/F that
+        // the zero-perturbation recovery must reproduce.
+        let standalone = FilterDesign::bandpass(order, rl_db, center, bw).synthesize()?;
+
+        // Monic-normalize a polynomial's coefficients (ascending power order;
+        // the leading coefficient is last) so a monic rescale of the whole
+        // polynomial is normalized away and we compare the shape of E and F.
+        let mono_coefs = |p: &crate::approx::ComplexPolynomial| -> Vec<f64> {
+            let lc = p.coefficients.last().unwrap().re;
+            p.coefficients.iter().map(|x| x.re / lc).collect()
+        };
+        // Max absolute difference of two equal-length coefficient vectors
+        // (E and F are the same degree for the same spec, so lengths match).
+        let max_coeff_diff = |a: &Vec<f64>, b: &Vec<f64>| -> f64 {
+            a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).fold(0.0_f64, f64::max)
+        };
+
+        let (e_rec, f_rec) = (
+            mono_coefs(&ch.polynomials().e),
+            mono_coefs(&ch.polynomials().f),
+        );
+        let (e_ref, f_ref) = (
+            mono_coefs(&standalone.polynomials().e),
+            mono_coefs(&standalone.polynomials().f),
+        );
+        // The P1-1 rescale moved F's degree-(n−1) coefficient by ~0.24 (and the
+        // reflection zeros with it); the correct reconstruction is exact to
+        // ~1e-16. A 1e-8 tolerance is five orders below the bug and far above
+        // noise, so it catches a rescale regression without flaking.
+        let e_diff = max_coeff_diff(&e_rec, &e_ref);
+        let f_diff = max_coeff_diff(&f_rec, &f_ref);
+        assert!(
+            e_diff < 1e-8,
+            "recovery corrupted E (max monic-coef diff {e_diff:.3e}); the P1-1 \
+             monic-rescale regression would move E's shape"
+        );
+        assert!(
+            f_diff < 1e-8,
+            "recovery corrupted F (max monic-coef diff {f_diff:.3e}); the P1-1 \
+             monic-rescale regression moved the reflection zeros by ~0.24"
+        );
+
+        // Sanity: the recovered channel's passband is not degenerate. The zero-
+        // perturbation recovery carries no junction loading, so its passband
+        // S11 tracks the standalone (both ~ the ripple floor). This is a loose
+        // guard — the coefficient check above is the precise P1-1 regression.
+        let worst_inband = |d: &FilterDesign| -> f64 {
+            let resp = d
+                .response_bandpass(center, bw, center - bw / 2.0, center + bw / 2.0, 101)
+                .unwrap();
+            resp.samples.iter().map(|s| s.s11_db()).fold(f64::NEG_INFINITY, f64::max)
+        };
+        let recovered_s11 = worst_inband(ch);
+        let solo_s11 = worst_inband(&standalone);
+        assert!(
+            (recovered_s11 - solo_s11).abs() < 5.0,
+            "recovered passband S11 {recovered_s11} dB diverges from standalone \
+             {solo_s11} dB (degenerate recovery)"
         );
         Ok(())
     }
@@ -669,7 +807,17 @@ impl Multiplexer {
             let s11s: Vec<Complex64> = channels.iter().map(|ch| ch[p].0).collect();
             let s21s: Vec<Complex64> = channels.iter().map(|ch| ch[p].1).collect();
             let mat = compose_node_s(&s11s, &s21s);
-            s.push(mat.iter().cloned().collect());
+            // Flatten explicitly row-major (S[i][j] at i*p + j). `mat.iter()`
+            // is nalgebra's column-major order, which would store S transposed
+            // (review P1-2).
+            let ports = mat.nrows();
+            let mut flat = Vec::with_capacity(ports * ports);
+            for i in 0..ports {
+                for j in 0..ports {
+                    flat.push(mat[(i, j)]);
+                }
+            }
+            s.push(flat);
         }
         Ok(MultiplexerSMatrix {
             frequencies: grid.as_slice().to_vec(),
@@ -706,13 +854,17 @@ impl Multiplexer {
             let row = &matrix.s[q];
             antenna_s11_db.push(mag_to_db(row[0]));
             for i in 0..n {
-                channel_s21_db[i].push(mag_to_db(row[i * p + 1]));
+                // channel_s21_db[i] = |S[i+1][0]| (antenna -> channel i).
+                channel_s21_db[i].push(mag_to_db(row[(i + 1) * p]));
+                // channel_s11_db[i] = |S[i+1][i+1]| (channel i's own port).
                 channel_s11_db[i].push(mag_to_db(row[(i + 1) * p + (i + 1)]));
             }
             for i in 0..n {
                 for j in 0..n {
                     if i != j {
-                        isolation_db[i][j].push(mag_to_db(row[i * p + (j + 1)]));
+                        // isolation_db[i][j] = |S[i+1][j+1]| (channel j
+                        // driven, channel i measured).
+                        isolation_db[i][j].push(mag_to_db(row[(i + 1) * p + (j + 1)]));
                     }
                 }
             }
@@ -959,7 +1111,7 @@ pub struct MultiplexerResponse {
     /// Per-channel reflection at its own port, dB.
     pub channel_s11_db: Vec<Vec<f64>>,
     /// Isolation between every ordered pair of distinct channels (i != j), dB.
-    /// `isolation[i][j]` = antenna-driven S21 between channel i and channel j.
+    /// `isolation[i][j]` = |`S[i+1][j+1]`| — channel j driven, channel i measured.
     /// For i == j the entry is a zero-length vector (self-isolation is undefined).
     pub isolation_db: Vec<Vec<Vec<f64>>>,
 }
@@ -1095,6 +1247,72 @@ mod analysis_tests {
             adm.antenna_s11_db[mid],
             geo.antenna_s11_db[mid],
             delta
+        );
+        Ok(())
+    }
+
+    /// Regression for review P1-2: the admittance-model dB fields must match
+    /// the documented physical elements of the raw (N+1)-port S-matrix. The
+    /// previous extraction read the column-major-flattened matrix as if it
+    /// were row-major, so `channel_s21_db[i]` (i>=1) and `isolation_db[i][j]`
+    /// (all pairs) reported transposed elements — a 72 dB isolation was
+    /// reported as ~0 dB. This test asserts every reported dB value against
+    /// the exact `S[i+1][j]` / `S[i+1][j+1]` entries.
+    #[test]
+    fn multiplexer_response_db_fields_match_s_matrix() -> Result<()> {
+        let mux = Multiplexer::new(vec![bandpass_design(10.0e9)?, bandpass_design(10.2e9)?])?;
+        let points = 21;
+        let resp = mux.response(9.9e9, 10.3e9, points)?;
+        let mat = mux.response_matrix(9.9e9, 10.3e9, points)?;
+        let p = mat.num_ports;
+
+        for q in 0..points {
+            let row = &mat.s[q];
+            let s = |i: usize, j: usize| mag_to_db(row[i * p + j]);
+            assert!(
+                (resp.antenna_s11_db[q] - s(0, 0)).abs() < 1e-9,
+                "antenna_s11 mismatch at {q}"
+            );
+            for i in 0..2 {
+                assert!(
+                    (resp.channel_s21_db[i][q] - s(i + 1, 0)).abs() < 1e-9,
+                    "channel_s21[{i}] mismatch at {q}"
+                );
+                assert!(
+                    (resp.channel_s11_db[i][q] - s(i + 1, i + 1)).abs() < 1e-9,
+                    "channel_s11[{i}] mismatch at {q}"
+                );
+            }
+            for i in 0..2 {
+                for j in 0..2 {
+                    if i != j {
+                        assert!(
+                            (resp.isolation_db[i][j][q] - s(i + 1, j + 1)).abs() < 1e-9,
+                            "isolation[{i}][{j}] mismatch at {q}"
+                        );
+                    }
+                }
+            }
+        }
+
+        // Physical sanity at channel 1's own band center (10.2 GHz): its
+        // transmission is a passband peak (near 0 dB) while channel 0 is in
+        // its stopband (deep). The pre-fix code reported the *diagonal*
+        // S[1][1] (~0 dB for any N) for channel 1's transmission and the
+        // transposed S[1][2] for channel 0's, so both assertions fail pre-fix.
+        // Grid 9.9e9..=10.3e9 / 21 points: step 2 MHz, 10.2e9 is index 15.
+        let c1_center = (0..points)
+            .find(|&q| (resp.frequencies[q] - 10.2e9).abs() < 1e3)
+            .expect("10.2 GHz on the grid");
+        assert!(
+            resp.channel_s21_db[1][c1_center] > -10.0,
+            "channel 1 passband peak too low: {} dB",
+            resp.channel_s21_db[1][c1_center]
+        );
+        assert!(
+            resp.channel_s21_db[0][c1_center] < -10.0,
+            "channel 0 must be in its stopband at channel 1's center: {} dB",
+            resp.channel_s21_db[0][c1_center]
         );
         Ok(())
     }

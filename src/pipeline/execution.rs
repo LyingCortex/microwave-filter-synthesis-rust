@@ -122,13 +122,24 @@ fn run_topology_transform_stage(context: &mut SynthesisContext) -> Result<()> {
 }
 
 fn run_response_evaluation_stage(context: &mut SynthesisContext) -> Result<()> {
-    // Predecessor: matrix
-    let matrix = context.matrix.as_ref().ok_or_else(|| {
-        MfsError::PreconditionViolation(
-            "response_evaluation requires a coupling matrix from the matrix_synthesis stage"
-                .to_string(),
-        )
-    })?;
+    // Use the transformed (folded) matrix when a transform exists, otherwise
+    // the synthesis matrix — exactly mirroring `run_full_pipeline`, which picks
+    // the same `eval_matrix`. Otherwise a resumed context would evaluate the
+    // untransformed (transversal) matrix and diverge from a fresh full run at
+    // machine precision (review: matrix-source consistency between the two
+    // response-evaluation drivers).
+    let eval_matrix = match context.transform.as_ref() {
+        Some(transform) => transform.matrix.clone(),
+        None => context
+            .matrix()
+            .ok_or_else(|| {
+                MfsError::PreconditionViolation(
+                    "response_evaluation requires a coupling matrix from the matrix_synthesis stage"
+                        .to_string(),
+                )
+            })?
+            .clone(),
+    };
 
     // Build a frequency grid from options or use a sensible default
     let grid = build_frequency_grid(&context.options)?;
@@ -136,9 +147,10 @@ fn run_response_evaluation_stage(context: &mut SynthesisContext) -> Result<()> {
     let start = Instant::now();
     let stage = ResponseEvaluationStage;
     let input = ResponseEvaluationInput {
-        matrix: matrix.as_ref().clone(),
+        matrix: eval_matrix,
         grid,
         mapping: context.options.mapping.clone(),
+        unloaded_q: context.spec.unloaded_q,
     };
     let response = stage.execute(&input)?;
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -189,17 +201,20 @@ struct ContextSnapshot {
     polynomials: Option<PolynomialSnapshot>,
     /// Reduced matrix data if matrix synthesis has completed.
     matrix: Option<MatrixSnapshot>,
-    /// Whether a transform outcome exists (topology transform completed).
-    has_transform: bool,
-    /// Whether a response exists (response evaluation completed).
-    has_response: bool,
 }
+
+/// A finite normalized value, or `None` for a non-finite one (a zero at
+/// infinity is `f64::INFINITY`). `serde_json` cannot round-trip a non-finite
+/// `f64` (it serializes to `null`, which fails to deserialize back to `f64`),
+/// so the snapshot stores them as `Option` — the same convention the output
+/// serializer (`context.rs` `SpecSummary`) uses (review P2-10 / round-2 F1).
+type FiniteZero = Option<f64>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SpecSnapshot {
     order: usize,
     return_loss_db: f64,
-    transmission_zeros: Vec<f64>,
+    transmission_zeros: Vec<FiniteZero>,
     unloaded_q: Option<f64>,
 }
 
@@ -209,7 +224,7 @@ struct PolynomialSnapshot {
     ripple_factor: f64,
     eps: f64,
     eps_r: f64,
-    transmission_zeros_normalized: Vec<f64>,
+    transmission_zeros_normalized: Vec<FiniteZero>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -223,13 +238,20 @@ impl ContextSnapshot {
         let spec = SpecSnapshot {
             order: context.spec.order,
             return_loss_db: context.spec.return_loss_db,
+            // A zero at infinity is `f64::INFINITY`; store it as `None` so the
+            // JSON round-trips (serde_json cannot serialize non-finite f64).
             transmission_zeros: context
                 .spec
                 .transmission_zeros
                 .iter()
-                .map(|tz| tz.value)
+                .map(|tz| tz.value.is_finite().then_some(tz.value))
                 .collect(),
-            unloaded_q: context.spec.unloaded_q,
+            // A non-finite Q (e.g. the lossless `INFINITY` sentinel) would
+            // break the round trip the same way; drop it to `None` (lossless).
+            unloaded_q: context
+                .spec
+                .unloaded_q
+                .filter(|q| q.is_finite()),
         };
 
         let polynomials = context.polynomials.as_ref().map(|p| PolynomialSnapshot {
@@ -237,7 +259,12 @@ impl ContextSnapshot {
             ripple_factor: p.ripple_factor,
             eps: p.eps,
             eps_r: p.eps_r,
-            transmission_zeros_normalized: p.transmission_zeros_normalized.clone(),
+            transmission_zeros_normalized: p
+                .transmission_zeros_normalized
+                .iter()
+                .copied()
+                .map(|z| z.is_finite().then_some(z))
+                .collect(),
         });
 
         let matrix = context.matrix.as_ref().map(|m| MatrixSnapshot {
@@ -251,16 +278,22 @@ impl ContextSnapshot {
             metadata: context.metadata.clone(),
             polynomials,
             matrix,
-            has_transform: context.transform.is_some(),
-            has_response: context.response.is_some(),
         }
     }
 
     fn into_context(self) -> Result<SynthesisContext> {
+        // A `null` zero was a zero at infinity (`f64::INFINITY`); a finite
+        // value is used as-is. Reconstruct the original `Vec<f64>`.
+        let transmission_zeros: Vec<f64> = self
+            .spec
+            .transmission_zeros
+            .iter()
+            .map(|z| z.unwrap_or(f64::INFINITY))
+            .collect();
         let spec = build_filter_spec(
             self.spec.order,
             self.spec.return_loss_db,
-            &self.spec.transmission_zeros,
+            &transmission_zeros,
             self.spec.unloaded_q,
         )?;
 
@@ -283,9 +316,51 @@ impl ContextSnapshot {
             context.matrix = Some(Arc::new(matrix));
         }
 
-        // Transform and response cannot be cheaply restored from a snapshot;
-        // they would need to be re-run. The metadata tracks which stages completed,
-        // so the caller can use run_stage to re-execute from the last checkpoint.
+        // A saved context can be hand-crafted or partially written: reject any
+        // snapshot whose metadata disagrees with its artifacts instead of
+        // letting run_remaining_stages skip a stage on bad metadata.
+        //
+        // Transform and response artifacts are never restored from a snapshot,
+        // so the metadata must not claim they completed either: otherwise
+        // run_remaining_stages would skip them and a resumed fully-completed
+        // context would come back with no transform/response while its metadata
+        // says those stages ran (review P2-9). Keep only the stages whose
+        // artifacts were actually restored, dropping the parallel per-stage
+        // timings so stage_timings_ms stays aligned with stages_executed.
+        let mut stages = Vec::new();
+        let mut timings = Vec::new();
+        // A hand-crafted or truncated snapshot can claim more stages than it
+        // has per-stage timings; reject it up front instead of indexing out of
+        // bounds in the loop below (review round-2 F2).
+        if context.metadata.stage_timings_ms.len()
+            < context.metadata.stages_executed.len()
+        {
+            return Err(MfsError::PreconditionViolation(format!(
+                "corrupt context snapshot: stage_timings_ms has {} entries \
+                 but stages_executed has {}",
+                context.metadata.stage_timings_ms.len(),
+                context.metadata.stages_executed.len()
+            )));
+        }
+        for (i, name) in context.metadata.stages_executed.iter().enumerate() {
+            let has_artifact = match name.as_str() {
+                "approximation" => context.polynomials.is_some(),
+                "matrix_synthesis" => context.matrix.is_some(),
+                _ => true,
+            };
+            if !has_artifact {
+                return Err(MfsError::PreconditionViolation(format!(
+                    "corrupt context snapshot: metadata claims stage '{name}' ran, but its \
+                     artifact is missing"
+                )));
+            }
+            if matches!(name.as_str(), "approximation" | "matrix_synthesis") {
+                stages.push(name.clone());
+                timings.push(context.metadata.stage_timings_ms[i]);
+            }
+        }
+        context.metadata.stages_executed = stages;
+        context.metadata.stage_timings_ms = timings;
 
         Ok(context)
     }
@@ -326,6 +401,41 @@ pub fn load_context(path: &Path) -> Result<SynthesisContext> {
         MfsError::PreconditionViolation(format!("failed to deserialize context: {e}"))
     })?;
     snapshot.into_context()
+}
+
+/// Runs every stage that has not yet executed, in pipeline order.
+///
+/// This is the resume driver used after [`load_context`]: it skips stages
+/// whose names appear in [`PipelineMetadata::stages_executed`] and runs the
+/// rest. `topology_transform` is optional and is skipped (rather than
+/// failed) when `options.topology` is not set; every other stage —
+/// including `response_evaluation` — is always attempted once its
+/// predecessors are present.
+pub fn run_remaining_stages(ctx: &mut SynthesisContext) -> Result<()> {
+    const ALL_STAGES: [&str; 4] = [
+        "approximation",
+        "matrix_synthesis",
+        "topology_transform",
+        "response_evaluation",
+    ];
+
+    for stage_name in ALL_STAGES {
+        if ctx
+            .metadata
+            .stages_executed
+            .iter()
+            .any(|name| name == stage_name)
+        {
+            continue;
+        }
+        // Skip the optional transform when no topology was requested.
+        if stage_name == "topology_transform" && ctx.options.topology.is_none() {
+            continue;
+        }
+        run_stage(ctx, stage_name)?;
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -485,6 +595,89 @@ mod tests {
     }
 
     #[test]
+    fn save_and_load_context_round_trip_with_infinite_zero() -> Result<()> {
+        // A zero at infinity (`f64::INFINITY`) and the lossless `INFINITY` Q
+        // are legal spec values; serde_json cannot round-trip non-finite f64,
+        // so the snapshot must store them as `null`/`None` and restore them
+        // faithfully (review round-2 F1).
+        let spec = FilterSpec::new(4, 20.0)?
+            .with_transmission_zeros(vec![
+                crate::spec::TransmissionZero::normalized(2.0),
+                crate::spec::TransmissionZero::infinite(),
+            ])
+            .with_unloaded_q(f64::INFINITY);
+        let mut ctx = SynthesisContext::new(spec);
+        run_stage(&mut ctx, "approximation")?;
+        run_stage(&mut ctx, "matrix_synthesis")?;
+
+        let path = std::env::temp_dir().join("mfs_test_context_inf_zero.json");
+        save_context(&ctx, &path)?;
+        let loaded = load_context(&path)?;
+
+        assert_eq!(loaded.spec.transmission_zeros.len(), 2);
+        assert_eq!(loaded.spec.transmission_zeros[0].value, 2.0);
+        assert_eq!(loaded.spec.transmission_zeros[1].value, f64::INFINITY);
+        let _ = fs::remove_file(&path);
+        Ok(())
+    }
+
+    #[test]
+    fn context_serialize_emits_null_for_infinite_normalized_zero() -> Result<()> {
+        // The public `Serialize` impl for `SynthesisContext` (what CLI
+        // `output_context` and any JSON dump use) must emit a zero at
+        // infinity in the polynomial summary as `null` — matching the
+        // schema (`transmission_zeros_normalized` items are `["number",
+        // "null"]`) and the spec summary, not a bare `inf` (review round-2
+        // F4 follow-up: the spec summary was fixed in P2-10 but the
+        // polynomial summary was missed).
+        let spec = FilterSpec::new(4, 20.0)?
+            .with_transmission_zeros(vec![
+                crate::spec::TransmissionZero::normalized(-1.5),
+                crate::spec::TransmissionZero::infinite(),
+            ]);
+        let mut ctx = SynthesisContext::new(spec);
+        run_stage(&mut ctx, "approximation")?;
+
+        let json = serde_json::to_string(&ctx).expect("serialization must succeed");
+        let value: serde_json::Value =
+            serde_json::from_str(&json).expect("output must be valid JSON");
+        let zeros = &value["polynomials"]["transmission_zeros_normalized"];
+        let zeros = zeros
+            .as_array()
+            .expect("polynomials.transmission_zeros_normalized must be an array");
+        assert_eq!(zeros.len(), 2, "expected 2 normalized zeros, got {zeros:?}");
+        assert!(
+            zeros[1].is_null(),
+            "a zero at infinity must serialize as null, got {:?}",
+            zeros[1]
+        );
+        assert!(
+            zeros[0].as_f64() == Some(-1.5),
+            "finite zero must be preserved, got {:?}",
+            zeros[0]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn into_context_rejects_mismatched_stage_timings() -> Result<()> {
+        // A hand-crafted snapshot that claims more stages than it has
+        // per-stage timings must be rejected, not panic on an index out of
+        // bounds (review round-2 F2).
+        let spec = FilterSpec::new(4, 20.0)?;
+        let mut ctx = SynthesisContext::new(spec);
+        run_stage(&mut ctx, "approximation")?;
+        run_stage(&mut ctx, "matrix_synthesis")?;
+        // 3 claimed stages but only 2 timings recorded.
+        ctx.metadata.stages_executed.push("response_evaluation".to_string());
+        let snapshot = ContextSnapshot::from_context(&ctx);
+        let err = snapshot.into_context().unwrap_err();
+        assert!(matches!(err, MfsError::PreconditionViolation(_)));
+        assert!(err.to_string().contains("stage_timings_ms"));
+        Ok(())
+    }
+
+    #[test]
     fn loaded_context_can_resume_execution() -> Result<()> {
         let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros(vec![-1.5, 1.5]);
         let mut ctx = SynthesisContext::with_options(
@@ -519,6 +712,73 @@ mod tests {
         assert_eq!(loaded.response().unwrap().samples.len(), 21);
 
         // Clean up
+        let _ = fs::remove_file(&path);
+        Ok(())
+    }
+
+    #[test]
+    fn resume_of_completed_context_reproduces_full_pipeline() -> Result<()> {
+        // Regression for review P2-9: a fully-completed context, saved and
+        // resumed via run_remaining_stages (the `--resume` driver), must come
+        // back with a transform and a response that match the original run —
+        // not a context whose metadata claims those stages ran but whose
+        // artifacts are missing.
+        let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros(vec![-1.5, 1.5]);
+        let options = PipelineOptions {
+            topology: Some(TopologyKind::Folded),
+            grid: Some(GridConfig {
+                start: -2.0,
+                stop: 2.0,
+                points: 31,
+            }),
+            ..PipelineOptions::default()
+        };
+
+        // Full pipeline reference run.
+        let mut full = SynthesisContext::with_options(spec.clone(), options.clone());
+        run_remaining_stages(&mut full)?;
+        assert!(full.transform().is_some());
+        assert!(full.response().is_some());
+
+        // Persist and reload.
+        let path = std::env::temp_dir().join("mfs_test_resume_full_context.json");
+        save_context(&full, &path)?;
+        let mut resumed = load_context(&path)?;
+
+        // The loaded context must NOT claim transform/response completed,
+        // since their artifacts were not restored.
+        assert!(!resumed
+            .metadata
+            .stages_executed
+            .iter()
+            .any(|s| s == "topology_transform"));
+        assert!(!resumed
+            .metadata
+            .stages_executed
+            .iter()
+            .any(|s| s == "response_evaluation"));
+
+        // Resuming runs the still-missing stages on top of the restored
+        // approximation + matrix artifacts.
+        run_remaining_stages(&mut resumed)?;
+
+        assert!(resumed.transform().is_some());
+        assert!(resumed.response().is_some());
+        assert_eq!(
+            resumed.transform().unwrap().topology,
+            full.transform().unwrap().topology
+        );
+
+        let r_full = full.response().unwrap();
+        let r_res = resumed.response().unwrap();
+        assert_eq!(r_full.samples.len(), r_res.samples.len());
+        for (a, b) in r_full.samples.iter().zip(r_res.samples.iter()) {
+            assert!((a.s11_re - b.s11_re).abs() < 1e-9, "S11 re mismatch");
+            assert!((a.s11_im - b.s11_im).abs() < 1e-9, "S11 im mismatch");
+            assert!((a.s21_re - b.s21_re).abs() < 1e-9, "S21 re mismatch");
+            assert!((a.s21_im - b.s21_im).abs() < 1e-9, "S21 im mismatch");
+        }
+
         let _ = fs::remove_file(&path);
         Ok(())
     }

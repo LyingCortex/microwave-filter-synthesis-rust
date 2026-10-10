@@ -50,6 +50,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --features cli --bin mfs_cli
+      # Run the binary's own unit tests, not just the black-box integration
+      # gate: `parse_matrix_json_flat_and_nested` broke silently when the
+      # symmetry invariant was sunk into `new_with_topology` because this
+      # feature-gated binary was otherwise only built + integration-tested.
+      - run: cargo test --features cli --bin mfs_cli
       - run: cargo test --features cli --test cli_integration
 
   # The `cli` and `python` features hide code behind required-features /

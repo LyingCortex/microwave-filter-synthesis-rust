@@ -179,10 +179,16 @@ pub struct NormalizedFilterSpec {
 /// Backward-compatible public name for the current normalized internal spec.
 pub type FilterSpec = NormalizedFilterSpec;
 
+/// Upper bound on the filter order accepted at any public entry (review
+/// P2-11). The order sizes an `(order+2)²` coupling matrix, so an unbounded
+/// order is an OOM vector; 256 covers every realistic filter while capping a
+/// hostile single-request allocation at ~26 MB.
+pub const MAX_ORDER: usize = 256;
+
 impl NormalizedFilterSpec {
     /// Creates a validated normalized internal specification.
     pub fn new(order: usize, return_loss_db: f64) -> Result<Self> {
-        if order == 0 {
+        if order == 0 || order > MAX_ORDER {
             return Err(MfsError::InvalidOrder { order });
         }
         if !return_loss_db.is_finite() || return_loss_db <= 0.0 {
@@ -293,6 +299,17 @@ mod tests {
     fn spec_validates_return_loss() {
         let error = NormalizedFilterSpec::new(4, 0.0).expect_err("return loss must be positive");
         assert!(matches!(error, MfsError::InvalidReturnLoss { .. }));
+    }
+
+    #[test]
+    fn spec_rejects_order_above_max() {
+        // P2-11: the choke point must reject an OOM-hostile order for every
+        // entry (not just the JSON validator).
+        let error = NormalizedFilterSpec::new(MAX_ORDER + 1, 20.0)
+            .expect_err("order above MAX_ORDER must be rejected");
+        assert!(matches!(error, MfsError::InvalidOrder { .. }));
+        // The boundary itself is still accepted.
+        assert!(NormalizedFilterSpec::new(MAX_ORDER, 20.0).is_ok());
     }
 
     #[test]

@@ -154,14 +154,37 @@ pub fn to_touchstone_string(
 }
 
 /// Writes an `SParameterResponse` to a Touchstone .s2p file.
+///
+/// The write is atomic: the content is written to a temporary file in the
+/// same directory and then renamed into place, so a mid-write failure cannot
+/// leave a truncated `.s2p` behind (review P3 #10).
 pub fn write_touchstone(
     response: &SParameterResponse,
     config: &TouchstoneConfig,
     path: impl AsRef<Path>,
 ) -> Result<()> {
+    let path = path.as_ref();
     let content = to_touchstone_string(response, config)?;
-    fs::write(path, content).map_err(|e| {
-        MfsError::PreconditionViolation(format!("failed to write Touchstone file: {e}"))
+
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| MfsError::PreconditionViolation(
+            "Touchstone output path must end in a file name".to_string(),
+        ))?
+        .to_os_string();
+    let tmp = parent.join(format!(".{}.mfs-tmp", file_name.to_string_lossy()));
+
+    fs::write(&tmp, &content).map_err(|e| {
+        MfsError::PreconditionViolation(format!("failed to write Touchstone temp file: {e}"))
+    })?;
+    fs::rename(&tmp, path).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        MfsError::PreconditionViolation(format!("failed to finalize Touchstone file: {e}"))
     })
 }
 

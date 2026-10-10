@@ -4,6 +4,70 @@
 
 ### Added
 
+- **Fast-path group delay (pole-expansion).** `PoleExpansionData::evaluate_at`
+  now returns `(s11, s21, group_delay)` instead of `(s11, s21)` and emits a
+  finite group delay at O(N)/point. The fast path previously returned
+  `group_delay: None` (explicit-undefined, T4.3) because the group-delay
+  consumer didn't exist yet; it is now computed as `−Im(d/dω ln S21)` where
+  S21 is a known rational function of ω in the Schur 2×2 form
+  (`src/response/pole_expansion.rs`), so its log-derivative is a per-pole
+  partial-fraction sum — one extra O(N) sum alongside the existing
+  S-parameter sum. It is `None` exactly at a transmission zero
+  (`|S21| → 0`), mirroring the LU backend's degenerate guard (explicit
+  undefined, not a fake 0.0). Both the normalized and bandpass fast-path
+  callers (`evaluate_normalized` / `evaluate_bandpass`) forward it, so
+  `design.response()` / `response_bandpass()` now deliver engine-native group
+  delay (the Python binding's `response_full` exposes it via `group_delay`).
+  **Verified against three independent algorithms:** (1) fast vs LU on a
+  3-zero filter, full band, to 1e-7 — `group_delay_matches_across_fast_and_lu_
+  backends` (Check 1, the cross-algorithm guarantee); (2) fast vs an
+  all-pole-ladder central difference of the S21 phase (Check 2, value anchor);
+  (3) cross-language, the new value converted to seconds via the exact BP
+  chain rule `dω/df = (1/FB)(1/fc + fc/f²)` matches **both** skrf `group_delay`
+  — the same third-party engine the GUI uses for its group-delay plots — and an
+  independent central difference of the S21 phase to **16.6 ps** over 268
+  points of a 2 GHz / 200 MHz band. The 16.6 ps is the 2nd-order
+  central-difference's own O(h²) truncation at Δf = 0.9 MHz: skrf computes
+  `group_delay` with the identical `−dφ/dω` central difference on the same S21
+  values, so it agrees with the FD reference to machine precision (0.000 ps)
+  and sits 16.6 ps from the analytic fast path on both sides. Measured O(N):
+  1801-pt sweep **2.0 µs/pt** (prototype) / **2.2 µs/pt** (bandpass) with the
+  derivative active.
+
+- **Whole-crate code review of 0.6.1 (2026-10-09).**
+  `docs/internal/review-findings-0.6.1.md`: six parallel read-only review
+  slices over all of `src/` (design/spec/freq API, matrix/transform/output,
+  approx/response/spectral, synthesis/verify, duplexer/multiplexer/optimize,
+  pipeline/CLI/Python/touchstone) plus an independent adjudication pass that
+  re-derived every confirmed finding against source and **empirically
+  reproduced the two highest-stakes claims** with a temporary throwaway
+  example (deleted after use). Tally:
+  **3 P1 / 13 P2 / 10 P3**. The three P1s are the "gate-green but wrong
+  result" class on the *default* paths: (1) the simplified duplexer/
+  multiplexer recovery path (`recover_channel_design`, `rescale_d=true`)
+  forces D to monic and silently destroys the passband return-loss spec —
+  the "D's leading coefficient cancels to ~0" premise in the code comment is
+  wrong, because `sub` trims the cancelled degree-n term and the stored D is
+  genuinely degree n−1 with an O(1) leading coefficient (reproduced: worst
+  case passband RL −20.52 dB → −2.53 dB, spec 22 dB); (2)
+  `Multiplexer::response()` (default Admittance model) reads wrong
+  column-major S-matrix indices for `channel_s21_db[i]` (i≥1) and
+  `isolation_db[i][j]` (all pairs) (reproduced: true −72.31 dB
+  antenna→channel-1 reported as −0.38 dB); (3) the response solver exploits
+  symmetry without a consumer-side guard, so the public opt-out asymmetric
+  constructors yield silently wrong group delay. Notable P2s:
+  `to_cascaded_trisections` order=1 `usize` underflow, `f_start_hz`/
+  `f_stop_hz` returning arithmetic-mean edges instead of the library's
+  geometric-mean `band_edge_pair` (breaks `bandpass_edges` round-trip),
+  `default_response` negative window for fbw>2/3, unvalidated `unloaded_q`
+  in `response_lossy*`, `PoleExpansionData::from_polynomials`
+  pole-domain inconsistency, pipeline `unloaded_q` dead parameter,
+  `--resume` evaluating the untransformed matrix, and missing resource
+  upper bounds on `order`/`grid.points`. Verification at assessment:
+  `cargo test --all-targets` 395 passed / 0 failed, clippy `-D warnings`
+  clean, docs clean. **The assessment's findings were closed out in the same
+  session — see the "Fixed" section below.**
+
 - **`cross_backend_equivalence` gate carried by the rust-native synthesis bench**
   (`benches/synthesis.rs`). The contract's fifth twoport gate — "the two
   backends build the same filter" — now runs in CI without the sibling python
@@ -84,6 +148,287 @@
   `cli_integration.rs` binary-missing guard changed from a silent skip to a
   hard `assert!` — a gate that cannot fail is no gate.
 
+### Fixed
+- **0.6.1 review fix wave (2026-10-09/10)** — the three P1s and all thirteen
+  P2s from the [0.6.1 review](docs/internal/review-findings-0.6.1.md)
+  (documented in "Added" above as an assessment) are fixed in the working tree.
+  The 72 dB→−0.38 dB class of "gate-green but wrong result" defects on the
+  *default* paths is closed. 395 → **406 passed** (11 new regression tests),
+  clippy/docs/bench/conformance all green (see the findings doc §F).
+  - **P1-1 simplified-path recovery rescale** (`src/synthesis/recovery.rs`):
+    the `rescale_d` flag and the whole rescale branch are **deleted**; every
+    caller now supplies D already in S's normalization and it is used as-is.
+    The "D's leading coefficient cancels to ~0" premise was wrong — `sub`
+    trims the cancelled degree-n term so the stored D is genuinely degree n−1
+    with an O(1) leading coefficient, and the monic rescale moved the
+    reflection zeros (worst-case passband RL −20.52 → −2.53 dB, spec 22 dB).
+    New regression `multiplexer_recovered_channel_preserves_return_loss`
+    (zero-perturbation limit, E/F coefficient match within 1e-8).
+  - **P1-2 `Multiplexer::response()` S-index** (`src/multiplexer.rs`): the
+    column-major extraction read the wrong elements —
+    `channel_s21_db[i]` (i≥1) and `isolation_db[i][j]` (all pairs). Now
+    `channel_s21_db[i] = |S[i+1][0]|`, `isolation_db[i][j] = |S[i+1][j+1]|`;
+    the struct doc rewritten to state the column-major storage. New regression
+    `multiplexer_response_db_fields_match_s_matrix` (asserts each dB field
+    against the raw `response_matrix()` element).
+  - **P1-3 solver symmetry guard** (`src/response/backend.rs`):
+    `evaluate_response` now calls `matrix.assert_symmetric()?` before the LU
+    solve (the consumer-side half of the c0902ba invariant), so a
+    deliberately asymmetric matrix returns a typed `PreconditionViolation`
+    instead of a silently wrong group delay.
+  - **P2-1** `to_cascaded_trisections` order=1 `usize` underflow →
+    `order < zeros.len() + 2` + `saturating_sub(2)`; test
+    `ct_zero_guard_order1_returns_error_not_panic`.
+  - **P2-2** `f_start_hz`/`f_stop_hz` return the geometric-mean
+    `band_edge_pair(c, bw)` edges (was arithmetic-mean `c ∓ bw/2`); the
+    `bandpass_edges` round-trip test re-anchored to the correct convention.
+  - **P2-3** `default_response` window derived from `band_edge_pair` edges and
+    floored positive (was `center − 1.5·bw`, which went < 0 Hz for fbw > 2/3);
+    test `response_default_wideband_positive_window`.
+  - **P2-4** `response_lossy*` validate `unloaded_q` (non-finite/non-positive
+    rejected; ∞ = lossless kept) — was silently dropped to a lossless
+    response.
+  - **P2-5** `compare_responses` `group_delay_compared` flag: set when
+    *at least one* sample pair is measured (any-pair semantics — group delay
+    is legitimately `None` at transmission zeros), so an entirely-unmeasured
+    comparison (the pole-expansion fast path) fails a finite group-delay
+    tolerance instead of passing on a silent 0.0; test
+    `compare_responses_uncompared_group_delay_fails_finite_tolerance`.
+  - **P2-6** `MultiplexerSynthesis::synthesize` validates the TypeII junction
+    `c0` (finite, positive) — was NaN/Inf-poisoned; test
+    `multiplexer_type_ii_rejects_nonpositive_capacitance`.
+  - **P2-7** the duplexer simplified (default) synthesis path only implements
+    the ideal Type-I junction, but silently discarded a requested non-ideal
+    Type-I `b0` and remapped a Type-II junction to ideal. The simplified path
+    now rejects a non-ideal Type-I (`n≠1` or `b0≠0`) or any Type-II junction
+    with a typed `PreconditionViolation` pointing at `.full_iteration(true)`
+    (which consumes the parameters exactly); the ideal Type-I default is
+    unchanged; `junction()` doc states the path constraint; regression
+    `simplified_path_rejects_non_ideal_junction` (4 parameter sets) and
+    `macchiarella_type_ii_junction` re-anchored to the full path.
+  - **P2-8** pipeline `unloaded_q` is no longer dead: the response stage
+    consumes it via `lossy_settings` (normalized `Q·bw/center`) — was a
+    lossless response with no warning; test
+    `response_evaluation_stage_applies_lossy_unloaded_q`.
+  - **P2-9** `--resume` no longer drops the transform/response artifacts:
+    `ContextSnapshot::into_context` rejects snapshots whose metadata
+    disagrees with the restored artifacts and clears the non-restorable
+    stages (`topology_transform`, `response_evaluation`) from
+    `stages_executed` (trimming the parallel `stage_timings_ms`), so a resume
+    re-runs them instead of skipping by stale metadata and leaving a context
+    that claims the stages ran but has no artifacts. `run_remaining_stages`
+    moved from the CLI binary into `mfs::pipeline` so the real `--resume`
+    driver is covered by the library suite; regression
+    `resume_of_completed_context_reproduces_full_pipeline` (a fully-completed
+    context, saved, loaded, and resumed, reproduces the full pipeline's
+    transform topology and S-parameters).
+  - **P2-10** context serialization: infinite transmission zeros → `null`
+    (finite-only Q), response dB through the clamped `s*_db()` (−300 dB
+    floor) — was a `serde_json` `NonFiniteValue` failure.
+  - **P2-11** public request validator enforces `MAX_ORDER=256` /
+    `MAX_GRID_POINTS=100_000` (was unbounded — a `{"order": 100000}` request
+    OOMs). The bounds now live at the choke points every public entry funnels
+    through — `FilterSpec::new` (`spec::MAX_ORDER`, order > 256 →
+    `InvalidOrder`) and `FrequencyGrid::linspace` (`freq::MAX_GRID_POINTS`,
+    points > 100 000 → `InvalidGridSize`) — so the CLI `design`/`multiplexer`
+    subcommands and the Python `bandpass`/`prototype` bindings (which
+    construct the spec/grid directly, bypassing `SynthesisRequest::validate`)
+    are bounded as well; `pipeline::request` re-exports the constants.
+    `InvalidOrder`/`InvalidGridSize` messages now state the supported range.
+    Regressions `spec_rejects_order_above_max`, `linspace_rejects_points_above_max`.
+  - **P2-12** `PoleExpansionData::from_polynomials` (s-plane poles, wrong
+    S-parameters) deleted; only the real ω-domain `from_matrix` remains, with
+    the convention documented.
+  - **P2-13** `run_design` `--topology` has explicit `folded`/`transversal`/
+    `arrow` arms; unknown values error instead of silently degrading to
+    Folded.
+  - **P2-14 (newly surfaced this pass) broken `mfs_cli` unit test + CI gate
+    gap** (`src/bin/mfs_cli.rs`, `.github/workflows/ci.yml`): a pre-existing
+    test broke at HEAD and was invisible because the `cli` job only *built*
+    the binary and ran the black-box `cli_integration` test, never the
+    binary's own unit tests. `parse_matrix_json_flat_and_nested` fed the
+    asymmetric order-1 fixture `[0,0.7,0.7,0,0.7,0,0,0,0]` (`M[0][1]=0.7`
+    vs `M[1][0]=0`), which fails now that the symmetry invariant lives in
+    `new_with_topology` (commit `c0902ba`). Fixed by re-anchoring the fixture
+    to a symmetric order-1 ladder and adding `cargo test --features cli
+    --bin mfs_cli` to the CI `cli` job so the binary's unit tests are gated
+    on every OS.
+  - **P3 #11 response-stage matrix source** (`src/pipeline/execution.rs`):
+    `run_response_evaluation_stage` (the `--resume` / `--stage` driver) always
+    evaluated `context.matrix` (the untransformed transversal synthesis
+    matrix), while `run_full_pipeline` evaluated the transformed (folded)
+    `transform.matrix` when a transform exists. The two are similar
+    representations of the same network, so S-parameters agreed to machine
+    precision everywhere except at transmission-zero nulls, where the `20·log10`
+    transform amplified a ~1e-16 residual into an ~11 dB spread in the
+    serialized dB column. The stage now selects `transform.matrix` when a
+    transform is present, exactly mirroring `run_full_pipeline`; a resumed
+    context reproduces the full pipeline's S-parameters bit-for-bit (found
+    while verifying the P2-9 fix).
+  - **P3 #1 + #9 pole-expansion fast path** (`src/response/pole_expansion.rs`,
+    `src/design.rs`): a near-singular Schur determinant (`|det|² ≤ 1e-30`, a
+    network pole) previously returned a fake `(S11, S21) = (1, 0)` total-
+    reflection sample, and the verification loop skipped every check point in
+    the deep stopband (|S21| ≤ 1e-10) so the fast path could be accepted
+    **unverified**. `evaluate_at` now returns `Result` and surfaces a typed
+    `NumericalFailure` at the near-singular point; `evaluate_normalized` /
+    `evaluate_bandpass` propagate it; and `response_normalized` /
+    `response_bandpass` fall back to LU on that error and accept the fast path
+    only when at least one check point was actually compared (an all-skipped
+    check grid now falls back to LU). Regressions
+    `near_singular_schur_determinant_is_an_error`, plus the fast-path LU-
+    fallback behavior in the design tests.
+  - **P3 #2 three-state check outcome** (`src/verify/mod.rs`):
+    `ResponseCheckReport::passes()` returned `true` for skipped checks,
+    conflating "not checked" with "passed". New `CheckOutcome` enum
+    (Skipped/Pass/Fail) with `ResponseCheckReport::outcome()`; the terminal
+    and markdown summaries now render the outcome (`skipped`/`pass`/`fail`).
+    `CheckOutcome` is re-exported from the crate root and the prelude.
+  - **P3 #3 arrow-pattern load column — investigated, REVERTED as a false
+    positive** (`src/verify/mod.rs`): the review claimed `matches_arrow_pattern`
+    should reject a nonzero load column (index `side−1`). Empirically that is
+    wrong: the real `to_arrow` reduction **requires** nonzero load-column
+    cross-couplings (they encode the transmission zeros) — e.g. order 4 has
+    `M(2,5)`, `M(3,5)` nonzero alongside the load coupling `M(4,5)`. Enforcing
+    a structural-zero load column rejected every legitimate arrow/wheel matrix
+    (5 existing tests failed). The band loop `(row+2)..=order` is the correct,
+    intended check; the only genuinely-unchecked residue is a hypothetical
+    direct source→load path, which the reduction never creates. No code change.
+  - **P3 #4 prototype `freq_range` Hz misinterpretation**
+    (`src/design.rs`, `TouchstoneBuilder`): an explicit physical-Hz `freq_range`
+    on a prototype design (no center/bw) is silently reinterpreted as
+    **normalized ω** while the Touchstone frequency column still shows the Hz
+    values (e.g. 6.5e9–7.0e9 → deep stopband data). `freq_range` on a
+    prototype design now returns a typed `InvalidFrequency`; the normalized
+    form is available via `freq_range_normalized`.
+  - **P3 #5 multi-band order / repeated-zero validation**
+    (`src/spec/multi_band.rs`, `src/approx/multi_band.rs`): the "order ≥ number
+    of finite transmission zeros" doc invariant is now enforced early with a
+    typed `DimensionMismatch` (was a misleading equiripple non-convergence
+    deep in the approximation stage); repeated (multiplicity) zeros are no
+    longer silently deduplicated to first order when building P.
+  - **P3 #6 `RejectionSpec` index validation** (`src/spec/multi_band.rs`):
+    `InterBand { index }` is now validated against `band_count − 1` at
+    construction (was an unenforced documented invariant).
+  - **P3 #7 error-message / condition mismatch** (`src/freq.rs`,
+    `src/spec/multi_band.rs`): the "0 < f1 <= f2" message is aligned to the
+    enforced condition `f1 < f2` (f1 == f2 is rejected), so the message no
+    longer promises equality is allowed.
+  - **P3 #8 legacy `filter_spec` `unloaded_q` default** (`src/lib.rs`): the
+    deprecated `filter_spec` shim defaulted `unloaded_q` to `Some(2000.0)`
+    while the new builder APIs default to `None`; it now delegates to
+    `synthesis::build_filter_spec` and matches the `None` (lossless)
+    convention, removing the dead `DEFAULT_UNLOADED_Q` const. Metadata-only
+    field (not consumed by synthesis); legacy_api_still_works test still
+    passes.
+  - **P3 #10 pipeline/CLI/Python hygiene batch**:
+    (a) `pipeline/schema.rs` output schema now matches the real
+    `SynthesisContext` serialization — `transform.response_invariant` (a
+    phantom field) replaced by `notes: Vec<String>`, `matrix` gains `side`,
+    `spec` gains `unloaded_q`, and both topology enums gain `Wheel`;
+    (b) `scripts/build_wheel.sh` `repair()` now retags **only** the newly
+    built wheel (`NEW_WHEEL`) instead of every non-target wheel in `dist/`
+    (which also rewrote prior build-original archives and made `NEW_REPAIRED`
+    point at the last glob file);
+    (c) `mfs_cli` `main()`'s JSON error fallback no longer
+    `format!`-interpolates the message (which could emit invalid JSON) — it
+    now builds the object via `serde_json::json!` so the message is escaped
+    correctly;
+    (d) `write_touchstone` is now atomic (write to a temp file in the same
+    directory, then rename), so a mid-write failure cannot leave a truncated
+    `.s2p`;
+    (e) Python `tune()` now rejects empty `freqs` (matching `extract()`).
+    The dead duplicate `pipeline::schema::validate_request` (a `pub`
+    `&Value` validator with zero callers, shadowing the canonical typed
+    `SynthesisRequest::validate`) and its 8 tests are removed.
+  - **Open (not fixed):** none of the 13 P2s remain. All P3 items are now
+    closed: #1, #2, #9, #11 fixed; #3 investigated and reverted (false
+    positive); #4-#8 and #10 fixed this session (see items above).
+    **Verification (this session):** `cargo test --features cli
+    --all-targets` **414 passed / 0 failed**; `cargo clippy --features
+    cli,python --all-targets -- -D warnings` clean. (The 8 now-deleted
+    `pipeline::schema::validate_request` tests are the only test removal;
+    the net change adds the P3 #5 regression and P3 #4/#6 regression tests.)
+
+- **0.6.1 working-tree second-pass review fix wave (2026-10-10)** — a
+  read-only re-review of the post-round-1 working tree found and fixed a set
+  of "gate-green but wrong result" and silent-degradation defects that the
+  round-1 wave had left open (the round-1 fixes touched the same files, so a
+  second pass re-derived each known risk against the current code and hunted
+  for new ones). All findings are fixed in the working tree.
+  - **C2 spectral-factor companion fallback unverified + RHP fill**
+    (`src/spectral.rs`): the cepstrum path verified the para-product identity
+    `D(jω)·D̃(jω) = R(jω)` (= `|D(jω)|² = R(jω)`) at 8 axis points, but the
+    companion-matrix fallback returned its factor **unverified** — and
+    `select_lhp_roots`' last-resort fill has no `re < 0` check, so it can
+    admit a right-half-plane root when the LHP count is short. A factor whose
+    magnitude response is wrong would silently corrupt the downstream
+    Machiarella coupling matrices. The 8-point check is now a shared
+    `para_product_verified` helper applied to **both** paths (cepstrum and
+    companion); a factor that fails it returns a typed `NumericalFailure`.
+    This is a **magnitude** backstop, not a minimum-phase enforcer: for a real
+    R the min- and max-phase factors share `|D(jω)|²` (both pass), so
+    minimum-phase *selection* remains `select_lhp_roots`' LHP bias. New
+    regression `para_product_verification_checks_magnitude_not_min_phase`
+    (pins both the reject behavior and the real-R limitation).
+  - **Type-II junction degenerate `d_lead`** (`src/synthesis/machiarella.rs`):
+    `compute_s_product`'s Type-II branch monic-normalizes the spectral factor
+    by dividing by `d_poly.leading_coefficient()`; `spectral.rs::monic` leaves
+    a degenerate factor (|lead| < 1e-15) unnormalized, so the division would
+    scale the polynomial across ~200 decades and produce catastrophic roots.
+    Now a typed `NumericalFailure` instead. New regression
+    `type_ii_s_product_rejects_degenerate_leading_coefficient`.
+  - **F1/F2/F3 pipeline snapshot round-trip** (`src/pipeline/execution.rs`):
+    infinite transmission zeros and the lossless-`∞` Q were stored as
+    non-finite `f64` and broke the `serde_json` round trip; now stored as
+    `Option` (finite) with `None` ↔ `∞` on restore. `into_context` now
+    rejects a snapshot whose metadata claims a stage ran whose artifact is
+    absent (was an unbounded `stage_timings_ms[i]` index — a hand-crafted /
+    truncated file would panic), and the dead `has_transform`/`has_response`
+    metadata fields are removed (written, never read). Regressions
+    `save_and_load_context_round_trip_with_infinite_zero` and
+    `loaded_context_rejects_crafted_stage_metadata`.
+  - **F4/F5/F6 pipeline schema + lossy Q** (`src/pipeline/schema.rs`,
+    `src/pipeline/stages.rs`): the input `topology` enum was missing `Wheel`;
+    the output `response` schema was an object-with-`samples` but the real
+    serializer emits a **direct array** (now matches). A "lossy" request with
+    a non-positive / non-finite `unloaded_q` (other than the lossless `∞`
+    sentinel) silently degraded to a lossless response (the backend only
+    applies the term when `is_finite() && > 0.0`) — now rejected with a typed
+    error; a finite Q with a low-pass mapping (incommensurate grid) is also
+    rejected. `ResponseEvaluationStage`'s doc now states the lossless
+    normalized path. Regressions `lossy_settings_rejects_invalid_q`,
+    `lossy_settings_rejects_finite_q_with_lowpass`,
+    `response_stage_rejects_invalid_q_on_normalized_path`.
+  - **MultiBandSpec order bound** (`src/spec/multi_band.rs`): `new` enforced
+    `order > 0` but not the `MAX_ORDER = 256` cap the single-band
+    `FilterSpec::new` applies (an OOM vector: an unbounded order sizes an
+    `(order+2)²` matrix). Now bounded; new regression
+    `multi_band_spec_order_is_bounded_by_max_order`.
+  - **Multiplexer default response window** (`src/bin/mfs_cli.rs`,
+    `src/python.rs`, `src/design.rs`): `resolve_multiplexer_range` and the
+    CLI/Python/`cascade` docs still used the arithmetic `center ∓ 1.5·bw`
+    window, which goes **< 0 Hz** for wideband channels (fbw > 2/3) and fails
+    in `map_hz_to_normalized`. Now derived from the geometric-mean
+    `band_edge_pair` edges padded by 0.5·bw and floored positive — the same
+    formula as `FilterDesign::default_response` (the P2-3 fix). New regression
+    `multiplexer_default_range_is_edge_based_and_positive`.
+  - **Polynomial-summary zero nullability** (`src/pipeline/context.rs`,
+    `src/pipeline/schema.rs`): the public `SynthesisContext` `Serialize` impl
+    serialized `PolynomialsSummary.transmission_zeros_normalized` as a bare
+    `Vec<f64>`, but a zero at infinity (legal — see
+    `approximation_accepts_explicit_infinite_transmission_zeros`) lands in
+    that list. The P2-10 fix had applied the finite→`null` mapping to the
+    *spec* summary but missed the *polynomial* summary, leaving the output
+    (which serde_json emits as `null` for `inf`) inconsistent with the schema
+    (which declared `items: number`). Now mapped to `Vec<Option<f64>>` like
+    the spec summary; schema items retyped to `["number", "null"]`. New
+    regression `context_serialize_emits_null_for_infinite_normalized_zero`.
+  **Verification (this wave):** `cargo test --all-targets` **411 passed / 0
+  failed** (the round-1 406 + 5 new second-pass regressions);
+  `cargo clippy --features cli,python --all-targets -- -D warnings` clean;
+  `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps` clean;
+  `cargo bench --no-run` compiles.
 
 ## [0.6.1] — 2026-10-07
 

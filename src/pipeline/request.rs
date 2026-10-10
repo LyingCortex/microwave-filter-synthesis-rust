@@ -49,6 +49,14 @@ impl std::fmt::Display for ValidationErrors {
     }
 }
 
+// Upper bounds are defined at the choke points that every public entry
+// (JSON/CLI/Python) funnels through and re-exported here for convenience:
+// `FilterSpec::new` rejects orders above `MAX_ORDER`, and
+// `FrequencyGrid::linspace` rejects grids above `MAX_GRID_POINTS` (review
+// P2-11). A hostile single request is bounded regardless of entry point.
+pub use crate::freq::MAX_GRID_POINTS;
+pub use crate::spec::MAX_ORDER;
+
 /// JSON input format for the synthesis pipeline.
 ///
 /// All fields except `order` and `return_loss_db` are optional with sensible
@@ -101,6 +109,13 @@ impl SynthesisRequest {
                 field: "order".to_string(),
                 message: "must be greater than 0".to_string(),
             });
+        } else if self.order > MAX_ORDER {
+            // P2-11: a single `{"order": 100000}` request would allocate an
+            // ~80 GB coupling matrix and die in the OOM killer.
+            errors.push(ValidationError {
+                field: "order".to_string(),
+                message: format!("must be at most {MAX_ORDER} (got {})", self.order),
+            });
         }
 
         if self.return_loss_db <= 0.0 || !self.return_loss_db.is_finite() {
@@ -115,6 +130,16 @@ impl SynthesisRequest {
                 errors.push(ValidationError {
                     field: "grid.points".to_string(),
                     message: "must be at least 2".to_string(),
+                });
+            } else if grid.points > MAX_GRID_POINTS {
+                // P2-11: a single `points: 1e9` request is a linear-allocation
+                // OOM vector.
+                errors.push(ValidationError {
+                    field: "grid.points".to_string(),
+                    message: format!(
+                        "must be at most {MAX_GRID_POINTS} (got {})",
+                        grid.points
+                    ),
                 });
             }
             if !grid.start.is_finite() || !grid.stop.is_finite() || grid.stop <= grid.start {
@@ -247,6 +272,7 @@ pub fn run_full_pipeline(request: SynthesisRequest) -> Result<SynthesisContext> 
             matrix: eval_matrix,
             grid,
             mapping: ctx.options.mapping.clone(),
+            unloaded_q: ctx.spec.unloaded_q,
         };
         let response = stage.execute(&input)?;
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;

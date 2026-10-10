@@ -11,17 +11,16 @@
 
 use num_complex::Complex64;
 
-use crate::approx::PolynomialSet;
 use crate::error::{MfsError, Result};
 use crate::freq::{FrequencyGrid, FrequencyMapping};
-use crate::synthesis::synthesize_residue_expansions;
 
 use super::{ResponseSample, SParameterResponse};
 
 /// Pre-computed pole-expansion data for fast frequency sweeps.
 ///
-/// Once constructed from a `PolynomialSet`, this can evaluate S-parameters
-/// at arbitrary frequencies in O(N) per point.
+/// Once constructed from a transversal coupling matrix via
+/// [`from_matrix`](Self::from_matrix), this can evaluate S-parameters at
+/// arbitrary frequencies in O(N) per point.
 #[derive(Debug, Clone)]
 pub struct PoleExpansionData {
     /// Poles shared by all Y parameters (denominator roots).
@@ -78,50 +77,13 @@ impl PoleExpansionData {
     ///
     /// The simplest correct approach: extract poles and residues directly from
     /// the transversal matrix structure, matching what the LU solver computes.
-    pub fn from_polynomials(polynomials: &PolynomialSet) -> Result<Self> {
-        let (y11, y12, y22) = synthesize_residue_expansions(polynomials)?;
-
-        if y11.residues.len() != y12.residues.len() || y11.residues.len() != y22.residues.len() {
-            return Err(MfsError::DimensionMismatch {
-                expected: y11.residues.len(),
-                actual: y12.residues.len().min(y22.residues.len()),
-            });
-        }
-
-        let poles: Vec<Complex64> = y11.residues.iter().map(|r| r.pole).collect();
-        let residues_y11: Vec<Complex64> = y11.residues.iter().map(|r| r.residue).collect();
-        let residues_y12: Vec<Complex64> = y12.residues.iter().map(|r| r.residue).collect();
-        let residues_y22: Vec<Complex64> = y22.residues.iter().map(|r| r.residue).collect();
-        let laurent_y11: Vec<Option<Vec<Complex64>>> =
-            y11.residues.iter().map(|r| r.laurent.clone()).collect();
-        let laurent_y12: Vec<Option<Vec<Complex64>>> =
-            y12.residues.iter().map(|r| r.laurent.clone()).collect();
-        let laurent_y22: Vec<Option<Vec<Complex64>>> =
-            y22.residues.iter().map(|r| r.laurent.clone()).collect();
-
-        let y12_constant = y12.constant_term.unwrap_or(Complex64::new(0.0, 0.0));
-        let y11_constant = y11.constant_term.unwrap_or(Complex64::new(0.0, 0.0));
-
-        Ok(Self {
-            poles,
-            residues_y11,
-            residues_y12,
-            residues_y22,
-            laurent_y11,
-            laurent_y12,
-            laurent_y22,
-            y12_constant,
-            y11_constant,
-            source_r: 1.0,
-            load_r: 1.0,
-        })
-    }
-
-    /// Builds pole-expansion data directly from the transversal coupling matrix.
     ///
-    /// This extracts the diagonal entries (B_k), source couplings (M_Sk), and
-    /// load couplings (M_kL) from the matrix, then computes S-parameters using
-    /// the exact transversal network formula.
+    /// **Pole-domain convention (review P2-12):** the stored poles are the
+    /// *real ω-domain* poles `−B_k` (resonator detuning), so that
+    /// `evaluate_at` forms `denom = ω − pole` with a real
+    /// `ω`. The transversal matrix is purely real, so `−B_k` is real; a
+    /// non-transversal (folded/arrow) matrix has complex couplings and must be
+    /// transformed to transversal form first.
     pub fn from_matrix(matrix: &crate::matrix::CouplingMatrix) -> Result<Self> {
         let order = matrix.order();
         let side = matrix.side();
@@ -164,35 +126,28 @@ impl PoleExpansionData {
         })
     }
 
-    /// Evaluates S-parameters at a single normalized frequency point.
-    ///
-    /// For the transversal coupling matrix, the exact S-parameter formulas are:
-    ///
-    ///   Let Σ₁₁ = Σ M_Sk² / (jω + B_k)
-    ///   Let Σ₁₂ = Σ (M_Sk · M_kL) / (jω + B_k) + M_SL
-    ///
-    /// Then the response matrix inverse elements are:
-    ///   [A⁻¹]_{0,0} and [A⁻¹]_{N+1,0}
+    /// Evaluates S11, S21 and the group delay at a single normalized frequency
+    /// point.
     ///
     /// For the normalized network (R_S = R_L = 1):
     ///   S11 = 1 + 2j · [A⁻¹]_{0,0}
     ///   S21 = -2j · [A⁻¹]_{N+1,0}
     ///
-    /// The key insight: for a transversal matrix, the response matrix A has a
-    /// special structure where each resonator contributes independently.
-    /// The inverse elements are exactly the partial-fraction sums divided by
-    /// a common denominator that accounts for port loading.
-    ///
-    /// However, the denominator is NOT trivial — it couples all resonators through
-    /// the ports. The exact formula requires solving a 2×2 system per frequency.
-    ///
-    /// Correct formula (from network theory):
-    ///   Let y11 = Σ M_Sk²/(jω+B_k), y12 = Σ M_Sk·M_kL/(jω+B_k) + M_SL
-    ///   Let y22 = Σ M_kL²/(jω+B_k)
-    ///   D = (jR_S + y11)(jR_L + y22) - y12²
-    ///   [A⁻¹]_{0,0} = -(jR_L + y22) / D
-    ///   [A⁻¹]_{N+1,0} = y12 / D
-    fn evaluate_at(&self, omega: f64) -> (Complex64, Complex64) {
+    /// Group delay is `−Im(d/dω ln S21)`, evaluated analytically from the
+    /// same Schur 2×2 form: with S21 = `j·scale·s01/det` (j·scale a
+    /// frequency-independent constant),
+    ///   d/dω ln S21 = ds01/s01 − ddet/det,
+    /// where the per-pole derivatives d/dω [r_k/(ω−p_k)] = −r_k/(ω−p_k)²
+    /// (simple poles) and d/dω [b_k/(ω−p_k)^{m−k}] = −(m−k)·b_k/(ω−p_k)^{m−k+1}
+    /// (Laurent parts) are accumulated in the
+    /// same single pass, so it stays **O(N) per point**. This is the same
+    /// quantity the per-point LU backend returns —
+    /// `Im Σ_k A⁻¹[k,N+1]·A⁻¹[k,0] / A⁻¹[N+1,0]`, from
+    /// `dA⁻¹/dω = −A⁻¹·(dA/dω)·A⁻¹` with `dA/dω = I_r` on the resonator block
+    /// only — both reduce to `−Im(d ln S21/dω)`. At a transmission zero where
+    /// S21 → 0 the expression is undefined, so it is returned as `None`
+    /// (explicit, not a fake 0.0), mirroring the LU backend's degenerate guard.
+    fn evaluate_at(&self, omega: f64) -> Result<(Complex64, Complex64, Option<f64>)> {
         // For a transversal coupling matrix, the response matrix A has the structure:
         //   A[0,0] = -jR_S,  A[0,k] = M_Sk,  A[0,N+1] = M_SL
         //   A[k,k] = jω + B_k (resonator diagonal)
@@ -200,52 +155,52 @@ impl PoleExpansionData {
         //   A[N+1,N+1] = -jR_L, A[N+1,k] = M_kL, A[N+1,0] = M_SL
         //
         // Using Schur complement on the resonator block D = diag(jω+B_k):
-        //   The 2×2 reduced matrix (source/load ports) is:
-        //     S = [[A[0,0], A[0,N+1]], [A[N+1,0], A[N+1,N+1]]] - U * D⁻¹ * V
-        //   where U and V are the border coupling vectors.
-        //
         //   S[0,0] = -jR_S - Σ M_Sk² / (jω + B_k)
         //   S[0,1] = M_SL - Σ M_Sk·M_kL / (jω + B_k)
-        //   S[1,0] = M_SL - Σ M_Sk·M_kL / (jω + B_k)
         //   S[1,1] = -jR_L - Σ M_kL² / (jω + B_k)
-        //
-        //   Then [A⁻¹]_{0,0} = S⁻¹[0,0] and [A⁻¹]_{N+1,0} = S⁻¹[1,0]
-        //   (from the Schur complement inversion formula)
-
+        //   [A⁻¹]_{0,0} = S⁻¹[0,0],  [A⁻¹]_{N+1,0} = S⁻¹[1,0]
         let jw = Complex64::new(omega, 0.0); // omega is real frequency variable
         let neg_j_rs = Complex64::new(0.0, -self.source_r);
         let neg_j_rl = Complex64::new(0.0, -self.load_r);
 
-        // Compute the partial-fraction sums (resonator contributions)
-        // Each resonator contributes residue_k / (ω - pole_k) where pole_k = -B_k
+        // Partial-fraction sums (resonator contributions) and their ω-derivatives.
+        // A simple pole r/(jω−p) differentiates to −j·r/(jω−p)²; a repeated pole's
+        // Laurent part b_k/(jω−p)^{m−k} differentiates to −j·(m−k)·b_k/(jω−p)^{m−k+1}.
         let mut sum_11 = Complex64::new(0.0, 0.0);
         let mut sum_12 = Complex64::new(0.0, 0.0);
         let mut sum_22 = Complex64::new(0.0, 0.0);
+        let mut ds_11 = Complex64::new(0.0, 0.0);
+        let mut ds_12 = Complex64::new(0.0, 0.0);
+        let mut ds_22 = Complex64::new(0.0, 0.0);
 
         for i in 0..self.poles.len() {
-            // poles[i] = -B_k (real), so ω - poles[i] = ω + B_k
+            // poles[i] = -B_k (real), so jω − poles[i] = jω + B_k
             let denom = jw - self.poles[i];
             if denom.norm_sqr() > 1e-30 {
                 // A repeated pole contributes its full Laurent principal part
-                // to its own partial-fraction sum, b_0/denom^m + ... +
-                // b_{m-1}/denom. Each Y parameter is summed with its *own*
-                // length: a shared pole's effective order can differ between
-                // y11/y12/y22 after numerator-denominator cancellation, so
-                // the three principal parts need not be equal-length.
+                // to its own partial-fraction sum, summed with its *own* length
+                // (a shared pole's effective order can differ between y11/y12/y22
+                // after numerator-denominator cancellation).
                 if let Some(l) = self.laurent_y11[i].as_ref() {
                     sum_11 += Self::laurent_sum(l, denom);
+                    ds_11 += Self::laurent_derivative(l, denom);
                 } else {
                     sum_11 += self.residues_y11[i] / denom;
+                    ds_11 -= self.residues_y11[i] / (denom * denom);
                 }
                 if let Some(l) = self.laurent_y12[i].as_ref() {
                     sum_12 += Self::laurent_sum(l, denom);
+                    ds_12 += Self::laurent_derivative(l, denom);
                 } else {
                     sum_12 += self.residues_y12[i] / denom;
+                    ds_12 -= self.residues_y12[i] / (denom * denom);
                 }
                 if let Some(l) = self.laurent_y22[i].as_ref() {
                     sum_22 += Self::laurent_sum(l, denom);
+                    ds_22 += Self::laurent_derivative(l, denom);
                 } else {
                     sum_22 += self.residues_y22[i] / denom;
+                    ds_22 -= self.residues_y22[i] / (denom * denom);
                 }
             }
         }
@@ -256,10 +211,24 @@ impl PoleExpansionData {
         let s10 = s01; // symmetric
         let s11 = neg_j_rl - sum_22;
 
-        // Invert the 2×2 matrix
+        // ω-derivatives of the Schur elements (resistances and M_SL are
+        // frequency-independent).
+        let ds00 = -ds_11;
+        let ds01 = -ds_12;
+        let ds11 = -ds_22;
+
+        // Invert the 2×2 matrix. A near-singular Schur determinant marks a
+        // pole/resonance of the reduced network; the partial-fraction form is
+        // not evaluable there, so surface a typed error (the caller falls back
+        // to LU) rather than emitting a fake "(S11, S21) = (1, 0)" total-
+        // reflection sample (review P3 #1).
         let det = s00 * s11 - s01 * s10;
         if det.norm_sqr() <= 1e-30 {
-            return (Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0));
+            return Err(MfsError::NumericalFailure(format!(
+                "pole expansion: near-singular Schur determinant (|det|² = {}) at ω = {omega}; \
+                 frequency is a network pole, use LU-based evaluation",
+                det.norm_sqr()
+            )));
         }
 
         let inv_00 = s11 / det;
@@ -270,7 +239,30 @@ impl PoleExpansionData {
         let scale = 2.0 * (self.source_r * self.load_r).sqrt();
         let s_21 = Complex64::new(0.0, -scale) * inv_10;
 
-        (s_11, s_21)
+        // Group delay = −Im(d/dω ln S21) = −Im(ds01/s01 − ddet/det), with
+        // ddet = ds00·s11 + s00·ds11 − 2·s01·ds01. Undefined at a transmission
+        // zero (|S21| → 0, i.e. |inv_10| → 0), so guard exactly like the LU
+        // backend (`denominator.norm_sqr() <= 1e-18`).
+        let ddet = ds00 * s11 + s00 * ds11 - 2.0 * s01 * ds01;
+        let group_delay = if inv_10.norm_sqr() <= 1e-18 {
+            None
+        } else {
+            Some(-(ds01 / s01 - ddet / det).im)
+        };
+
+        Ok((s_11, s_21, group_delay))
+    }
+
+    /// Derivative of a Laurent principal part `Σ_k b_k/denom^{m−k}` (where
+    /// `m = l.len()`): `d/dω Σ_k b_k/(jω−p)^{m−k} = −j·Σ_k (m−k)·b_k/(jω−p)^{m−k+1}`.
+    fn laurent_derivative(l: &[Complex64], denom: Complex64) -> Complex64 {
+        let m = l.len();
+        let mut sum = Complex64::new(0.0, 0.0);
+        for (k, &b) in l.iter().enumerate() {
+            let power = m - k; // exponent of b_k on denom
+            sum -= (power as f64) * b / denom.powi(power as i32 + 1);
+        }
+        sum
     }
 
     /// Sums one pole's Laurent principal part:
@@ -295,25 +287,27 @@ impl PoleExpansionData {
     }
 
     /// Evaluates S-parameters on a normalized frequency grid.
+    ///
+    /// Returns an error if any grid point hits a near-singular Schur
+    /// determinant (a network pole); the caller should fall back to LU-based
+    /// evaluation (review P3 #1).
     pub fn evaluate_normalized(&self, grid: &FrequencyGrid) -> Result<SParameterResponse> {
         let samples = grid
             .as_slice()
             .iter()
             .map(|&omega| {
-                let (s11, s21) = self.evaluate_at(omega);
-                ResponseSample {
+                let (s11, s21, group_delay) = self.evaluate_at(omega)?;
+                Ok(ResponseSample {
                     frequency_hz: omega,
                     normalized_omega: omega,
-                    // Pole expansion does not compute group delay: explicit
-                    // None rather than a silent 0.0 (T4.3).
-                    group_delay: None,
+                    group_delay,
                     s11_re: s11.re,
                     s11_im: s11.im,
                     s21_re: s21.re,
                     s21_im: s21.im,
-                }
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(SParameterResponse { samples })
     }
@@ -330,11 +324,11 @@ impl PoleExpansionData {
             .map(|&freq_hz| {
                 let normalized = mapping.map_hz_to_normalized(freq_hz)?;
                 let omega = normalized.omega;
-                let (s11, s21) = self.evaluate_at(omega);
+                let (s11, s21, group_delay) = self.evaluate_at(omega)?;
                 Ok(ResponseSample {
                     frequency_hz: freq_hz,
                     normalized_omega: omega,
-                    group_delay: None,
+                    group_delay,
                     s11_re: s11.re,
                     s11_im: s11.im,
                     s21_re: s21.re,
@@ -388,7 +382,7 @@ mod tests {
             load_r: 1.0,
         };
 
-        let (s11, s21) = data.evaluate_at(0.5);
+        let (s11, s21, _group_delay) = data.evaluate_at(0.5).expect("evaluable point");
 
         let expected_s11 = Complex64::new(7.0 / 25.0, 0.0);
         assert!((s11 - expected_s11).norm() < 1e-12, "s11 = {s11}");
@@ -435,11 +429,46 @@ mod tests {
             load_r: 1.0,
         };
 
-        let (s11, s21) = data.evaluate_at(2.0);
+        let (s11, s21, _group_delay) = data.evaluate_at(2.0).expect("evaluable point");
 
         let expected_s11 = Complex64::new(0.91646018, 0.21309734);
         assert!((s11 - expected_s11).norm() < 1e-6, "s11 = {s11}");
         let expected_s21 = Complex64::new(-0.07008850, 0.33132744);
         assert!((s21 - expected_s21).norm() < 1e-6, "s21 = {s21}");
+    }
+    /// P3 #1: a near-singular Schur determinant (the reduced 2×2 network has
+    /// no finite solution) must surface a typed error so the caller falls back
+    /// to LU — not a fake `(1, 0)` total-reflection sample. Construct a data
+    /// set whose `det = s00*s11 - s01²` is exactly zero at the chosen ω.
+    #[test]
+    fn near_singular_schur_determinant_is_an_error() {
+        let z = Complex64::new(0.0, 0.0);
+        // One real pole at -0.5, evaluated at ω = 0.5 (denom = 1.0). A
+        // pure-imaginary source residue makes the partial-fraction sum exactly
+        // `sum_11 = -j`, cancelling the `-jR_S` diagonal so the (0,0) Schur
+        // element is exactly zero: s00 = 0. With no source-load path (s01 = 0)
+        // the determinant s00·s11 - s01² is exactly 0 — a genuine network pole.
+        // This is the case the old code answered with a fake `(1, 0)` sample;
+        // it must now surface a typed error (review P3 #1).
+        let data = PoleExpansionData {
+            poles: vec![Complex64::new(-0.5, 0.0)],
+            residues_y11: vec![Complex64::new(0.0, -1.0)],
+            residues_y12: vec![z],
+            residues_y22: vec![z],
+            laurent_y11: vec![None],
+            laurent_y12: vec![None],
+            laurent_y22: vec![None],
+            y12_constant: z,
+            y11_constant: z,
+            source_r: 1.0,
+            load_r: 1.0,
+        };
+        let err = data.evaluate_at(0.5).unwrap_err();
+        assert!(
+            matches!(err, crate::error::MfsError::NumericalFailure(_)),
+            "expected NumericalFailure, got: {err:?}"
+        );
+        let msg = format!("{err}");
+        assert!(msg.contains("near-singular"), "message: {msg}");
     }
 }

@@ -33,12 +33,15 @@ impl CouplingMatrix {
         }
 
         let order = self.order();
-        if zeros.len() > order - 2 {
+        // Written as `order < zeros.len() + 2` so order=1 cannot underflow a
+        // `usize` (review P2-1): the old `zeros.len() > order - 2` panicked in
+        // debug and turned into a dead `usize::MAX` guard in release.
+        if order < zeros.len() + 2 {
             return Err(MfsError::PreconditionViolation(format!(
                 "too many zeros ({}) for order {} (max {})",
                 zeros.len(),
                 order,
-                order - 2
+                order.saturating_sub(2)
             )));
         }
 
@@ -147,6 +150,29 @@ mod tests {
             );
         }
         Ok(())
+    }
+
+    /// Regression for review P2-1: the zero-count guard must not underflow a
+    /// `usize` at order=1. The old `zeros.len() > order - 2` panicked in debug
+    /// and wrapped to a dead `usize::MAX` guard in release, so one zero for an
+    /// order-1 filter (max order-2 = -1, i.e. none) slipped through to
+    /// `extract_triplet` instead of a typed error.
+    #[test]
+    fn ct_zero_guard_order1_returns_error_not_panic() {
+        let matrix = CouplingMatrix::new(1, vec![
+            0.0, 0.5, 0.0,
+            0.5, 0.0, 0.0,
+            0.0, 0.0, 0.5,
+        ])
+        .unwrap();
+        let err = matrix.to_cascaded_trisections(&[-1.2]).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                MfsError::PreconditionViolation(msg) if msg.contains("too many zeros")
+            ),
+            "expected 'too many zeros' precondition error, got {err:?}"
+        );
     }
 
     #[test]
