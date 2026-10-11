@@ -493,9 +493,15 @@
   - **§D.7 dB single source** (`src/bin/mfs_cli/io.rs`): the five hand-rolled
     `10·log10(re²+im²)` sites in the CLI now route through
     `ResponseSample::s11_db()`/`s21_db()` (−300 dB floor at zero magnitude — a
-    true transmission zero no longer serializes as `null`). The
+    true transmission zero no longer serializes as `null`); the new
+    `verify_against_spec` reuses the same methods (a private `db_from_mag` it
+    first shipped was deduplicated onto them in the review follow-up). The
     `multiplexer.rs` `min_db`/`max_db` operate on library-precomputed `Vec<f64>`
-    dB (no `ResponseSample`) and are left as-is, cited for §D.7.
+    dB (no `ResponseSample`) and are left as-is, cited for §D.7. **Scope note:**
+    pre-existing library-side hand-rolled `mag → dB` lambdas
+    (`duplexer.rs:101/113/276`, `multiplexer.rs:462/958/979/1028`,
+    `machiarella.rs:754`) predate this commit and were not unified — a full
+    §D.7 closure is open and non-blocking.
   - **§D.6 save/resume closed-loop e2e in CI** (`tests/cli_save_resume_e2e.rs`,
     `.github/workflows/ci.yml`): a permanent, CLI-side successor to the deleted
     P3 #11 harness. `mfs_cli --input` (full pipeline) vs `mfs::pipeline::
