@@ -136,6 +136,10 @@ remaining low-priority ecosystem items and the refuted passband-TZ work.
     analytic fast path on both sides. Measured O(N): 1801-pt sweep
     **2.0 µs/pt** (prototype) / **2.2 µs/pt** (bandpass) with the derivative
     active, release build.
+    **Check 3 is reproducible** from the consumer repo at
+    `fuqtgui/src/scripts/verify_fastpath_gd.py` (needs mfs ≥ 0.6.2 + skrf in
+    the venv; run `uv run python src/scripts/verify_fastpath_gd.py`, exit 0 on
+    pass). Checks 1–2 are the permanent CI legs (Rust test, no third-party dep).
   - **Mistake recorded (2026-10-11) — 2π units slip in the *verification* FD
     reference, misattributed to "FD truncation near the transmission zeros".**
     Root cause: the cross-check built a finite-difference reference as

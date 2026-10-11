@@ -1,6 +1,6 @@
 [package]
 name = "mfs"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 description = "Microwave filter synthesis core library in Rust"
 license = "MIT OR Apache-2.0"
