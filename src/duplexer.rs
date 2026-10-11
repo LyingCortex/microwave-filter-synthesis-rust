@@ -8,7 +8,7 @@ use crate::design::FilterDesign;
 use crate::error::{MfsError, Result};
 use crate::freq::{BandPassMapping, FrequencyGrid};
 use crate::matrix::CouplingMatrix;
-use crate::response::ResponseSolver;
+use crate::response::{magnitude_to_db, ResponseSolver};
 
 /// A duplexer combining Tx and Rx filter designs.
 #[derive(Debug, Clone)]
@@ -97,11 +97,7 @@ impl Duplexer {
             let tx_s11_mag = tx_s.s11_mag();
             let rx_s11_mag = rx_s.s11_mag();
             let combined_s11 = (tx_s11_mag * rx_s11_mag).sqrt(); // geometric mean approximation
-            let ant_s11 = if combined_s11 > 1e-15 {
-                20.0 * combined_s11.log10()
-            } else {
-                -300.0
-            };
+            let ant_s11 = magnitude_to_db(combined_s11);
             antenna_s11_db.push(ant_s11);
 
             // Isolation: Tx-to-Rx = Tx_S21 rejection at Rx band + Rx_S21 rejection at Tx band
@@ -109,11 +105,7 @@ impl Duplexer {
             let tx_s21_lin = tx_s.s21_mag();
             let rx_s21_lin = rx_s.s21_mag();
             let iso_lin = tx_s21_lin * rx_s21_lin;
-            let iso_db_val = if iso_lin > 1e-15 {
-                20.0 * iso_lin.log10()
-            } else {
-                -300.0
-            };
+            let iso_db_val = magnitude_to_db(iso_lin);
             isolation_db.push(iso_db_val);
         }
 
@@ -273,7 +265,6 @@ impl DuplexerSynthesisResult {
         let grid = FrequencyGrid::linspace(start_hz, stop_hz, points).ok()?;
         let p0t = common.p0t_sq.sqrt();
         let p0r = common.p0r_sq.sqrt();
-        let to_db = |mag: f64| if mag > 1e-15 { 20.0 * mag.log10() } else { -300.0 };
 
         let mut frequencies = Vec::with_capacity(points);
         let mut tx_s21_db = Vec::with_capacity(points);
@@ -300,14 +291,14 @@ impl DuplexerSynthesisResult {
             let tx = p0t * dpt.norm() / dd.norm();
             let rx = p0r * dpr.norm() / dd.norm();
             frequencies.push(f);
-            antenna_s11_db.push(to_db(ant));
-            tx_s21_db.push(to_db(tx));
-            rx_s21_db.push(to_db(rx));
+            antenna_s11_db.push(magnitude_to_db(ant));
+            tx_s21_db.push(magnitude_to_db(tx));
+            rx_s21_db.push(magnitude_to_db(rx));
             // Channel-port reflections are not separately available from the
             // common-domain model; report them as fully matched.
             tx_s11_db.push(-300.0);
             rx_s11_db.push(-300.0);
-            isolation_db.push(to_db(tx * rx));
+            isolation_db.push(magnitude_to_db(tx * rx));
         }
         Some(DuplexerResponse {
             frequencies,

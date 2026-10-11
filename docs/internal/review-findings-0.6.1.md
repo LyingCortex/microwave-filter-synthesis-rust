@@ -633,19 +633,29 @@ round 1+2 wave (`8f3191a`).
   `design.rs`, `multiplexer.rs`, `optimize.rs`, `target.rs` (shared
   `parse_response_json`/`parse_matrix_json`/`load_target`), `io.rs`
   (error/tables/formats). Line-by-line move, no CLI flag/help/output change.
-- **§D.7 (dB single source) — FIXED (CLI + new verify code).** All five
+- **§D.7 (dB single source) — FIXED (full closure, 2026-10-11).** All
   hand-rolled `10·log10(re²+im²)` sites in the CLI route through
   `ResponseSample::s11_db()`/`s21_db()` (−300 dB floor at zero magnitude —
   no more `null` at a true transmission zero). The new `verify_against_spec`
   code reuses the same `s*_db()` methods (a private `db_from_mag` it first
-  shipped was deduplicated onto them in the review follow-up). **Scope
-  note:** the raw-array `min_db`/`max_db` in `multiplexer.rs` operates on
-  library-precomputed `Vec<f64>` dB (no `ResponseSample`), left as-is with a
-  §D.7 citation. Pre-existing library-side hand-rolled `mag → dB` lambdas
-  (`duplexer.rs:101/113/276`, `multiplexer.rs:462/958/979/1028`,
-  `machiarella.rs:754`) are **outside this commit's scope** — they were there
-  before and were not unified; a full §D.7 closure would route them through
-  the same `s*_db()`/shared helper too (open, non-blocking).
+  shipped was deduplicated onto them in the review follow-up). **Library side
+  now closed too:** a shared `response::magnitude_to_db(mag) -> f64` (−300 dB
+  floor at `mag <= 1e-15`, else `20·log10(mag)`) is the crate-wide single
+  source of truth; the seven library hand-rolled lambdas
+  (`duplexer.rs` antenna-S11/isolation/common-domain `to_db`,
+  `multiplexer.rs` geometric-mean/isolation/`response_admittance`,
+  `machiarella.rs` `junction_response`) and the public `s*_db()` all route
+  through it. The `s*_db` threshold tightens `<= 0.0` → `<= 1e-15`, clamping
+  the machine-epsilon null region (a true zero lands at `mag ~ 1e-17`) to a
+  *stable* −300.0 instead of `20·log10(1e-17)` amplifying run-to-run noise —
+  this is what makes the `cli_save_resume_e2e` deep-null gate reproducible.
+  The `multiplexer.rs` `peak_db` `NEG_INFINITY` site is a *degeneracy
+  sentinel* (no passband), not a serialization floor, and is left distinct.
+  A CI `wheel` job (`uv build --wheel` + clean-venv install + k12 FFI probe
+  vs Rust ref to 1e-6) now gates the pyo3/cdylib path. Full suite green; no
+  test pins the old `(0, 1e-15]` window. The `multiplexer.rs` `min_db`/
+  `max_db` operate on library-precomputed `Vec<f64>` dB (no `ResponseSample`)
+  and are left as-is, cited for §D.7.
 - **§D.6 (save/resume closed-loop e2e in CI) — FIXED.** New
   `tests/cli_save_resume_e2e.rs` (gated `cli` feature) runs the permanent
   successor to the deleted P3 #11 harness: `mfs_cli --input` (full pipeline)

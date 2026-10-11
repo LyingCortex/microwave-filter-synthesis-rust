@@ -53,6 +53,7 @@ use crate::approx::{
 use crate::duplexer::{ChannelSpec, JunctionType};
 use crate::error::{MfsError, Result};
 use crate::freq::FrequencyGrid;
+use crate::response::magnitude_to_db;
 use crate::spectral::spectral_factor;
 use crate::synthesis::build_filter_spec;
 use nalgebra::{DMatrix, DVector};
@@ -751,7 +752,6 @@ pub fn junction_response(
     let mut antenna_s11_db = Vec::with_capacity(points);
     let mut frequencies = Vec::with_capacity(points);
 
-    let to_db = |mag: f64| if mag > 1e-15 { 20.0 * mag.log10() } else { -300.0 };
     for &f in grid.as_slice() {
         let omega = (f / common.f0 - common.f0 / f) / common.b;
         let s = Complex64::new(0.0, omega);
@@ -763,10 +763,10 @@ pub fn junction_response(
         }
         let dn = common.n.evaluate(s);
         frequencies.push(f);
-        antenna_s11_db.push(to_db(dn.norm() / dd.norm()));
+        antenna_s11_db.push(magnitude_to_db(dn.norm() / dd.norm()));
         for (i, pt) in common.pt.iter().enumerate() {
             let p0 = common.p0_sq[i].sqrt();
-            channel_s21_db[i].push(to_db(p0 * pt.evaluate(s).norm() / dd.norm()));
+            channel_s21_db[i].push(magnitude_to_db(p0 * pt.evaluate(s).norm() / dd.norm()));
         }
     }
     Ok(JunctionResponse {

@@ -66,6 +66,41 @@ jobs:
       # (both need the `cli` feature; the binary is already built above).
       - run: cargo test --features cli --test cli_integration --test cli_save_resume_e2e
 
+  # The Python wheel (`pyproject.toml` + `pyo3`) was previously built only by
+  # the manual `scripts/build_wheel.sh` (needs uv + docker, run ad hoc), so the
+  # cdylib/FFI path had no CI gate: a breaking change in the `python` feature
+  # or the pyo3 surface would surface only at wheel-build time, downstream.
+  # This job builds the wheel with the same `uv build --wheel` command as
+  # `build_wheel.sh`, installs it into a clean venv, and asserts a
+  # pure-Rust-computation value — the k12 coupling of a 4th-order RL=20 dB
+  # filter, stable across glibc 2.35→2.39 (libm has no algorithm change there)
+  # — against the Rust-side reference to 1e-6. That 1e-6 is the same cross-
+  # glibc tolerance `build_wheel.sh` already uses, so it is proven, not a
+  # bit-equality trap. Linux only: the manylinux/glibc-compat concern is
+  # Linux-specific. The glibc-2.36 *runtime* load check still needs docker +
+  # credentials (out of scope for CI; see review-findings §F).
+  wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheel (same `uv build --wheel` as build_wheel.sh)
+        run: uv build --wheel
+      - name: Install into a clean venv + FFI numeric probe
+        run: |
+          uv venv /tmp/mfsvenv
+          whl=$(ls dist/mfs-*.whl)
+          [ -e "$whl" ] || { echo "no wheel in dist/"; ls -la dist/; exit 1; }
+          uv pip install --python /tmp/mfsvenv/bin/python \
+            --no-cache-dir --no-deps "$whl"
+          /tmp/mfsvenv/bin/python -c "import mfs; d=mfs.bandpass(order=4,rl=20.0,center=900e6,bw=30e6); k12=float(d.matrix()[0][1]); ref=0.414467071; assert abs(k12-ref)<1e-6, f'k12 FFI mismatch {k12} vs Rust ref {ref}'; print(f'k12={k12:.9f} ok')"
+
   # The `cli` and `python` features hide code behind required-features /
   # optional deps that the default `clippy` job never compiles, so their
   # lints would otherwise stay dormant. Lint both feature-enabled builds.

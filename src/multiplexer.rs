@@ -21,7 +21,7 @@ use crate::duplexer::{ChannelSpec, JunctionType};
 use crate::error::{MfsError, Result};
 use crate::freq::{BandPassMapping, FrequencyGrid};
 use crate::matrix::CouplingMatrix;
-use crate::response::ResponseSolver;
+use crate::response::{magnitude_to_db, ResponseSolver};
 use crate::spec::FilterSpec;
 use crate::synthesis::build_filter_spec;
 use nalgebra::DMatrix;
@@ -852,19 +852,19 @@ impl Multiplexer {
 
         for q in 0..points {
             let row = &matrix.s[q];
-            antenna_s11_db.push(mag_to_db(row[0]));
+            antenna_s11_db.push(magnitude_to_db(row[0].norm()));
             for i in 0..n {
                 // channel_s21_db[i] = |S[i+1][0]| (antenna -> channel i).
-                channel_s21_db[i].push(mag_to_db(row[(i + 1) * p]));
+                channel_s21_db[i].push(magnitude_to_db(row[(i + 1) * p].norm()));
                 // channel_s11_db[i] = |S[i+1][i+1]| (channel i's own port).
-                channel_s11_db[i].push(mag_to_db(row[(i + 1) * p + (i + 1)]));
+                channel_s11_db[i].push(magnitude_to_db(row[(i + 1) * p + (i + 1)].norm()));
             }
             for i in 0..n {
                 for j in 0..n {
                     if i != j {
                         // isolation_db[i][j] = |S[i+1][j+1]| (channel j
                         // driven, channel i measured).
-                        isolation_db[i][j].push(mag_to_db(row[(i + 1) * p + (j + 1)]));
+                        isolation_db[i][j].push(magnitude_to_db(row[(i + 1) * p + (j + 1)].norm()));
                     }
                 }
             }
@@ -954,11 +954,7 @@ impl Multiplexer {
             } else {
                 0.0
             };
-            let db = if geomean > 1e-15 {
-                20.0 * geomean.log10()
-            } else {
-                -300.0
-            };
+            let db = magnitude_to_db(geomean);
             antenna_s11_db.push(db);
         }
 
@@ -975,11 +971,7 @@ impl Multiplexer {
                 let mut row_db = Vec::with_capacity(points);
                 for (mag_i, mag_j) in channel_s21_mag[i].iter().zip(channel_s21_mag[j].iter()) {
                     let prod = mag_i * mag_j;
-                    let db = if prod > 1e-15 {
-                        20.0 * prod.log10()
-                    } else {
-                        -300.0
-                    };
+                    let db = magnitude_to_db(prod);
                     row_db.push(db);
                 }
                 iso_row.push(row_db);
@@ -1018,16 +1010,6 @@ impl Multiplexer {
             );
         }
         Ok(channels)
-    }
-}
-
-/// S-magnitude to dB, with the -300 dB floor used across the crate.
-fn mag_to_db(mag: Complex64) -> f64 {
-    let m = mag.norm();
-    if m > 1e-15 {
-        20.0 * m.log10()
-    } else {
-        -300.0
     }
 }
 
@@ -1268,7 +1250,7 @@ mod analysis_tests {
 
         for q in 0..points {
             let row = &mat.s[q];
-            let s = |i: usize, j: usize| mag_to_db(row[i * p + j]);
+            let s = |i: usize, j: usize| magnitude_to_db(row[i * p + j].norm());
             assert!(
                 (resp.antenna_s11_db[q] - s(0, 0)).abs() < 1e-9,
                 "antenna_s11 mismatch at {q}"

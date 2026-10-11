@@ -57,27 +57,19 @@ impl ResponseSample {
 
     /// S11 magnitude in dB.
     ///
-    /// A zero magnitude (a transmission/reflection null) maps to a finite
-    /// floor of −300 dB instead of `−∞`, so the value stays serializable as
-    /// JSON (review P2-10: a sample taken exactly at a transmission zero
-    /// would otherwise produce `log10(0) = −inf` and fail `serde_json`).
+    /// A null (a transmission/reflection zero) maps to a finite floor of
+    /// −300 dB instead of `−∞`, so the value stays serializable as JSON
+    /// (review P2-10 / §D.7). See [`magnitude_to_db`] for the floor and the
+    /// `1e-15` stability threshold.
     pub fn s11_db(&self) -> f64 {
-        let mag = self.s11_mag();
-        if mag <= 0.0 {
-            return -300.0;
-        }
-        20.0 * mag.log10()
+        magnitude_to_db(self.s11_mag())
     }
 
     /// S21 magnitude in dB.
     ///
-    /// See [`Self::s11_db`] for the zero-magnitude (−300 dB) convention.
+    /// See [`Self::s11_db`] / [`magnitude_to_db`] for the floor convention.
     pub fn s21_db(&self) -> f64 {
-        let mag = self.s21_mag();
-        if mag <= 0.0 {
-            return -300.0;
-        }
-        20.0 * mag.log10()
+        magnitude_to_db(self.s21_mag())
     }
 
     /// S11 phase in degrees.
@@ -88,6 +80,28 @@ impl ResponseSample {
     /// S21 phase in degrees.
     pub fn s21_phase_deg(&self) -> f64 {
         self.s21_im.atan2(self.s21_re).to_degrees()
+    }
+}
+
+/// Convert a linear S-parameter magnitude to dB, with the crate-wide
+/// **−300 dB floor** and the **`1e-15` stability threshold** (review §D.7 —
+/// the single source of truth for the magnitude→dB convention; `s11_db` /
+/// `s21_db` and every other dB-producing site route through this).
+///
+/// * `mag <= 1e-15` → exactly `−300.0` (finite, JSON-serializable).
+/// * otherwise → `20·log10(mag)`.
+///
+/// The `1e-15` threshold (not `<= 0`) clamps the machine-epsilon null region
+/// (a true zero lands at `mag ~ 1e-17`, where `20·log10` amplifies run-to-run
+/// noise into a large, unstable dB swing) to a stable `−300.0`. This is what
+/// makes the dB at a transmission zero reproducible across runs / backends
+/// (the `cli_save_resume_e2e` deep-null gate and the CLI `−300`-floor tests
+/// depend on it).
+pub fn magnitude_to_db(mag: f64) -> f64 {
+    if mag <= 1e-15 {
+        -300.0
+    } else {
+        20.0 * mag.log10()
     }
 }
 
