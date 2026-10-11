@@ -14,14 +14,20 @@
   to a single `pub(crate) fn flip_sign_inplace(&mut self, index)` in
   `src/matrix/mod.rs`; `core::flip_sign` is a thin `clone + call` wrapper.
   The row/column-negation logic is byte-for-byte the old `inplace` body, so
-  the behaviour is unchanged. Regression test
+  the behaviour is unchanged. **Bit-exact A/B verified:** the same 9
+  prototype cases (orders 4–10, including even-order asymmetric filters
+  that exercise the sign flip) were synthesized and run on the pre-refactor
+  commit (`353f506~1`) and this commit; the `to_folded` matrices, the `to_ct` /
+  `to_cq` matrices (the `flip_sign_inplace` paths), and the 401-point folded
+  S-parameter responses came out **byte-identical** (5364-line dump, `diff`
+  empty). Regression test
   `matrix::core::flip_sign_negates_row_and_column_only_and_preserves_diagonal`
   pins the three semantics a naive edit breaks — the flipped node's diagonal
   is negated twice and comes out **unchanged** (the historical third-negation
   bug dropped transmission zeros for even-order asymmetric filters), only
   the flipped row/column change sign, and the immutable/in-place forms agree
-  entry-for-entry. Full suite green; `folding` benchmark (the `to_folded`
-  path) shows no measurable change.
+  entry-for-entry. All 289 `cargo test --lib` tests green; clippy clean
+  (default + `cli,python` features).
 
 - **§D.7 dB single source — library side closed.** A crate-wide shared
   helper `response::magnitude_to_db(mag) -> f64` (−300 dB floor at
