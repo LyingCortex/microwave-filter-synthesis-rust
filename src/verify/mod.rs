@@ -392,7 +392,7 @@ pub fn verify_against_spec(spec: &FilterSpec, response: &SParameterResponse) -> 
         // design that misses its RL at the band edges.
         let min_rl_db = passband
             .iter()
-            .map(|s| -db_from_mag(s.s11_mag()))
+            .map(|s| -s.s11_db())
             .fold(f64::INFINITY, f64::min);
         let required = spec.return_loss_db() - RETURN_LOSS_GATE_MARGIN_DB;
         gates.push(measured_gate(
@@ -417,7 +417,7 @@ pub fn verify_against_spec(spec: &FilterSpec, response: &SParameterResponse) -> 
     } else {
         let s21_dbs: Vec<f64> = passband
             .iter()
-            .map(|s| db_from_mag(s.s21_mag()))
+            .map(|s| s.s21_db())
             .collect();
         let max_db = s21_dbs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         let min_db = s21_dbs.iter().cloned().fold(f64::INFINITY, f64::min);
@@ -471,7 +471,7 @@ pub fn verify_against_spec(spec: &FilterSpec, response: &SParameterResponse) -> 
                     Some(indices) => {
                         let depth_db = indices
                             .iter()
-                            .map(|&i| db_from_mag(samples[i].s21_mag()))
+                            .map(|&i| samples[i].s21_db())
                             .fold(f64::INFINITY, f64::min);
                         gates.push(measured_gate(
                             &name,
@@ -500,16 +500,6 @@ pub fn verify_against_spec(spec: &FilterSpec, response: &SParameterResponse) -> 
     ));
 
     SpecCheckReport { gates }
-}
-
-/// Magnitude (linear) to dB with the −300 dB zero-floor convention shared
-/// by `ResponseSample::s*_db`, so exact nulls stay finite and serializable.
-fn db_from_mag(mag: f64) -> f64 {
-    if mag <= 0.0 {
-        -300.0
-    } else {
-        20.0 * mag.log10()
-    }
 }
 
 /// Builds a Pass/Fail gate result (Skipped is built by [`skipped_gate`]).
