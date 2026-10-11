@@ -22,8 +22,37 @@ pub(crate) mod rotations;
 mod scaling;
 mod sections;
 
+
 pub use builder::CouplingMatrixBuilder;
 pub use core::{BandPassScaledCouplingMatrix, CouplingMatrix, MatrixShape, MatrixTopology};
+
+impl CouplingMatrix {
+    /// Apply a similarity sign flip to resonator `index` **in place**.
+    ///
+    /// A proper similarity flip `R·M·Rᵀ` with `R[i][i] = −1` negates row
+    /// `i` and column `i`; the diagonal element is thereby negated twice
+    /// and is left **unchanged**. It must NOT be negated a third time —
+    /// that bug flipped the self-coupling sign of any flipped node and
+    /// corrupted the response (lost transmission zeros) for even-order
+    /// asymmetric filters (see `docs/folded-fidelity-flip-sign-fix.md`).
+    ///
+    /// This is the single shared implementation; the immutable
+    /// `flip_sign` (used by `to_folded`) and the sections-module
+    /// wrapper are both clone/call-and-return or in-place calls over it.
+    pub(crate) fn flip_sign_inplace(&mut self, index: usize) {
+        let side = self.side();
+        // Negate row `index`.
+        for col in 0..side {
+            let val = self.data[index * side + col];
+            self.data[index * side + col] = -val;
+        }
+        // Negate column `index`.
+        for row in 0..side {
+            let val = self.data[row * side + index];
+            self.data[row * side + index] = -val;
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

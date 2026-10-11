@@ -356,28 +356,6 @@ impl CouplingMatrix {
             }
         }
     }
-
-    // TODO: This mirrors `CouplingMatrix::flip_sign` in `src/matrix/core.rs`
-    // (same row/column negation, same diagonal preservation), differing only
-    // in mutating in place instead of returning a new matrix. Keep the two in
-    // sync: a similarity sign flip must leave the diagonal unchanged
-    // (R*M*R^T with R[i][i] = -1). If one is edited, the other must be checked
-    // too. Consider deduplicating into a single shared helper.
-    // Dead only under the default features: used by
-    // `ensure_positive_main_couplings`, which the extract_* topology methods
-    // call. Kept per the P7 dead-code policy.
-    #[allow(dead_code)]
-    fn flip_sign_inplace(&mut self, index: usize) {
-        let side = self.side();
-        for col in 0..side {
-            let val = self.data[index * side + col];
-            self.data[index * side + col] = -val;
-        }
-        for row in 0..side {
-            let val = self.data[row * side + index];
-            self.data[row * side + index] = -val;
-        }
-    }
 }
 
 impl CouplingMatrix {

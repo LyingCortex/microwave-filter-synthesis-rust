@@ -356,31 +356,16 @@ impl CouplingMatrix {
         }
     }
 
-    // TODO: This mirrors `CouplingMatrix::flip_sign_inplace` in
-    // `src/matrix/sections.rs` (same row/column negation, same diagonal
-    // preservation), differing only in returning a new matrix instead of
-    // mutating in place. Keep the two in sync: a similarity sign flip must
-    // leave the diagonal unchanged (R*M*R^T with R[i][i] = -1). If one is
-    // edited, the other must be checked too. Consider deduplicating into a
-    // single shared helper.
+    /// Immutable similarity sign flip: returns a new matrix with resonator
+    /// `diagonal_index`'s row and column negated (diagonal unchanged).
+    ///
+    /// Delegate to the shared [`CouplingMatrix::flip_sign_inplace`] in
+    /// `src/matrix/mod.rs` — the single source of truth for the row/column
+    /// negation (diagonal-preservation) semantics. Do not re-introduce a
+    /// second copy of the loops here.
     fn flip_sign(&self, diagonal_index: usize) -> Self {
-        let side = self.side();
         let mut result = self.clone();
-        // Negate row `diagonal_index`
-        for col in 0..side {
-            result.data[diagonal_index * side + col] = -result.data[diagonal_index * side + col];
-        }
-        // Negate column `diagonal_index`
-        for row in 0..side {
-            result.data[row * side + diagonal_index] = -result.data[row * side + diagonal_index];
-        }
-        // The diagonal element has now been negated twice (once by the row
-        // negation, once by the column negation), so it is back to its original
-        // value. A proper similarity flip R*M*R^T (R[i][i] = -1) leaves the
-        // diagonal unchanged, so we must NOT negate it a third time. Negating
-        // it again here was a bug that flipped the self-coupling sign of any
-        // flipped node, corrupting the response (lost transmission zeros) for
-        // even-order asymmetric filters.
+        result.flip_sign_inplace(diagonal_index);
         result
     }
 
@@ -658,5 +643,59 @@ mod tests {
             matches!(err, MfsError::PreconditionViolation(_)),
             "a relative-1e-6 asymmetric pair must be rejected, got {err:?}"
         );
+    }
+
+    /// Regression for the similarity sign flip (`R·M·Rᵀ`, `R[i][i] = -1`).
+    ///
+    /// Pins the two semantics that a naive "restore the diagonal" edit
+    /// breaks: (a) the diagonal element of the flipped node is negated
+    /// twice (row + column) and must come out **unchanged** — the historical
+    /// bug negated it a third time, flipping the self-coupling sign and
+    /// silently dropping transmission zeros for even-order asymmetric
+    /// filters (see `docs/folded-fidelity-flip-sign-fix.md`); (b) the flip
+    /// must not touch any entry outside the flipped node's row/column. Also
+    /// pins that the immutable `flip_sign` and the in-place
+    /// `flip_sign_inplace` (the shared helper both delegate to) agree
+    /// bit-for-bit, so the deduplicated path cannot drift.
+    #[test]
+    fn flip_sign_negates_row_and_column_only_and_preserves_diagonal() {
+        // Symmetric order-2 (side 4) prototype with **nonzero diagonals** so
+        // diagonal preservation is observable, and a negative self-coupling
+        // on the flipped node so "negate once" vs "negate twice" differ.
+        let mut d = symmetric_data();
+        d[0] = 0.1; d[5] = -0.2; d[10] = 0.3; d[15] = -0.4;
+        let m = CouplingMatrix::new_with_topology(2, MatrixTopology::Transversal, d.clone()).unwrap();
+
+        let flipped = m.flip_sign(1); // resonator 1 (M[1][1] = -0.2)
+        // (a) diagonal of the flipped node is UNCHANGED (not negated a 3rd time).
+        assert_eq!(flipped.data[5], -0.2, "diagonal must survive the similarity flip");
+        // all other diagonals untouched
+        assert_eq!(flipped.data[0], 0.1);
+        assert_eq!(flipped.data[10], 0.3);
+        assert_eq!(flipped.data[15], -0.4);
+        // (b) row 1 and column 1 off-diagonals are negated. (row-major:
+        // data[row*4+col]; row 1 = indices 4..8, column 1 = 1,5,9,13.)
+        assert_eq!(flipped.data[1], -0.8);  // M[0][1] col 1
+        assert_eq!(flipped.data[9], -0.6);  // M[2][1] col 1 (chain 0.6)
+        assert_eq!(flipped.data[13], -0.7); // M[3][1] col 1
+        assert_eq!(flipped.data[4], -0.8);  // M[1][0] row 1
+        assert_eq!(flipped.data[6], -0.6);  // M[1][2] row 1
+        assert_eq!(flipped.data[7], -0.7);  // M[1][3] row 1
+        // (c) entries outside row/column 1 are untouched (the failure that
+        // motivated this: a buggy negation of index 2 would make it -0.5).
+        assert_eq!(flipped.data[2], 0.5);   // M[0][2]
+        assert_eq!(flipped.data[8], 0.5);   // M[2][0]
+        assert_eq!(flipped.data[3], 0.0);   // M[0][3] (unset in fixture)
+        assert_eq!(flipped.data[11], 0.4);  // M[2][3]
+        assert_eq!(flipped.data[14], 0.4);  // M[3][2]
+
+        // Equivalence: the in-place shared helper and the immutable wrapper
+        // must agree entry-for-entry.
+        let mut in_place = m.clone();
+        in_place.flip_sign_inplace(1);
+        assert_eq!(in_place.data, flipped.data, "flip_sign must equal clone+flip_sign_inplace");
+
+        // A second flip is the identity (similarity flips are involutions).
+        assert_eq!(flipped.flip_sign(1).data, d, "double flip must restore the matrix");
     }
 }

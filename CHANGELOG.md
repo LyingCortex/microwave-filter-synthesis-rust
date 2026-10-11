@@ -2,6 +2,64 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **`flip_sign` / `flip_sign_inplace` deduplicated into one shared helper.**
+  Two copies of the similarity sign flip (`R·M·Rᵀ`, `R[i][i] = -1`: negate
+  resonator `i`'s row and column, leaving the diagonal unchanged) lived in
+  `matrix::core` (`flip_sign`, the immutable `&self -> Self` form used by
+  `to_folded`) and `matrix::sections` (`flip_sign_inplace`, the `&mut self`
+  form used by the python-feature CT/CQ `extract_*` topology methods),
+  cross-referenced by two "consider deduplicating" TODOs. Both now delegate
+  to a single `pub(crate) fn flip_sign_inplace(&mut self, index)` in
+  `src/matrix/mod.rs`; `core::flip_sign` is a thin `clone + call` wrapper.
+  The row/column-negation logic is byte-for-byte the old `inplace` body, so
+  the behaviour is unchanged. Regression test
+  `matrix::core::flip_sign_negates_row_and_column_only_and_preserves_diagonal`
+  pins the three semantics a naive edit breaks — the flipped node's diagonal
+  is negated twice and comes out **unchanged** (the historical third-negation
+  bug dropped transmission zeros for even-order asymmetric filters), only
+  the flipped row/column change sign, and the immutable/in-place forms agree
+  entry-for-entry. Full suite green; `folding` benchmark (the `to_folded`
+  path) shows no measurable change.
+
+- **§D.7 dB single source — library side closed.** A crate-wide shared
+  helper `response::magnitude_to_db(mag) -> f64` (−300 dB floor at
+  `mag <= 1e-15`, else `20·log10(mag)`) is now the single source of truth for
+  every magnitude→dB conversion. The seven library hand-rolled lambdas
+  (`duplexer.rs` antenna-S11 + isolation + the common-domain `to_db`;
+  `multiplexer.rs` geometric-mean S11 + pairwise isolation + the
+  `response_admittance`/`response_matrix` dB; `synthesis/machiarella.rs`
+  `junction_response` `to_db`) and the public `ResponseSample::s11_db()`/
+  `s22_db()` all route through it. The `s*_db` threshold tightens from
+  `mag <= 0.0` to `mag <= 1e-15`, which clamps the machine-epsilon null
+  region (a true transmission zero lands at `mag ~ 1e-17`) to a *stable*
+  −300.0 — previously `20·log10(1e-17)` amplified run-to-run residual noise
+  into a large, unstable dB swing. This is what makes the `cli_save_resume_
+  e2e` deep-null gate and the CLI −300-floor tests reproducible. No test pins
+  the old `(0, 1e-15]` window; the full suite is green. The `multiplexer.rs`
+  `peak_db` `NEG_INFINITY` site is a *degeneracy sentinel* (a fully-reflective
+  channel has no passband), not a serialization floor, and is intentionally
+  left distinct.
+
+### Added
+
+- **CI wheel/pyo3 build + FFI gate** (`.github/workflows/ci.yml` `wheel`
+  job, Linux). The Python wheel was previously built only by the manual
+  `scripts/build_wheel.sh` (needs uv + docker), so the cdylib/FFI path had no
+  CI gate: a breaking change in the `python` feature or the pyo3 surface
+  would surface only at wheel-build time, downstream. The job builds the
+  wheel with the same `uv build --wheel` command as `build_wheel.sh`,
+  installs it into a clean venv, and asserts a pure-Rust-computation value —
+  the k12 coupling of a 4th-order RL=20 dB filter, stable across glibc
+  2.35→2.39 (libm has no algorithm change there) — against the Rust-side
+  reference to 1e-6 (the same cross-glibc tolerance `build_wheel.sh` uses).
+  The glibc-2.36 *runtime* load check still needs docker + credentials (out
+  of scope for CI; see review-findings §F).
+
+
+## [0.6.2] — 2026-10-11
+
 ### Added
 
 - **Fast-path group delay (pole-expansion).** `PoleExpansionData::evaluate_at`
@@ -32,7 +90,10 @@
   values, so it agrees with the FD reference to machine precision (0.000 ps)
   and sits 16.6 ps from the analytic fast path on both sides. Measured O(N):
   1801-pt sweep **2.0 µs/pt** (prototype) / **2.2 µs/pt** (bandpass) with the
-  derivative active.
+  derivative active. **Check 3 is reproducible** from the consumer repo at
+  `fuqtgui/src/scripts/verify_fastpath_gd.py` (needs this version + skrf in the
+  venv; `uv run python src/scripts/verify_fastpath_gd.py`, exit 0 on pass).
+  Checks 1–2 are the permanent CI legs (Rust test, no third-party dep).
 
 - **Whole-crate code review of 0.6.1 (2026-10-09).**
   `docs/internal/review-findings-0.6.1.md`: six parallel read-only review
