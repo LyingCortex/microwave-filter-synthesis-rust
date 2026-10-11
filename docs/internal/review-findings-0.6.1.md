@@ -559,10 +559,12 @@ second-pass slice findings, distinct from the round-1 P1/P2/P3):
    change; lesson: after reverting/re-applying edits, verify against a fresh
    binary before diagnosing a "flake".
 
-**Current open items (2026-10-11, after the group-delay non-finding):** no
-confirmed defect remains open — the 3 P1s, 14 P2s (P2-1..14), all 11 P3s, and
-the 8 round-2 findings (C2/C3/F1..F6 + the two `—` rows) are all FIXED. Status
-of the §C/§D follow-ups:
+**Third-pass closure (2026-10-11, §I):** §C risks 1–7 and §D items 3/5/6/7
+were the last open follow-ups; all are now closed (§I). The remaining open
+items after this session: §D.1/.2/.4/.8 (already satisfied at second pass)
+are unchanged; no confirmed defect remains open.
+
+**Status at 2026-10-10 (superseded by §I):** no confirmed defect remains open
 
 - **§C risks 1–7: open** (not closed in-repo; no known production trigger):
   faer backward-residual gate width (1e-3), companion-fallback para-product
@@ -597,3 +599,85 @@ of the §C/§D follow-ups:
   (FFI statically reviewed only).
 
 
+# I. Third-pass closure (2026-10-11)
+
+Five parallel slices closed the last open items (§C.1–C.7, §D.3/D.5/D.6/D.7,
+and the four §F "not executed" legs). All changes are on top of the committed
+round 1+2 wave (`8f3191a`).
+
+## I.1 §C risks 1–7 — verified closed
+
+| # | Location | Outcome | Evidence |
+|---|---|---|---|
+| C.1 | `complex_poly.rs` faer backward-residual gate | **VERIFIED-NO-ISSUE** — the gate is `max_backward ≤ 1e-3` accept; residuals in (1e-3, 1e-2) are **rejected** → fall through to Durand-Kerner/Aberth (safe direction). Production polynomials probed orders 4..40: backward residual ≤ ~1e-5, none in the band. | `faer_gate_does_not_fire_on_production_polynomials_up_to_order_40` (PASS); comment at `complex_poly.rs:770` |
+| C.2 | `spectral.rs` `select_lhp_roots` last-resort fill | **FIXED** — the fill now admits only strictly-LHP roots (`re < -1e-9`); a short LHP pass can no longer pull in an RHP or pure-imaginary root. The companion fallback's para-product backstop (C2, round 2) stays as the magnitude check. | `select_lhp_roots_fill_rejects_rhp_when_lhp_short` (PASS) |
+| C.3 | `spectral.rs` high-order normal-equation conditioning | **VERIFIED-NO-ISSUE (perf only)** — at order 40 the cepstrum path falls through to the companion fallback; the fallback is correct (O(N log N) intent lost, no correctness/timeout issue). Measured 50.8 ms at order 40. | Measurement only; no code change |
+| C.4 | `matrix/scaling.rs` external-Q convention | **VERIFIED-NO-ISSUE (anchor added)** — the `g²` convention is self-consistent: order-1 RL=20 BP `Qse = 2·f0/BW3dB` matches `1/(M01²·Δ)` to <1%; the "standard" `1/(M01·Δ)` is off by `M01` (rel diff 1.23). The g² convention is now pinned by a physical order-1 test. | `external_q_convention_matches_physical_order1_bandpass` (PASS) |
+| C.5 | `machiarella.rs` `FullIterationState` one-iteration lag | **VERIFIED-NO-ISSUE (documented)** — the lag is real and bounded by the convergence error (< `STAGNATION_ACCEPT` 1e-3); it is now documented at the capture site. Fixing it would change convergence behavior and is not worth the risk. | Comment at `machiarella.rs:656` |
+| C.6 | `machiarella.rs` `to_proto` misleading error | **FIXED** — the "non-finite root set" error now names the actual cause (out-of-range finite root |r| ≥ 50). The pre-existing message-assertion test was aligned to the new message. | `machiarella.rs:608`; existing test aligned |
+| C.7 | `mfs_cli` optimize/extract grid contract | **FIXED (guard + docs)** — the normalized contract is documented, and a magnitude guard rejects physical-Hz grids (span > 1e6 → `PreconditionViolation("NORMALIZED…")`). Feeding a real .s2p no longer "converges" at ±6e9 normalized frequency. | `response_grid_rejects_physical_hz_and_accepts_normalized` (PASS); `optimize.rs:122-150`, `main.rs:176-119` |
+
+## I.2 §D architecture items
+
+- **§D.3 (verify absolute spec checks) — FIXED.** `verify::verify_against_spec`
+  now checks a response **against a `FilterSpec`** (not just two responses
+  against each other): passband return loss (min passband RL ≥ spec − 0.1 dB
+  margin), passband insertion loss (|S21| in [−1, +0.5] dB), transmission-zero
+  depth (≤ −40 dB within ±2 grid steps; infinite zeros → Skipped), and
+  stopband rejection (always Skipped — `FilterSpec` carries no normalized
+  stopband requirement; documented). Missing data → `Skipped`, never a silent
+  `Pass` (P3 #2 semantics). Exposed in `lib.rs`/`prelude.rs` alongside
+  `CheckOutcome`.
+- **§D.5 (split `mfs_cli.rs`) — FIXED.** The 1911-line `src/bin/mfs_cli.rs`
+  is split into `src/bin/mfs_cli/` — `main.rs` (entry/dispatch),
+  `design.rs`, `multiplexer.rs`, `optimize.rs`, `target.rs` (shared
+  `parse_response_json`/`parse_matrix_json`/`load_target`), `io.rs`
+  (error/tables/formats). Line-by-line move, no CLI flag/help/output change.
+- **§D.7 (dB single source) — FIXED.** All five hand-rolled
+  `10·log10(re²+im²)` sites in the CLI route through
+  `ResponseSample::s11_db()`/`s21_db()` (−300 dB floor at zero magnitude —
+  no more `null` at a true transmission zero). The raw-array `min_db`/`max_db`
+  in `multiplexer.rs` operates on library-precomputed `Vec<f64>` dB (no
+  `ResponseSample`), left as-is with a §D.7 citation.
+- **§D.6 (save/resume closed-loop e2e in CI) — FIXED.** New
+  `tests/cli_save_resume_e2e.rs` (gated `cli` feature) runs the permanent
+  successor to the deleted P3 #11 harness: `mfs_cli --input` (full pipeline)
+  vs `mfs::pipeline::save_context` + `mfs_cli --resume` must reproduce the
+  same response — non-zero samples within 1e-9 dB, transmission-zero samples
+  as deep S21 nulls in both runs. Zero-point is a deep-null assertion
+  (≤ −60 dB S21 + near-total S11), not bit-equal dB (20·log10 amplifies the
+  ~1e-17 residual into a large dB swing). The exact CI command
+  (`cargo test --features cli --test cli_integration --test cli_save_resume_e2e`)
+  is wired into `.github/workflows/ci.yml`.
+
+## I.3 §F "not executed" legs
+
+- **bench-data conformance tiers — EXECUTED (green).**
+  `cargo test --test benchmark_standard` → 20/0 (both the sibling byte-for-byte
+  tier and the manifest sha256 tier ran; the sibling is present in this
+  environment, correcting the "only tier available" framing).
+  `folded_response_invariance` → 10/0.
+- **Python wheel build — PARTIAL → FIXED (script repaired).** The maturin
+  wheel builds and installs (k12 = 0.414467071, bit-identical to the Rust
+  probe). The script's wheel-ID glob aborted on maturin's `linux_x86_64`
+  output (no `patchelf` on this WSL2 host); `scripts/build_wheel.sh` is now
+  patched to accept and repair the untagged wheel. **Docker-based glibc-2.36
+  verification was blocked by a dead containerd daemon in this environment** —
+  the repaired wheel's max GLIBC requirement is statically verified as
+  `GLIBC_2.35` (verneed nodes), so it is installable/importable on glibc ≥ 2.35.
+- **`python`-feature runtime — EXECUTED (no longer "statically reviewed only").**
+  `import mfs` + `bandpass`/`duplexer`/`prototype` all run through pyo3 at
+  runtime; `extract`/`bandpass_edges` present and callable.
+- **non-Linux platforms — NOT-EXECUTABLE-HERE (CI coverage).** No
+  macOS/Windows toolchain in WSL2; `ci.yml` runs the 3-OS × 2-rust matrix for
+  test and cli jobs. **Gap noted:** `ci.yml` has no job that builds the Python
+  wheel or runs the pyo3 runtime (a delivery risk worth a future CI job).
+
+## I.4 Third-pass verification
+
+Recorded in the commit message and re-run at the end of this session:
+`cargo test --all-targets` (all green),
+`cargo clippy --all-targets -- -D warnings` (0),
+`cargo clippy --features cli,python --all-targets -- -D warnings` (0),
+`cargo doc --no-deps` (clean), and the exact CI command for the save/resume
+gate.

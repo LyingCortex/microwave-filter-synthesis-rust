@@ -605,9 +605,42 @@ pub fn run_full_iteration(
         let mut max_delta = 0.0_f64;
         for i in 0..n {
             if new_proto[i].len() != orders[i] {
-                return Err(MfsError::NumericalFailure(
-                    "Full iteration produced a non-finite root set".into(),
-                ));
+                // §C.6: `to_proto` drops *both* non-finite roots and finite
+                // roots with |r| ≥ 50 (the historical stability filter). The
+                // old message ("non-finite root set") was misleading for the
+                // finite-but-out-of-range case — classify the offending mapped
+                // root and report what actually happened, naming it.
+                let slot = block_idx
+                    .iter()
+                    .position(|&c| c == i)
+                    .expect("block_idx is a permutation of channels");
+                let (a, b) = (states_in[i].a, states_in[i].b);
+                let dropped = orders[i].saturating_sub(new_proto[i].len());
+                let offending = blocks[slot].iter().find_map(|&r| {
+                    let mapped = (r - Complex64::new(0.0, b)) / a;
+                    if !mapped.re.is_finite() || !mapped.im.is_finite() {
+                        Some(format!("non-finite mapped root {r}"))
+                    } else if mapped.norm() >= 50.0 {
+                        Some(format!(
+                            "finite root {r} (prototype |r| = {:.3} >= 50, dropped)",
+                            mapped.norm()
+                        ))
+                    } else {
+                        None
+                    }
+                });
+                let detail = offending
+                    .map(|o| format!(", e.g. {o}"))
+                    .unwrap_or_default();
+                return Err(MfsError::NumericalFailure(format!(
+                    "Full iteration: channel {i} (center {} Hz) lost {} of {} \
+                     prototype roots during the common->prototype map because \
+                     they are non-finite or |r| >= 50{detail}; expected {} roots",
+                    states_in[i].center_hz,
+                    dropped,
+                    orders[i],
+                    orders[i],
+                )));
             }
             max_delta = max_delta.max(compute_root_displacement(&s_roots[i], &new_proto[i]));
         }
@@ -623,6 +656,19 @@ pub fn run_full_iteration(
                 && stagnant >= STAGNATION_WINDOW
                 && best_delta < STAGNATION_ACCEPT
         {
+            // §C.5: captured at convergence, but note the one-iteration lag.
+            // `d_poly`/`pts`/`p0_sq` were computed from `s_roots` *before* the
+            // update `s_roots = new_proto` (above), so `common.{d,pt,p0_sq}`
+            // describe the junction as of iteration k while the returned
+            // `s_roots` field is iteration k+1. The two are therefore off by
+            // one iteration: `common` (which feeds the junction-level output
+            // `junction_response`) lags `s_roots` (which feeds per-channel
+            // recovery) by exactly this iteration's root displacement, which is
+            // reported as the returned `convergence_error` — < convergence_tol
+            // on the strict-convergence path, and O(best_delta <
+            // STAGNATION_ACCEPT, 1e-3) when accepted by stagnation. It is not
+            // recomputed from the final `s_roots` because doing so would change
+            // the captured output (convergence behavior).
             conv = Some((n_poly.clone(), d_poly, pts, p0_sq));
             break;
         }

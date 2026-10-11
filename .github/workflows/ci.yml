@@ -39,8 +39,10 @@ jobs:
   # The `mfs_cli` binary is gated behind the `cli` feature (required-features),
   # so the default `cargo test --all-targets` above never builds it and
   # `tests/cli_integration.rs` compiles to zero tests. This job builds the
-  # binary and runs the black-box end-to-end gate on every OS — including the
-  # D3-opt optimizer subcommands (`optimize` / `extract`).
+  # binary and runs its black-box end-to-end gate on every OS:
+  # - the binary's own unit tests (feature-gated code otherwise never linted), and
+  # - the integration suites in `tests/cli_integration.rs` and
+  #   `tests/cli_save_resume_e2e.rs` (the save/resume closed-loop gate).
   cli:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -55,7 +57,14 @@ jobs:
       # symmetry invariant was sunk into `new_with_topology` because this
       # feature-gated binary was otherwise only built + integration-tested.
       - run: cargo test --features cli --bin mfs_cli
-      - run: cargo test --features cli --test cli_integration
+      # The save/resume closed-loop e2e gate (review §D.6 / P3 #11):
+      # `mfs_cli --input` (full pipeline) vs `mfs::pipeline::save_context` +
+      # `mfs_cli --resume` must reproduce the same response — non-zero samples
+      # within 1e-9 dB, and the transmission-zero samples as deep S21 nulls in
+      # both runs. This is the permanent successor to the deleted temporary
+      # P3 #11 `examples/` harness. Runs in the same job as `cli_integration`
+      # (both need the `cli` feature; the binary is already built above).
+      - run: cargo test --features cli --test cli_integration --test cli_save_resume_e2e
 
   # The `cli` and `python` features hide code behind required-features /
   # optional deps that the default `clippy` job never compiles, so their

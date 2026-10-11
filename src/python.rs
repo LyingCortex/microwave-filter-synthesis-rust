@@ -201,8 +201,12 @@ impl PyFilterDesign {
     /// Computes full S-parameter response with all fields.
     ///
     /// Returns a list of dicts with keys: freq, s21_db, s11_db, s21_mag, s11_mag,
-    /// s21_phase, s11_phase, group_delay (float, or None where the solver path
-    /// does not compute group delay).
+    /// s21_phase, s11_phase, group_delay. `group_delay` is in **normalized
+    /// prototype units** (`dτ/dω`, ω the normalized coordinate) — *not* seconds.
+    /// For a band-pass design, seconds = `group_delay·(1/FB)(1/fc + fc/f²)/(2π)`,
+    /// FB = bw/fc (see `ResponseSample::group_delay` for the full convention and
+    /// the per-hertz vs per-radian 2π trap). `None` where the solver path does
+    /// not compute group delay (or the expression is degenerate at a zero).
     #[pyo3(signature = (start=None, stop=None, points=201))]
     fn response_full(
         &self,

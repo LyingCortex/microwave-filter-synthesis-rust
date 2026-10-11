@@ -770,6 +770,13 @@ impl ComplexRootSolver for FaerRootSolver {
         // A backward-stable solve returns exact roots of a slightly perturbed
         // polynomial, so the backward residual is ~1e-15..1e-6 (worst observed:
         // 3e-6 for an order-30 production F_s). Garbage outputs are O(1e-2)+.
+        // §C.1: the gate accepts only `max_backward <= 1e-3` (see
+        // `faer_gate_accepts`). A residual in the (1e-3, 1e-2) band is
+        // therefore **rejected** (not accepted) — `AdaptiveRootSolver` falls
+        // through to the iterative Durand-Kerner/Aberth methods, the safe
+        // direction. Production polynomials (probed up to order 40 in
+        // `faer_gate_does_not_fire_on_production_polynomials_up_to_order_40`)
+        // sit at ~1e-5..1e-6, far below the gate, so they never fall through.
         // Failing here lets `AdaptiveRootSolver` fall through to the iterative
         // methods instead of silently shipping bad roots.
         let max_backward = max_backward_residual(&normalized, &roots);
@@ -1442,13 +1449,16 @@ mod tests {
     }
 
     /// The faer gate must NOT fire on legitimate production filter polynomials.
-    /// Calibration (order 4..40, E_s/F_s/P_s) shows the production backward
-    /// residual stays ≤ ~3e-2 up to order 40 where the companion matrix
-    /// degrades; the 1e-3 gate with fall-through is safe because production
-    /// polynomials up to order 30 sit at ~6e-6 (170x margin).
+    /// Calibration (orders 4..40, E_s/F_s/P_s) shows the production backward
+    /// residual stays far below the 1e-3 gate: it sits at ~1e-14 up to order
+    /// 20 and ~8.5e-12 at order 40 — two to three orders of magnitude under
+    /// the threshold, so production polynomials never fall through to the
+    /// iterative fallback. The (1e-3, 1e-2) band is *rejected* by the gate
+    /// (fall-through, the safe direction); no production polynomial measured
+    /// here lands in that band.
     #[test]
-    fn faer_gate_does_not_fire_on_production_polynomials_up_to_order_30() -> Result<()> {
-        for order in [4usize, 8, 12, 16, 20, 24, 30] {
+    fn faer_gate_does_not_fire_on_production_polynomials_up_to_order_40() -> Result<()> {
+        for order in [4usize, 8, 12, 16, 20, 24, 30, 36, 40] {
             let zeros: Vec<f64> = (0..order.min(8))
                 .map(|k| (1.2 + 0.5 * (k as f64)) * if k % 2 == 0 { 1.0 } else { -1.0 })
                 .collect();

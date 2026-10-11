@@ -69,5 +69,5 @@ crate-type = ["cdylib", "rlib"]
 
 [[bin]]
 name = "mfs_cli"
-path = "src/bin/mfs_cli.rs"
+path = "src/bin/mfs_cli/main.rs"
 required-features = ["cli"]

@@ -318,11 +318,20 @@ fn select_lhp_roots(all_roots: &[Complex64], target_count: usize) -> Vec<Complex
         }
     }
 
-    // Fill remaining with closest-to-LHP roots
+    // Fill remaining with closest-to-LHP roots.
+    //
+    // §C.2: the last-resort fill must only admit strictly-LHP roots
+    // (`re < -1e-9`). Without the guard, a short LHP pass (numerical noise or
+    // a non-spectral R) could pull in a right-half-plane or pure-imaginary
+    // root, producing a silent non-minimum-phase factor. Rejecting those
+    // roots here leaves `stable` short; `companion_spectral_factor` then
+    // builds a lower-degree D whose `|D(jω)|² ≠ R(jω)` para-product identity
+    // is caught by `spectral_factor`'s verification (the backstop, ~:403) as
+    // a typed `NumericalFailure`, never a silent RHP root.
     if stable.len() < target_count {
         let mut remaining: Vec<(usize, f64)> = indices
             .iter()
-            .filter(|&&i| !used[i] && all_roots[i].re.is_finite())
+            .filter(|&&i| !used[i] && all_roots[i].re.is_finite() && all_roots[i].re < -1e-9)
             .map(|&i| (i, all_roots[i].re))
             .collect();
         remaining.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -393,12 +402,15 @@ pub fn spectral_factor(
     }
 
     // Fallback: companion matrix (adaptive, faer-gated) approach. The result
-    // must also pass the para-product verification. `select_lhp_roots` can admit
-    // a right-half-plane root when the LHP count is short (its last-resort fill
-    // has no sign check); a wrong-magnitude factor — the kind that corrupts the
-    // downstream coupling matrices — only the `|D(jω)|² = R(jω)` identity check
-    // distinguishes from a correct one. (Minimum-phase *selection* is the LHP
-    // bias in `select_lhp_roots`; the verification is the magnitude backstop.)
+    // must also pass the para-product verification. Since §C.2 the
+    // `select_lhp_roots` last-resort fill admits only strictly-LHP roots
+    // (`re < -1e-9`), so it can no longer silently pull in an RHP or
+    // pure-imaginary root; if the LHP pass is short it instead returns a
+    // lower-degree factor. That wrong-degree / wrong-magnitude factor — the
+    // kind that corrupts the downstream coupling matrices — is rejected here
+    // because its `|D(jω)|² = R(jω)` identity fails. (Minimum-phase
+    // *selection* is the LHP bias in `select_lhp_roots`; the verification is
+    // the magnitude backstop.)
     let d = companion_spectral_factor(r_poly, target_degree)?;
     if !para_product_verified(r_poly, &d) {
         return Err(MfsError::NumericalFailure(
@@ -647,6 +659,36 @@ mod tests {
             para_product_verified(&r_real, &d_max),
             "max-phase anti-factor of real R ALSO passes (magnitude is identical)"
         );
+        Ok(())
+    }
+    /// §C.2 regression: the last-resort fill must NOT admit a right-half-plane
+    /// (or pure-imaginary) root when the LHP pass is short. Without the
+    /// `re < -1e-9` guard the fill pulls in the RHP root `(2,0)` to reach
+    /// `target_count`, producing a silent non-minimum-phase factor.
+    #[test]
+    fn select_lhp_roots_fill_rejects_rhp_when_lhp_short() -> Result<()> {
+        // One true LHP root, no mirror partner in the set, and two RHP roots
+        // that are the only candidates left once the LHP pass comes up short.
+        let all_roots = vec![
+            Complex64::new(-1.0, 0.0), // LHP
+            Complex64::new(2.0, 0.0), // RHP (the pre-fix fill target)
+            Complex64::new(3.0, 0.5), // RHP
+        ];
+
+        let picked = select_lhp_roots(&all_roots, 2);
+        assert_eq!(
+            picked.len(),
+            1,
+            "fill must not admit RHP roots to reach the target count; got {picked:?}"
+        );
+        // Every admitted root is strictly in the LHP; no RHP root leaks in.
+        for &r in &picked {
+            assert!(
+                r.re < -1e-9,
+                "admitted root {r} is not strictly in the LHP (fill guard failed)"
+            );
+        }
+        assert!((picked[0] - Complex64::new(-1.0, 0.0)).norm() < 1e-12);
         Ok(())
     }
 

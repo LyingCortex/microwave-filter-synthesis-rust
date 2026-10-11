@@ -75,7 +75,9 @@ z.close()
 SO = next(n for n in names if n.endswith(".so"))
 WP = next(n for n in names if n.endswith("dist-info/WHEEL"))
 RP = next(n for n in names if n.endswith("dist-info/RECORD"))
-src_tag = re.search(r"manylinux_\d+_\d+_x86_64", WH).group(0)
+# 输入标签：有 patchelf 时 manylinux_X_Y（maturin 自审计）；无 patchelf 时
+# 裸 linux（构建机 glibc 的 weak 符号绑定照样存在，ELF 修复照样能剥）。
+src_tag = re.search(r"(?:manylinux_\d+_\d+|linux)_x86_64", WH).group(0)
 dst_tag = "manylinux_" + TAG + "_x86_64"
 assert src_tag != dst_tag, "wheel 已是 manylinux_" + TAG
 
@@ -302,7 +304,11 @@ build() {
   local before f b
   before="$(ls dist/ 2>/dev/null || true)"
   uv build --wheel 2>&1 | tail -6
-  for f in dist/mfs-*-cp3*-cp3*-manylinux_*_x86_64.whl; do
+  # 构建机有 patchelf 时 uv/maturin 打 manylinux_*_x86_64；没有 patchelf 时
+  # maturin 只打 linux_x86_64（无 manylinux 标签）。两种都要能辨认，否则
+  # 构建成功却在这里 die（review 2026-10-11：WSL2 无 patchelf 的实测路径）。
+  for f in dist/mfs-*-cp3*-cp3*-manylinux_*_x86_64.whl \
+           dist/mfs-*-cp3*-cp3*-linux_x86_64.whl; do
     [ -e "$f" ] || continue
     b="${f##*/}"
     case "$before" in

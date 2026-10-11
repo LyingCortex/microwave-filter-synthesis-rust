@@ -136,6 +136,29 @@ remaining low-priority ecosystem items and the refuted passband-TZ work.
     analytic fast path on both sides. Measured O(N): 1801-pt sweep
     **2.0 µs/pt** (prototype) / **2.2 µs/pt** (bandpass) with the derivative
     active, release build.
+  - **Mistake recorded (2026-10-11) — 2π units slip in the *verification* FD
+    reference, misattributed to "FD truncation near the transmission zeros".**
+    Root cause: the cross-check built a finite-difference reference as
+    `−d(phase)/df` (per **hertz**), but group delay is `−dφ/dω` with
+    `ω = 2πf` — the reference was `2π`× too large, so `fast−FD` and
+    `skrf−FD` both read `(2π−1)·gd ≈ 85 ns`. I first (wrongly) wrote that up as
+    a genuine "85 ns FD truncation near the zeros, not a fast-path error" and
+    shipped it in two docs. Why it looked plausible: the offset was a smooth
+    function of |S21| and a *coarser* central difference, so the reflex
+    diagnosis was "truncation + steep phase." **How to catch it next time** —
+    the two tell-tale symptoms that rule out truncation and point at a
+    units/convention slip instead: (1) the error *does not shrink* when the
+    grid is refined (truncation would collapse ~16× at 16× finer Δf); (2) it
+    *grows with |S21|* toward the passband, opposite of where a zero-driven
+    steep-phase/ill-conditioning error would peak. A `2π`-family offset that
+    scales as `(2π−1)·max(gd)` is the signature of a per-hertz-vs-per-radian
+    (or missing `1/(2π)`) slip, not an algorithm bug. **Fix:** differentiate
+    w.r.t. `2πf` (i.e. `central_diff(2πf, S21)`), which makes the FD a genuine
+    ~20 ps independent anchor and skrf-vs-FD drop to machine precision —
+    confirming the fast path was correct all along. The units + conversion +
+    the two symptoms are now pinned on `ResponseSample::group_delay`
+    (`src/response/mod.rs`) and `response_full` (`src/python.rs`) so the next
+    reader hits the convention before reaching for a per-hertz derivative.
 
 
 ### Low priority (ecosystem)

@@ -96,7 +96,11 @@ pub use spec::{
 };
 pub use synthesis::MatrixSynthesisMethod;
 pub use transform::TopologyKind;
-pub use verify::{CheckOutcome, ResponseTolerance};
+pub use verify::{
+    verify_against_spec, CheckOutcome, ResponseTolerance, SpecCheckReport, SpecGateResult,
+    PASSBAND_MAX_IL_DB, PASSBAND_MIN_IL_DB, RETURN_LOSS_GATE_MARGIN_DB,
+    TRANSMISSION_ZERO_DEPTH_DB, TRANSMISSION_ZERO_WINDOW_STEPS,
+};
 
 #[deprecated(note = "use FilterDesign::bandpass()/prototype() or FilterSpec::builder()")]
 pub fn filter_spec<T>(

@@ -429,6 +429,100 @@
   `cargo clippy --features cli,python --all-targets -- -D warnings` clean;
   `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps` clean;
   `cargo bench --no-run` compiles.
+- **0.6.1 review third-pass closure (2026-10-11)** — the last open follow-ups
+  from the 0.6.1 review (the §C "risks needing verification" and the §D
+  architecture recommendations) are now closed, plus the four §F "not
+  executed" verification legs. All changes build on the round 1+2 wave
+  (`8f3191a`); details in `review-findings-0.6.1.md` §I.
+  - **§C.2 `select_lhp_roots` RHP fill** (`src/spectral.rs`): the last-resort
+    fill (reaching `target_count` when the LHP pass is short) had no `re < 0`
+    check and could admit a right-half-plane or pure-imaginary root — a silent
+    non-minimum-phase spectral factor feeding the full Machiarella path. The
+    fill now admits only strictly-LHP roots (`re < -1e-9`). New regression
+    `select_lhp_roots_fill_rejects_rhp_when_lhp_short`. (Closes the §C.2 risk
+    that the round-2 C2 `para_product_verified` backstop did **not** cover —
+    the backstop is a magnitude check, the fill was a min-phase *selection*
+    gap.)
+  - **§C.1 faer backward-residual gate** (`src/approx/complex_poly.rs`):
+    **verified, no issue.** The gate accepts `max_backward ≤ 1e-3` and
+    **rejects** residuals in (1e-3, 1e-2), falling through to Durand-Kerner /
+    Aberth (the safe direction). Probed on production E_s/F_s/P_s polynomials
+    at orders 4..40: backward residual ≤ ~1e-5, none in the band. New
+    regression `faer_gate_does_not_fire_on_production_polynomials_up_to_order_40`;
+    the gate comment now states the accept/reject semantics explicitly.
+  - **§C.3 high-order normal-equation conditioning** (`src/spectral.rs`):
+    **verified, perf-only.** At order 40 the cepstrum path falls through to
+    the (correct) companion fallback — the O(N log N) intent is lost but there
+    is no correctness or timeout problem. Measurement only, no code change.
+  - **§C.4 external-Q convention** (`src/matrix/scaling.rs`): **verified,
+    anchor added.** `Qe = 1/(M01²·Δ)` (vs the textbook `1/(M01·Δ)`) is
+    self-consistent under this code's coupling convention where `M01 = √rate`;
+    a physical order-1 RL=20 bandpass (`Qse = 2·f0/BW3dB`) matches `1/(M01²·Δ)`
+    to <1% and the `1/(M01·Δ)` form is off by a factor `M01`. New anchor
+    `external_q_convention_matches_physical_order1_bandpass`.
+  - **§C.5 `FullIterationState` one-iteration lag** (`src/synthesis/
+    machiarella.rs`): **verified, documented.** The lag is real and bounded by
+    the convergence error (< `STAGNATION_ACCEPT` = 1e-3); it now carries a
+    comment at the capture site. Fixing it would change convergence behavior;
+    not worth the risk.
+  - **§C.6 `to_proto` misleading error** (`src/synthesis/machiarella.rs`):
+    the "non-finite root set" error now names the actual cause — an out-of-range
+    *finite* root (|r| ≥ 50, the historical stability filter), which is distinct
+    from a genuinely non-finite root. The pre-existing message-assertion test
+    was aligned to the new message.
+  - **§C.7 CLI `optimize`/`extract` grid contract** (`src/bin/mfs_cli/
+    optimize.rs`, `main.rs`): the normalized contract is documented, and a
+    magnitude guard rejects a physical-Hz grid (span > 1e6 → typed
+    `PreconditionViolation`), so feeding a real `.s2p` no longer "converges"
+    the optimizer at ±6e9 normalized frequency. New regression
+    `response_grid_rejects_physical_hz_and_accepts_normalized`.
+  - **§D.3 absolute spec checks** (`src/verify/mod.rs`): new
+    `verify_against_spec(spec, response)` checks a response **against the
+    design spec** (which `compare_responses` — two responses agreeing — never
+    did): passband return loss (worst-case min RL ≥ spec − 0.1 dB), passband
+    insertion loss (|S21| in [−1, +0.5] dB), transmission-zero depth (≤ −40 dB
+    within ±2 grid steps; zeros at infinity → Skipped), and stopband rejection
+    (always Skipped — `FilterSpec` carries no normalized stopband requirement,
+    so there is nothing to gate on without inventing a requirement). Missing
+    data is `Skipped`, never a silent `Pass`. Exposed in `lib.rs`/`prelude.rs`.
+  - **§D.5 split `mfs_cli.rs`** (`src/bin/mfs_cli/`): the 1911-line
+    `src/bin/mfs_cli.rs` is now `main.rs` (entry/dispatch) + `design.rs` +
+    `multiplexer.rs` + `optimize.rs` + `target.rs` (shared
+    `load_target`/`parse_matrix_json`) + `io.rs`. Line-by-line move, no CLI
+    flag/help/output change.
+  - **§D.7 dB single source** (`src/bin/mfs_cli/io.rs`): the five hand-rolled
+    `10·log10(re²+im²)` sites in the CLI now route through
+    `ResponseSample::s11_db()`/`s21_db()` (−300 dB floor at zero magnitude — a
+    true transmission zero no longer serializes as `null`). The
+    `multiplexer.rs` `min_db`/`max_db` operate on library-precomputed `Vec<f64>`
+    dB (no `ResponseSample`) and are left as-is, cited for §D.7.
+  - **§D.6 save/resume closed-loop e2e in CI** (`tests/cli_save_resume_e2e.rs`,
+    `.github/workflows/ci.yml`): a permanent, CLI-side successor to the deleted
+    P3 #11 harness. `mfs_cli --input` (full pipeline) vs `mfs::pipeline::
+    save_context` + `mfs_cli --resume` must reproduce the same response —
+    non-zero samples within 1e-9 dB, transmission-zero samples as deep S21
+    nulls in both runs (deep-null assertion, not bit-equal dB: 20·log10
+    amplifies the ~1e-17 residual into a large dB swing). Wired into the CI
+    `cli` job's exact test command.
+  - **§F not-executed legs:** bench-data conformance tiers **executed green**
+    (`benchmark_standard` 20/0, both the sibling byte-for-byte and the manifest
+    sha256 tiers ran — the sibling is present here, correcting the "only tier
+    available" framing; `folded_response_invariance` 10/0). The Python **wheel
+    build** now produces an installable artifact (k12 = 0.414467071,
+    bit-identical to the Rust probe) and `scripts/build_wheel.sh` is patched to
+    recognize and repair maturin's untagged `linux_x86_64` output (no
+    `patchelf` on the build host) rather than aborting. The **python runtime**
+    was exercised through pyo3 (`import mfs` + `bandpass`/`duplexer`/
+    `prototype`; `extract`/`bandpass_edges` present) — no longer "statically
+    reviewed only". Non-Linux platforms remain **not executable here** (CI's
+    3-OS × 2-rust matrix is the coverage; a CI job for the wheel/pyo3 runtime
+    is a noted future gap).
+  **Verification (this wave):** `cargo test --all-targets` all green;
+  `cargo clippy --all-targets -- -D warnings` clean;
+  `cargo clippy --features cli,python --all-targets -- -D warnings` clean;
+  `cargo doc --no-deps` clean; the exact CI command
+  `cargo test --features cli --test cli_integration --test cli_save_resume_e2e`
+  green.
 
 ## [0.6.1] — 2026-10-07
 

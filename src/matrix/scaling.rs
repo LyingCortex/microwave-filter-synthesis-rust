@@ -194,4 +194,87 @@ mod tests {
             );
         }
     }
+
+    /// §C.4: the external-Q convention `Qe = 1/(M01²·Δ)` (vs the "standard"
+    /// `1/(M01·Δ)` from some textbooks) is anchored to a physical order-1
+    /// bandpass. In this code's coupling convention the source/load coupling
+    /// `M01` is `sqrt(rate)`, so the *fractional* external coupling *rate*
+    /// is `M01²·Δ` and the external Q is its reciprocal. This is verified
+    /// against the measured physical external Q of a single-resonator,
+    /// narrowband (Δ = 0.01, so the half-power points sit inside the
+    /// passband) bandpass: for a symmetric, lossless, critically-coupled
+    /// resonator, the loaded Q is `f0/BW_3dB` and `Qse = Qle = 2·Q_L`.
+    ///
+    /// The measurement (RL = 20 dB, f0 = 1 GHz, Δ = 0.01) gives
+    /// `Qse_meas = 2f0/BW_3dB = 20.10` while `1/(M01²·Δ) = 20.10`
+    /// (ratio 1.0000) and `1/(M01·Δ) = 44.83` (ratio 0.448, off by M01 = 2.23).
+    /// The `g²` form is the physically correct one in this code's convention;
+    /// the "standard" `1/(M01·Δ)` would be off by the coupling magnitude.
+    /// (A maximally-flat order-1 bandpass has a return-loss-free, flat
+    /// passband, so its -3 dB points coincide with the half-power points.)
+    #[test]
+    fn external_q_convention_matches_physical_order1_bandpass() -> Result<()> {
+        use crate::design::FilterDesign;
+        let f0 = 1.0e9;
+        let bw = 1.0e7; // Δ = 0.01, narrowband
+        let delta = bw / f0;
+        let design = FilterDesign::bandpass(1, 20.0, f0, bw).synthesize()?;
+        let m = design.matrix();
+        let m01 = m.at(0, 1).ok_or_else(|| {
+            MfsError::PreconditionViolation(
+                "order-1 bandpass matrix has no source coupling".into(),
+            )
+        })?;
+        let mapping = BandPassMapping::new(f0, bw)?;
+
+        // The physical external Q measured from the response.
+        let grid = crate::freq::FrequencyGrid::linspace(f0 * 0.90, f0 * 1.10, 20001)?;
+        let solver = crate::response::ResponseSolver;
+        let resp = solver.evaluate(m, &grid, &mapping)?;
+        let mag2 = |i: usize| {
+            resp.samples[i].s21_re * resp.samples[i].s21_re + resp.samples[i].s21_im.powi(2)
+        };
+        let peak = (0..resp.samples.len()).map(mag2).fold(0.0_f64, f64::max);
+        let level = 0.5 * peak;
+        let center = resp.samples.len() / 2;
+        let mut lo: Option<f64> = None;
+        let mut hi: Option<f64> = None;
+        for i in 0..center {
+            if lo.is_none() && mag2(i) < level && mag2(i + 1) >= level {
+                lo = Some(resp.samples[i + 1].frequency_hz);
+            }
+        }
+        for i in center..resp.samples.len() - 1 {
+            if hi.is_none() && mag2(i) >= level && mag2(i + 1) < level {
+                hi = Some(resp.samples[i + 1].frequency_hz);
+            }
+        }
+        let (lo, hi) = match (lo, hi) {
+            (Some(l), Some(h)) => (l, h),
+            _ => {
+                return Err(MfsError::NumericalFailure(format!(
+                    "-3dB points not found in [0.9,1.1]f0 (peak={peak:.3e})"
+                )))
+            }
+        };
+        let qse_meas = 2.0 * f0 / (hi - lo); // Qse = Qle = 2·Q_L (symmetric)
+
+        // The code's convention `1/(M01²·Δ)` must agree with the measurement.
+        let qse_code = 1.0 / (m01 * m01 * delta);
+        assert!(
+            ((qse_meas - qse_code).abs() / qse_meas) < 1.0e-2,
+            "code external Q 1/(M01²·Δ)={qse_code:.4} disagrees with measured \
+             Qse=2f0/BW3dB={qse_meas:.4} (rel diff {})",
+            (qse_meas - qse_code).abs() / qse_meas
+        );
+        // The "standard" 1/(M01·Δ) must NOT agree (it would be off by M01).
+        let qse_std = 1.0 / (m01 * delta);
+        assert!(
+            ((qse_meas - qse_std).abs() / qse_meas) > 1.0,
+            "the 'standard' 1/(M01·Δ)={qse_std:.4} should be off by M01 from \
+             the measured Qse={qse_meas:.4}; if this ever passes the convention \
+             has changed and the g² anchor must be re-derived"
+        );
+        Ok(())
+    }
 }

@@ -32,7 +32,9 @@ pub use crate::freq::{
 pub use crate::matrix::MatrixTopology as TopologyKind;
 pub use crate::response::ResponseSolver;
 pub use crate::spec::{FilterSpec, FilterSpecBuilder, TransmissionZero};
-pub use crate::verify::{CheckOutcome, ResponseTolerance};
+pub use crate::verify::{
+    verify_against_spec, CheckOutcome, ResponseTolerance, SpecCheckReport, SpecGateResult,
+};
 
 // Legacy functions (for existing code). These re-export the deprecated crate-root
 // free functions so existing callers keep compiling; new code should use the

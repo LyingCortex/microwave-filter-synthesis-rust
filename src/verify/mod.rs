@@ -1,6 +1,7 @@
 use crate::error::Result;
 use crate::matrix::{CouplingMatrix, MatrixTopology};
-use crate::response::SParameterResponse;
+use crate::response::{ResponseSample, SParameterResponse};
+use crate::spec::FilterSpec;
 
 /// Tolerance profile used when comparing two sampled responses.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -242,6 +243,337 @@ pub fn compare_responses(
     }
 
     Ok(comparison)
+}
+
+
+// ─── Absolute spec checks (review §D.3) ──────────────────────────────────────
+/// Margin (dB) applied to the spec return-loss gate. The worst passband RL
+/// sits at the band edges (the ripple), where the solver matches the spec to
+/// ~1e-4 dB, so a strict `>=` comparison is a coin flip at the floating-point
+/// boundary; a small margin avoids failing a design that meets its edge RL.
+pub const RETURN_LOSS_GATE_MARGIN_DB: f64 = 0.1;
+/// Maximum allowed `|S21|` (dB) inside the normalized passband. A lossless
+/// matched design sits at 0 dB modulo ripple; +0.5 dB absorbs sampling
+/// placement near the band edges and light `unloaded_q` loss. Heuristic gate
+/// threshold, not physical law.
+pub const PASSBAND_MAX_IL_DB: f64 = 0.5;
+/// Minimum allowed `|S21|` (dB) inside the normalized passband. −1 dB is
+/// below the ripple of any realistic Chebyshev passband and far above the
+/// depth of a genuine in-band null (which would indicate a misplaced zero).
+/// Heuristic gate threshold, not physical law.
+pub const PASSBAND_MIN_IL_DB: f64 = -1.0;
+/// `|S21|` (dB) a prescribed transmission zero must dip to (i.e. ≤ this)
+/// within its search window. −40 dB is far below any passband ripple and
+/// far above the solver's numerical floor, so a missing or misplaced zero
+/// fails by many tens of dB while a true zero passes with margin. Heuristic
+/// gate threshold, not physical law.
+pub const TRANSMISSION_ZERO_DEPTH_DB: f64 = -40.0;
+/// Half-width of the search window around a prescribed transmission zero, in
+/// grid steps (the zero's dip must occur within ± this many steps of it).
+pub const TRANSMISSION_ZERO_WINDOW_STEPS: usize = 2;
+
+/// The result of one absolute-spec gate (e.g. passband return loss).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpecGateResult {
+    /// Stable gate name (e.g. `passband_return_loss`, `transmission_zero_depth_1`).
+    pub gate: String,
+    /// Three-state outcome; reuses [`CheckOutcome`] so "data unavailable"
+    /// stays `Skipped`, never a silent `Pass` (review P3 #2 / §D.3).
+    pub outcome: CheckOutcome,
+    /// Key measured scalar in dB that the gate judged; `None` when skipped.
+    /// For `passband_insertion_loss` this is the violated side, or the floor
+    /// value when the gate passes.
+    pub measured: Option<f64>,
+    /// Threshold applied to `measured` (direction depends on the gate);
+    /// `None` when skipped.
+    pub threshold: Option<f64>,
+    /// Human-readable context: both measured values where a gate checks two,
+    /// or the reason the gate was skipped.
+    pub detail: String,
+}
+
+/// Report of the absolute spec checks performed by [`verify_against_spec`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpecCheckReport {
+    /// One entry per gate, in the order the gates run.
+    pub gates: Vec<SpecGateResult>,
+}
+
+impl SpecCheckReport {
+    /// Aggregates the gate outcomes: any `Fail` → `Fail`; every gate
+    /// `Skipped` → `Skipped` (no data was available to check against);
+    /// otherwise `Pass`.
+    pub fn outcome(&self) -> CheckOutcome {
+        if self.gates.iter().any(|g| g.outcome == CheckOutcome::Fail) {
+            return CheckOutcome::Fail;
+        }
+        if self.gates.iter().all(|g| g.outcome == CheckOutcome::Skipped) {
+            return CheckOutcome::Skipped;
+        }
+        CheckOutcome::Pass
+    }
+
+    /// Returns `true` when no gate failed (a fully-skipped report is `true`,
+    /// mirroring [`ResponseCheckReport::passes`]). Callers that must keep
+    /// "never checked" distinct from "passed" should prefer
+    /// [`Self::outcome`] (review P3 #2).
+    pub fn passes(&self) -> bool {
+        !self.gates.iter().any(|g| g.outcome == CheckOutcome::Fail)
+    }
+
+    /// Looks up the result of a gate by name.
+    pub fn gate(&self, name: &str) -> Option<&SpecGateResult> {
+        self.gates.iter().find(|g| g.gate == name)
+    }
+
+    /// One reportable line per gate — `name = outcome (detail)` — the same
+    /// row shape the terminal/markdown renderers use for
+    /// [`CheckOutcome`]-backed checks, so callers can print the new check
+    /// type with the existing rendering conventions.
+    pub fn format_rows(&self) -> String {
+        self.gates
+            .iter()
+            .map(|g| format!("{:<28} = {:<7}  {}", g.gate, g.outcome, g.detail))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+/// Checks a sampled response **against a [`FilterSpec`]** — the absolute
+/// gates that [`compare_responses`] (two responses agree) never covers
+/// (review §D.3): passband return loss, passband insertion loss,
+/// transmission-zero depth, and (by convention, skipped) stopband rejection.
+///
+/// The response is expected in **normalized prototype coordinates**: the
+/// passband is `|ω| ≤ 1` (the convention `FilterSpec` stores; it carries no
+/// explicit edges) and the spec's transmission zeros are already normalized.
+/// Physical-grid responses work as long as `normalized_omega` is populated,
+/// which the response solver always does.
+///
+/// Each gate returns a three-state [`CheckOutcome`]: a gate whose data is
+/// unavailable (no passband samples, zero at infinity, empty response, ...)
+/// is `Skipped`, never a silent `Pass`. The stopband gate is always
+/// `Skipped`: `FilterSpec` carries no stopband requirement in normalized
+/// coordinates (its optional out-of-band windows are physical Hz and would
+/// need a band mapping that is unavailable here), so there is nothing to
+/// gate on without inventing a requirement.
+///
+/// ```rust
+/// # use mfs::prelude::*;
+/// let design = FilterDesign::prototype(4, 20.0)
+///     .zeros([-2.0, 2.0])
+///     .synthesize()?;
+/// let response = design.response_normalized(-3.0, 3.0, 601)?;
+/// let report = verify_against_spec(design.spec(), &response);
+/// assert!(report.passes());
+/// # Ok::<(), MfsError>(())
+/// ```
+pub fn verify_against_spec(spec: &FilterSpec, response: &SParameterResponse) -> SpecCheckReport {
+    let samples = &response.samples;
+    let passband: Vec<&ResponseSample> = samples
+        .iter()
+        .filter(|s| s.normalized_omega.abs() <= 1.0)
+        .collect();
+
+    let mut gates = Vec::new();
+
+    // Gate 1: passband return loss against the spec's own `return_loss_db`.
+    if passband.is_empty() {
+        gates.push(skipped_gate(
+            "passband_return_loss",
+            "no samples inside the normalized passband |ω| ≤ 1",
+        ));
+    } else {
+        // RL = −20·log10(|S11|); the spec constrains the *worst* passband
+        // point (|S11| is largest at the band edges, where it equals the
+        // ripple), so the gate compares the min passband RL against the spec
+        // with a boundary margin (see RETURN_LOSS_GATE_MARGIN_DB). The center
+        // passband can dip far deeper (reflection nulls); a max would pass a
+        // design that misses its RL at the band edges.
+        let min_rl_db = passband
+            .iter()
+            .map(|s| -db_from_mag(s.s11_mag()))
+            .fold(f64::INFINITY, f64::min);
+        let required = spec.return_loss_db() - RETURN_LOSS_GATE_MARGIN_DB;
+        gates.push(measured_gate(
+            "passband_return_loss",
+            min_rl_db,
+            Some(spec.return_loss_db()),
+            min_rl_db >= required,
+            format!(
+                "min passband RL {:.1} dB, spec requires {:.1} dB",
+                min_rl_db,
+                spec.return_loss_db()
+            ),
+        ));
+    }
+
+    // Gate 2: passband insertion loss — |S21| must stay near 0 dB.
+    if passband.is_empty() {
+        gates.push(skipped_gate(
+            "passband_insertion_loss",
+            "no samples inside the normalized passband |ω| ≤ 1",
+        ));
+    } else {
+        let s21_dbs: Vec<f64> = passband
+            .iter()
+            .map(|s| db_from_mag(s.s21_mag()))
+            .collect();
+        let max_db = s21_dbs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let min_db = s21_dbs.iter().cloned().fold(f64::INFINITY, f64::min);
+        let too_hot = max_db > PASSBAND_MAX_IL_DB;
+        let too_cold = min_db < PASSBAND_MIN_IL_DB;
+        // `measured` reports the violated side when one failed, otherwise the
+        // floor (the side a misplaced in-band zero would violate).
+        let (measured, threshold) = if too_hot {
+            (max_db, PASSBAND_MAX_IL_DB)
+        } else {
+            (min_db, PASSBAND_MIN_IL_DB)
+        };
+        gates.push(measured_gate(
+            "passband_insertion_loss",
+            measured,
+            Some(threshold),
+            !too_hot && !too_cold,
+            format!(
+                "passband |S21| {min_db:.1} .. {max_db:.1} dB (allowed {PASSBAND_MIN_IL_DB:.1} .. {PASSBAND_MAX_IL_DB:.1} dB)"
+            ),
+        ));
+    }
+
+    // Gate 3: transmission-zero depth, one sub-gate per prescribed zero.
+    if spec.transmission_zeros.is_empty() {
+        gates.push(skipped_gate(
+            "transmission_zero_depth",
+            "spec prescribes no transmission zeros",
+        ));
+    } else {
+        for (index, zero) in spec.transmission_zeros.iter().enumerate() {
+            let name = format!("transmission_zero_depth_{index}");
+            if !zero.value.is_finite() {
+                // Spec convention: f64::INFINITY is a zero at infinity — it
+                // imposes no in-band dip requirement, so the sub-gate is
+                // Skipped (not Pass: no dip was actually verified).
+                gates.push(skipped_gate(&name, "zero at infinity — no dip requirement"));
+            } else if samples.is_empty() {
+                gates.push(skipped_gate(&name, "response has no samples"));
+            } else {
+                match zero_window_indices(samples, zero.value) {
+                    Some(indices) if indices.is_empty() => {
+                        gates.push(skipped_gate(
+                            &name,
+                            format!(
+                                "no samples within ±{TRANSMISSION_ZERO_WINDOW_STEPS} grid steps of ω = {:.3}",
+                                zero.value
+                            ),
+                        ));
+                    }
+                    Some(indices) => {
+                        let depth_db = indices
+                            .iter()
+                            .map(|&i| db_from_mag(samples[i].s21_mag()))
+                            .fold(f64::INFINITY, f64::min);
+                        gates.push(measured_gate(
+                            &name,
+                            depth_db,
+                            Some(TRANSMISSION_ZERO_DEPTH_DB),
+                            depth_db <= TRANSMISSION_ZERO_DEPTH_DB,
+                            format!(
+                                "min |S21| {depth_db:.1} dB within ±{TRANSMISSION_ZERO_WINDOW_STEPS} steps of ω = {:.3} (floor {TRANSMISSION_ZERO_DEPTH_DB:.1} dB)",
+                                zero.value
+                            ),
+                        ));
+                    }
+                    None => unreachable!("zero_window_indices returns None only for an empty sample set"),
+                }
+            }
+        }
+    }
+
+    // Gate 4: stopband rejection — always Skipped by design. FilterSpec has
+    // no normalized-domain stopband requirement (see function docs), so
+    // inventing a floor here would gate on a requirement the spec never made.
+    gates.push(skipped_gate(
+        "stopband_rejection",
+        "spec carries no stopband requirement in normalized coordinates \
+         (out-of-band windows are physical Hz and need a band mapping)",
+    ));
+
+    SpecCheckReport { gates }
+}
+
+/// Magnitude (linear) to dB with the −300 dB zero-floor convention shared
+/// by `ResponseSample::s*_db`, so exact nulls stay finite and serializable.
+fn db_from_mag(mag: f64) -> f64 {
+    if mag <= 0.0 {
+        -300.0
+    } else {
+        20.0 * mag.log10()
+    }
+}
+
+/// Builds a Pass/Fail gate result (Skipped is built by [`skipped_gate`]).
+fn measured_gate(
+    gate: &str,
+    measured: f64,
+    threshold: Option<f64>,
+    ok: bool,
+    detail: String,
+) -> SpecGateResult {
+    SpecGateResult {
+        gate: gate.to_string(),
+        outcome: if ok { CheckOutcome::Pass } else { CheckOutcome::Fail },
+        measured: Some(measured),
+        threshold,
+        detail,
+    }
+}
+
+/// Builds a Skipped gate result: data unavailable, so the gate is reported
+/// as `Skipped`, never as `Pass` (review P3 #2 / §D.3).
+fn skipped_gate(gate: &str, detail: impl Into<String>) -> SpecGateResult {
+    SpecGateResult {
+        gate: gate.to_string(),
+        outcome: CheckOutcome::Skipped,
+        measured: None,
+        threshold: None,
+        detail: detail.into(),
+    }
+}
+
+/// Indices of the samples within ±[`TRANSMISSION_ZERO_WINDOW_STEPS`] grid
+/// steps of `zero_omega`, assuming a monotonic grid (the solver's
+/// linspace grids are). For a degenerate/non-monotonic grid the window
+/// falls back to the nearest sample and its two neighbors each side.
+fn zero_window_indices(samples: &[ResponseSample], zero_omega: f64) -> Option<Vec<usize>> {
+    let n = samples.len();
+    if n == 0 {
+        return None;
+    }
+
+    let spacing = if n >= 2 {
+        (samples[n - 1].normalized_omega - samples[0].normalized_omega).abs() / (n - 1) as f64
+    } else {
+        0.0
+    };
+    if spacing > 0.0 && spacing.is_finite() {
+        let radius = spacing * TRANSMISSION_ZERO_WINDOW_STEPS as f64;
+        return Some((0..n).filter(|&i| {
+            (samples[i].normalized_omega - zero_omega).abs() <= radius
+        }).collect());
+    }
+
+    let mut nearest = 0usize;
+    for i in 1..n {
+        if (samples[i].normalized_omega - zero_omega).abs()
+            < (samples[nearest].normalized_omega - zero_omega).abs()
+        {
+            nearest = i;
+        }
+    }
+    let lo = nearest.saturating_sub(TRANSMISSION_ZERO_WINDOW_STEPS);
+    let hi = (nearest + TRANSMISSION_ZERO_WINDOW_STEPS + 1).min(n);
+    Some((lo..hi).collect())
 }
 
 /// Returns whether a matrix matches the expected folded source-side sparsity pattern.
@@ -628,4 +960,175 @@ mod tests {
         assert!(report.passes());
         Ok(())
     }
+    // ─── Absolute spec checks (review §D.3) ───────────────────────────────
+
+    use crate::design::FilterDesign;
+    use crate::spec::TransmissionZero;
+
+    fn good_sixth_order_design() -> Result<FilterDesign> {
+        FilterDesign::prototype(6, 23.0)
+            .zeros([-2.0, 2.0])
+            .synthesize()
+    }
+
+    /// (a) A good synthesized 6th-order design passes every measurable gate.
+    #[test]
+    fn verify_against_spec_good_design_passes_all_gates() -> Result<()> {
+        let design = good_sixth_order_design()?;
+        let response = design.response_normalized(-3.0, 3.0, 601)?;
+        let report = verify_against_spec(design.spec(), &response);
+
+        assert_eq!(report.outcome(), CheckOutcome::Pass);
+        assert!(report.passes());
+
+        let rl = report.gate("passband_return_loss").expect("RL gate present");
+        assert_eq!(rl.outcome, CheckOutcome::Pass, "RL detail: {}", rl.detail);
+        let measured_rl = rl.measured.expect("pass carries the measured RL");
+        assert!(
+            (22.5..=28.0).contains(&measured_rl),
+            "measured passband RL {measured_rl} dB out of expected band"
+        );
+
+        let il = report.gate("passband_insertion_loss").expect("IL gate present");
+        assert_eq!(il.outcome, CheckOutcome::Pass, "IL detail: {}", il.detail);
+        let measured_il = il.measured.expect("pass carries the measured IL");
+        assert!(
+            (PASSBAND_MIN_IL_DB..=PASSBAND_MAX_IL_DB).contains(&measured_il),
+            "measured passband IL {measured_il} dB out of allowed band"
+        );
+
+        for name in ["transmission_zero_depth_0", "transmission_zero_depth_1"] {
+            let tz = report.gate(name).expect("TZ gate present");
+            assert_eq!(tz.outcome, CheckOutcome::Pass, "{name}: {}", tz.detail);
+            assert!(
+                tz.measured.unwrap() <= TRANSMISSION_ZERO_DEPTH_DB,
+                "{name}: measured depth above floor"
+            );
+        }
+
+        // The stopband gate is documented as always Skipped: FilterSpec
+        // carries no stopband requirement in normalized coordinates.
+        let sb = report.gate("stopband_rejection").expect("stopband gate present");
+        assert_eq!(sb.outcome, CheckOutcome::Skipped);
+        Ok(())
+    }
+
+    /// (b) A spec 10 dB tighter than the design can achieve fails the RL gate
+    /// with the measured (achievable) value, not the unachievable spec.
+    #[test]
+    fn verify_against_spec_tightened_rl_spec_fails_return_loss_gate() -> Result<()> {
+        let design = good_sixth_order_design()?;
+        let response = design.response_normalized(-3.0, 3.0, 601)?;
+        let tightened = FilterSpec::new(6, 33.0)?.with_normalized_transmission_zeros([-2.0, 2.0]);
+
+        let report = verify_against_spec(&tightened, &response);
+        assert_eq!(report.outcome(), CheckOutcome::Fail);
+        assert!(!report.passes());
+
+        let rl = report.gate("passband_return_loss").expect("RL gate present");
+        assert_eq!(rl.outcome, CheckOutcome::Fail, "RL detail: {}", rl.detail);
+        let measured = rl.measured.expect("fail carries the measured value");
+        assert!(
+            (22.5..=28.0).contains(&measured),
+            "measured RL {measured} dB should be the achievable ~23, not ~33"
+        );
+        assert_eq!(rl.threshold, Some(33.0));
+
+        // The other gates are unaffected by the tightened RL spec.
+        assert_eq!(
+            report.gate("passband_insertion_loss").unwrap().outcome,
+            CheckOutcome::Pass
+        );
+        Ok(())
+    }
+
+    /// (b′) A prescribed zero the response does not have fails the depth gate
+    /// with the shallow (off-grid) measured depth.
+    #[test]
+    fn verify_against_spec_prescribed_zero_off_grid_fails_depth_gate() -> Result<()> {
+        // A zero-free 4th-order design: its passband has no in-band dip, so a
+        // prescribed in-band zero the response does not realize must fail.
+        let design = FilterDesign::prototype(4, 20.0).synthesize()?;
+        let response = design.response_normalized(-3.0, 3.0, 601)?;
+        // The spec prescribes a zero at ω = 0.5 (inside the passband) that the
+        // synthesized response does not have.
+        let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros([0.5]);
+
+        let report = verify_against_spec(&spec, &response);
+        assert_eq!(report.outcome(), CheckOutcome::Fail);
+
+        let missing = report.gate("transmission_zero_depth_0").unwrap();
+        assert_eq!(missing.outcome, CheckOutcome::Fail, "detail: {}", missing.detail);
+        let depth = missing.measured.expect("fail carries the measured depth");
+        assert!(
+            depth > TRANSMISSION_ZERO_DEPTH_DB,
+            "depth {depth} dB should not reach the -40 dB floor"
+        );
+        Ok(())
+    }
+
+    /// (c) Missing data → Skipped, never a silent Pass (review P3 #2 / §D.3).
+    #[test]
+    fn verify_against_spec_missing_data_is_skipped_not_pass() -> Result<()> {
+        let spec = FilterSpec::new(4, 20.0)?.with_normalized_transmission_zeros([-2.0]);
+
+        // Empty response: every gate Skipped, aggregate Skipped.
+        let empty = SParameterResponse { samples: vec![] };
+        let report = verify_against_spec(&spec, &empty);
+        assert_eq!(report.outcome(), CheckOutcome::Skipped);
+        assert_ne!(report.outcome(), CheckOutcome::Pass);
+        for gate in &report.gates {
+            assert_eq!(gate.outcome, CheckOutcome::Skipped, "{}", gate.gate);
+            assert!(gate.measured.is_none(), "{}", gate.gate);
+        }
+        // The reportable rows still render the three-state outcome.
+        assert!(report.format_rows().contains("skipped"));
+
+        // Samples exist but none in the normalized passband: the passband
+        // gates are Skipped, and the zero at ω = -2 is outside the window of
+        // every sample (grid spacing 0.5 → radius 1.0, nearest ω = 1.5), so
+        // the zero gate is Skipped too. Nothing passes silently.
+        let out_of_band = SParameterResponse {
+            samples: vec![sample(10.0, 1.5, 0.01, 0.9), sample(20.0, 2.0, 0.01, 0.2)],
+        };
+        let report = verify_against_spec(&spec, &out_of_band);
+        assert_eq!(
+            report.gate("passband_return_loss").unwrap().outcome,
+            CheckOutcome::Skipped
+        );
+        assert_eq!(
+            report.gate("passband_insertion_loss").unwrap().outcome,
+            CheckOutcome::Skipped
+        );
+        assert_eq!(
+            report.gate("transmission_zero_depth_0").unwrap().outcome,
+            CheckOutcome::Skipped
+        );
+        Ok(())
+    }
+
+    /// A zero at infinity (spec convention: `f64::INFINITY`) imposes no dip
+    /// requirement → its sub-gate is Skipped, while a real zero still Passes.
+    #[test]
+    fn verify_against_spec_zero_at_infinity_is_skipped() -> Result<()> {
+        let design = FilterDesign::prototype(4, 20.0)
+            .zeros([-2.0])
+            .synthesize()?;
+        let response = design.response_normalized(-3.0, 3.0, 601)?;
+        let spec = FilterSpec::new(4, 20.0)?.with_transmission_zeros([
+            TransmissionZero::normalized(-2.0),
+            TransmissionZero::infinite(),
+        ]);
+
+        let report = verify_against_spec(&spec, &response);
+        assert_eq!(
+            report.gate("transmission_zero_depth_0").unwrap().outcome,
+            CheckOutcome::Pass
+        );
+        let infinite = report.gate("transmission_zero_depth_1").unwrap();
+        assert_eq!(infinite.outcome, CheckOutcome::Skipped);
+        assert!(infinite.detail.contains("infinity"));
+        Ok(())
+    }
+
 }
