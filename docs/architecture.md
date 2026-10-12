@@ -57,11 +57,13 @@ src/
 │   ├── builder.rs          FilterSpecBuilder with validation
 │   └── multi_band.rs        MultiBandSpec / BandSpec / RejectionSpec
 ├── matrix/             Coupling matrix representation and operations
-│   ├── mod.rs              Module facade and re-exports
-│   ├── core.rs             CouplingMatrix struct, topology, shape, accessors
+│   ├── mod.rs              Facade, re-exports, and the shared `flip_sign_inplace`
+│   │                       (similarity sign flip, `R·M·Rᵀ`, diagonal preserved)
+│   ├── core.rs             CouplingMatrix struct, to_folded / to_arrow Givens sequences
 │   ├── builder.rs          CouplingMatrixBuilder with dimension validation
-│   ├── rotations.rs        Givens rotations, diagonal rotation angles
-│   ├── sections.rs         Triplet, quadruplet, trisection extraction
+│   ├── rotations.rs        Givens rotations, safe_angle, diagonal rotation angles
+│   ├── sections.rs         Triplet, quadruplet, trisection extraction primitives
+│   ├── cascade.rs          CT / CQ cascade synthesis (to_cascaded_trisections/quadruplets)
 │   └── scaling.rs          Bandpass denormalization, external Q extraction
 ├── synthesis/          Coupling matrix synthesis engine
 │   ├── mod.rs              Module facade and public exports
@@ -69,10 +71,11 @@ src/
 │   ├── residues/           Residue synthesis (split by engine seam)
 │   │   ├── mod.rs              Facade re-exporting the three seams
 │   │   ├── admittance.rs       Y-parameter polynomials from approximation output
-│   │   ├── expansion.rs        Residue expansion, classification
+│   │   ├── expansion.rs        Residue expansion, clustering, Laurent, classification
 │   │   └── transversal.rs      Transversal coupling-matrix assembly
 │   ├── orchestration.rs    High-level synthesis + evaluation helpers
 │   ├── recovery.rs         Shared duplexer/multiplexer channel recovery
+│   ├── machiarella.rs      Macchiarella–Tamiazzo full-spectral iteration (duplexer + multiplexer)
 │   └── sections.rs         SectionSynthesis (triplet/quadruplet/trisection)
 ├── transform/          Topology transformations
 │   ├── mod.rs              Transform facade, response invariance checking
@@ -103,7 +106,7 @@ src/
 │   ├── mod.rs              Fixture loading
 │   └── database.rs         Filter database JSON parsing
 └── bin/
-    └── mfs_cli.rs      CLI binary (--input, --stage, --resume, --format)
+    └── mfs_cli/        CLI (main, design, io, multiplexer, target, optimize subcommands)
 ```
 
 ## Data Flow
@@ -250,10 +253,13 @@ Dense (N+2)×(N+2) real-valued coupling matrix with source and load nodes.
 - `BandPassScaledCouplingMatrix` — physical-frequency scaled matrix with external Q
 
 **Operations:**
-- Givens rotations (arbitrary axis pairs)
-- Bandpass denormalization and normalization
-- External Q extraction
-- Section extraction (triplet, quadruplet, trisection)
+- Givens similarity rotations (arbitrary axis pairs, O(N) in-place)
+- Shared `flip_sign_inplace` — the similarity sign flip `R·M·Rᵀ` (`R[i][i] = −1`,
+  negate row i + column i, diagonal **unchanged**); the single source of truth
+  both `to_folded`'s positive-main-line normalization and the CT/CQ `extract_*`
+  cleanup call (see `docs/algorithms.md` §6.1)
+- Bandpass denormalization and normalization; external Q extraction
+- Section extraction (triplet, quadruplet, trisection) and CT/CQ cascade synthesis
 - nalgebra-backed matrix multiply and transpose
 
 ### `synthesis` — Matrix Synthesis Engine
@@ -267,10 +273,13 @@ Orchestrates the conversion from polynomials to coupling matrix.
 - `AdmittancePolynomials` — y11, y12, y22 numerators + shared denominator
 - `SectionSynthesis` — triplet/quadruplet/trisection synthesis workflows
 
-**Algorithm:**
-1. Construct admittance polynomials from E, F, P (with leading-coefficient normalization)
-2. Find denominator roots via Durand-Kerner
-3. Compute residues at each pole for y11, y12, y22
+**Algorithm** (full detail in `docs/algorithms.md` §2–5):
+1. Construct admittance polynomials from E, F, P (with leading-coefficient
+   cancellation guard and odd-order parity sign)
+2. Find denominator roots via `AdaptiveRootSolver` (faer balanced-companion →
+   Durand-Kerner → Aberth-Ehrlich), cluster coalesced roots, build Laurent
+   principal parts for repeated poles
+3. Compute residues at each pole for y11, y12, y22 (independent per Y)
 4. Classify residues as real or complex-conjugate pairs
 5. Build transversal coupling matrix from classified residues
 6. Optionally transform to target topology
@@ -302,13 +311,21 @@ Evaluates electrical response from coupling matrix over frequency grid.
 - `ResponseSolver` — configurable solver (lossless/lossy)
 - `SParameterResponse` — collection of frequency-indexed S-parameter samples
 - `ResponseSample` — S11, S21 (real + imaginary) at one frequency point, plus
-  `group_delay: Option<f64>` (explicitly `None` when the solver path cannot
-  compute it, e.g. the pole-expansion fast path — never a silent `0.0`)
+  `group_delay: Option<f64>` in **normalized-prototype** units
+  (`−Im(d/dω ln S21)`, derivative w.r.t. the normalized axis — *not* per-hertz;
+  see the conversion + 2π trap note in `src/response/mod.rs`). Both solver paths
+  (LU and the O(N) pole-expansion fast path) compute it; it is `None` only where
+  the expression is numerically degenerate (a transmission zero, `S21 → 0`) —
+  never a silent `0.0`.
 
 **Algorithm:**
-Complex matrix inversion method: `[S] = [I] - 2j[R]^(1/2) ([jΩ] - [M])^(-1) [R]^(1/2)`.
-A fast O(N) pole-expansion path is used when the matrix is transversal,
-cross-checked against the LU solver with automatic fallback.
+Complex-matrix solve `[S] = [I] − 2j·[R]^(1/2)·([jΩ] − [M])⁻¹·[R]^(1/2)`,
+evaluated with a *selective* LU (one factorization, two right-hand sides `e₀`
+and `eₙ`), valid for every topology and the lossy (`Q`-finite) case. A fast
+O(N) pole-expansion partial-fraction path is used for **lossless transversal**
+matrices, cross-checked against LU on a 5-point grid (accept iff `|ΔS21|/|S21|
+< 1e-3` on ≥1 non-deep-stopband point) with automatic full-grid LU fallback;
+it also emits group delay analytically at O(N). See `docs/algorithms.md` §7.
 
 ### `verify` — Verification Utilities
 
@@ -457,10 +474,13 @@ All errors are `Serialize + Deserialize` for structured JSON error reporting.
 
 ### Test Layers
 
-1. **Unit tests** (202 in `src/`, as of 2026-09-28) — per-function validation with known inputs
+1. **Unit tests** — per-function validation with known inputs (`cargo test --lib`:
+   289 passing as of 2026-10-12)
 2. **Property-based tests** (10 properties, 100 iterations each in `tests/synthesis_properties.rs`)
-3. **Regression tests** (36 in `tests/synthesis_regression.rs`) — previously-failing configurations
-4. **Integration tests** (15 files in `tests/`) — end-to-end pipeline validation
+3. **Regression tests** (`tests/synthesis_regression.rs`) — previously-failing configurations
+4. **Integration tests** (20 files in `tests/`) — end-to-end pipeline validation, incl.
+   `benchmark_standard` (Cameron book-matrix + cross-backend eigenvalue conformance gates)
+   and `folded_response_invariance` (folded-vs-transversal response invariance)
 5. **Literature fixtures** — reference values from Cameron textbook and published papers
 
 ### Correctness Properties

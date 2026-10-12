@@ -29,6 +29,28 @@
   entry-for-entry. All 289 `cargo test --lib` tests green; clippy clean
   (default + `cli,python` features).
 
+- **Docs synced to current state + new implementation-grounded algorithm
+  reference.** Added `docs/algorithms.md`: a per-stage writeup of what the
+  code *actually* computes — the Cameron w-domain recurrence (with the
+  corrected V-update, no spurious `w` factor) and the `E(w) = F/eps_r +
+  j·P/eps` upper-half-plane-monic stage; admittance Y-polynomial assembly
+  (N-mod-4 leading-coefficient guard + odd-order parity sign); residue
+  expansion (1e-5 single-linkage clustering, Laurent principal parts, per-Y
+  independent summation); transversal assembly (adaptive pole-axis tolerance,
+  M_SL sources, repeated-pole `NotImplemented`); the `to_folded` / `to_arrow`
+  Givens sequences + the shared `flip_sign_inplace`; CT/CQ cascade tiling;
+  LU + pole-expansion response (5-point verification gate, group-delay units
+  + 2π trap); the Macchiarella–Tamiazzo N-channel iteration; dual-band
+  route-α + the K≥3 DOF wall; cepstrum + balanced-companion spectral
+  factorization; LM optimization/extraction — each with `file:line` anchors
+  and a consolidated numerical-threshold table. Also corrected the stale
+  "group delay is `None` on the fast path" claims in `README.md` and
+  `docs/api-reference.md` (both solver paths now compute it; `None` only at a
+  transmission zero), updated the `matrix/`/`synthesis/`/`bin/` module tree
+  and test counts in `docs/architecture.md`, and refreshed the
+  `docs/internal/todo.md` status header to the 0.6.2-unreleased head
+  (`cargo test` 435/0 across 22 binaries).
+
 - **§D.7 dB single source — library side closed.** A crate-wide shared
   helper `response::magnitude_to_db(mag) -> f64` (−300 dB floor at
   `mag <= 1e-15`, else `20·log10(mag)`) is now the single source of truth for

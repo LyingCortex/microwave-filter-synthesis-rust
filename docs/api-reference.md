@@ -158,9 +158,10 @@ for sample in &response.samples {
     sample.s11_re             // 实部
     sample.s11_im             // 虚部
 
-    // 群延迟
-    sample.group_delay        // Option<f64>：Some(群延迟，归一化单位)；
-                              // None = 该求解路径不计算群延迟（极点展开快路径），
+    // 群延迟（归一化原型单位 dτ/dω，非"每赫兹"；换算成秒见
+    // ResponseSample::group_delay 的文档 + 2π 陷阱说明）
+    sample.group_delay        // Option<f64>：LU 与极点展开快路径都计算；
+                              // None 仅出现在数值退化处（传输零点 S21→0），
                               // 显式标记而非静默的 0.0
 }
 ```

@@ -1,42 +1,36 @@
 # MFS TODO List
 
-**Status as of 0.6.1 (2026-10-07).** This file is maintained as the single
+**Status as of 0.6.2-unreleased (2026-10-12).** This file is maintained as the single
 open-item list. Closed items are listed with the version that closed them so
 history is traceable. Authoritative architecture/limitation references:
-`docs/architecture.md` (Known Limitations / Future Roadmap) and
+`docs/architecture.md` (Known Limitations / Future Roadmap),
+`docs/algorithms.md` (implementation-grounded algorithm reference), and
 `docs/internal/architecture-review-2026-09-25.md`.
 
-## Current state (0.6.1, 2026-10-07)
+## Current state (0.6.2-unreleased, 2026-10-12)
 
-Working tree clean; `master` head `ec4482c` (Wave 7: cross-backend gate).
-All CI-parity checks green on that head:
+Working tree clean; `master` head `e0c2699` (bit-exact A/B doc for the
+`flip_sign` dedup on top of `353f506`).
+All CI-parity checks green on that head (local, WSL2 / Rust 1.95.0):
 
-- `cargo test --all-targets` — green (lib 256 passed + 15 integration
-  test binaries, 0 failed)
+- `cargo test` — **435 passed, 0 failed** across 22 binaries (lib 289 + 20
+  integration suites: `benchmark_standard` 20 conformance gates,
+  `folded_response_invariance` 10, `multiplexer` 15, `literature_fixtures` 5,
+  `passband_tz` 4, `prelude_smoke` 3, `optimizer_integration` 2, etc.)
 - `cargo clippy --all-targets -- -D warnings` — zero warnings
-- `cargo doc --no-deps` — zero warnings
+- `cargo clippy --features cli,python --all-targets -- -D warnings` — zero warnings
 
-0.6.1 closes the 0.6.0 whole-crate review end-to-end: the "silent errors"
-wave (P1-1/2/3/4/6 + P2-1/2/3/5 + all six P3, the "gate-green but wrong
-result" class) and the CT/CQ cascade wave (P1-5 + P2-4), plus the follow-up
-clean CQ quadruplet tiling (source-side non-overlapping, `order >= 4·pairs`,
-order-6 2-pair rejected as topologically impossible) and a fresh-eyes review
-that corrected the CQ load-port gate index and two doc/code contradictions.
-All 17 valid review findings are now fixed and gate-anchored. Passband
-transmission zeros remain refuted as unrealizable in the single-function
-prototype (E1, 0.6.0).
-
-The continuation plan for the four areas is
-[`docs/continuation-plan.md`](../continuation-plan.md); all of its Wave 1–7
-items are done (2026-09-29 → 2026-10-07). Wave 7 (2026-10-07, `ec4482c`)
-carries the standard's `cross_backend_equivalence` gate in the rust-native
-`synthesis` bench: a pinned python-backend eigenvalue reference
-(`bench-data/golden/cross_backend_reference.json`, vendored from
-`filter-bench/data/golden/`) is compared against mfs's folded
-resonator-subblock eigenvalues at the contract tolerance (1e-6); measured
-≤ 2.7e-12 across all 7 twoport cases, with a conformance test in
-`tests/benchmark_standard.rs`. The Open sections below hold the
-remaining low-priority ecosystem items and the refuted passband-TZ work.
+Since the 0.6.1 snapshot: the 0.6.1 whole-crate review wave (3 P1 +
+14 P2 + 11 P3 + round-2) is **fully closed and gate-anchored** (released as
+0.6.2, 2026-10-11: fast-path group delay + three-algorithm verification,
+§D.7 dB single source, CI wheel/FFI gate). On top of 0.6.2:
+`flip_sign` / `flip_sign_inplace` deduplicated into one shared
+`pub(crate)` helper (`matrix/mod.rs`), bit-exact A/B verified (9 prototype
+cases, orders 4–10: folded/CT/CQ matrices + 401-point folded response
+byte-identical between `353f506~1` and `353f506`; 5364-line dump, `diff`
+empty), plus a regression test pinning the diagonal-preservation invariant.
+The Open sections below hold the remaining low-priority ecosystem items and
+the refuted passband-TZ work.
 
 ## Open
 

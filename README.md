@@ -84,7 +84,8 @@ for s in &response.samples {
     s.s21_db()          // |S21| in dB
     s.s11_db()          // |S11| in dB
     s.s21_phase_deg()   // ∠S21 in degrees
-    s.group_delay       // Option<f64> group delay (None on the fast path)
+    s.group_delay       // Option<f64> normalized-prototype group delay;
+                        // computed by both solver paths, None only at a transmission zero
 }
 ```
 
@@ -144,6 +145,7 @@ cargo run --example literature_fixtures
 
 - [API Reference](docs/api-reference.md) — Complete method reference
 - [Numerical Optimization Report](docs/numerical-optimization-report.md) — Algorithm details
+- [Algorithm Reference](docs/algorithms.md) — what each numerical stage actually computes (formulas, conventions, invariants)
 
 ## Project Structure
 
