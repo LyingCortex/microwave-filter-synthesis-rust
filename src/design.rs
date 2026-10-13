@@ -23,11 +23,87 @@ use crate::approx::{generalized_chebyshev_polynomials, PolynomialSet};
 use crate::error::Result;
 use crate::freq::{BandPassMapping, FrequencyGrid, FrequencyMapping};
 use crate::matrix::{CouplingMatrix, MatrixTopology};
-use crate::response::{ResponseSolver, SParameterResponse};
+use crate::response::{ResponseSample, ResponseSolver, SParameterResponse};
 use crate::spec::FilterSpec;
 use crate::synthesis::{build_filter_spec, MatrixSynthesisEngine};
-
+use num_complex::Complex64;
 // ═══════════════════════════════════════════════════════════════════════════════
+// Fast-path verification gate
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Threshold below which a check point is treated as "not comparable": the
+/// LU reference |S21| is at the numerical noise floor, so no meaningful
+/// relative comparison exists there.
+const FAST_PATH_GATE_S21_FLOOR: f64 = 1e-10;
+
+/// Result of the fast-path-vs-LU cross-check at a few sample points.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct GateVerdict {
+    /// Number of check points actually compared (|S21| above the floor).
+    compared: usize,
+    /// Largest relative complex deviation over S21 and S11 at the compared
+    /// points. Non-finite values at a compared point mark the gate as failed
+    /// (`max_diff` stays finite; `all_finite` goes false).
+    max_diff: f64,
+    /// False when any compared sample held a non-finite S11/S21 value — such
+    /// a point is an automatic gate failure, not a large-but-finite diff.
+    all_finite: bool,
+}
+
+impl GateVerdict {
+    /// The gate passes when at least one point was compared, every compared
+    /// value was finite, and the relative deviation is below `tol`.
+    fn passes(&self, tol: f64) -> bool {
+        self.compared > 0 && self.all_finite && self.max_diff < tol
+    }
+}
+
+/// Cross-checks the pole-expansion fast path against the LU backend at a few
+/// sample points.
+///
+/// Compares the **complex** S21 (magnitude *and* phase) and S11, not just
+/// `|S21|` — a dropped or mis-signed coupling that leaves |S21| nearly
+/// unchanged while rotating the phase, or that only moves S11, would slip a
+/// magnitude-only gate. A non-finite value at a compared point is an
+/// automatic failure (fall back to LU) rather than a silent NaN answer.
+///
+/// `tol` is the pass threshold on the largest relative deviation; the call
+/// sites use 1e-3 (see `response_normalized` / `response_bandpass`).
+pub(crate) fn fast_path_gate(
+    pole: &[ResponseSample],
+    lu: &[ResponseSample],
+) -> GateVerdict {
+    let mut compared = 0usize;
+    let mut max_diff = 0.0f64;
+    let mut all_finite = true;
+    for (p, l) in pole.iter().zip(lu.iter()) {
+        let l_mag = l.s21_mag();
+        if l_mag <= FAST_PATH_GATE_S21_FLOOR {
+            continue; // deep-stopband point: nothing comparable
+        }
+        compared += 1;
+        let l21 = Complex64::new(l.s21_re, l.s21_im);
+        let p21 = Complex64::new(p.s21_re, p.s21_im);
+        let l11 = Complex64::new(l.s11_re, l.s11_im);
+        let p11 = Complex64::new(p.s11_re, p.s11_im);
+        let finite = p21.is_finite()
+            && l21.is_finite()
+            && p11.is_finite()
+            && l11.is_finite();
+        if !finite {
+            all_finite = false;
+            continue;
+        }
+        max_diff = max_diff.max(((p21 - l21) / l21).norm());
+        max_diff = max_diff.max(((p11 - l11) / l11).norm());
+    }
+    GateVerdict {
+        compared,
+        max_diff,
+        all_finite,
+    }
+}
+
 // Builder
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -81,6 +157,13 @@ impl FilterDesignBuilder {
     }
 
     /// Runs the synthesis pipeline. Returns a completed `FilterDesign`.
+    ///
+    /// A successful result means the coupling matrix was synthesized; it does
+    /// **not** certify that the design meets its return-loss spec on the
+    /// sampled response. Use [`crate::verify::verify_against_spec`] on the
+    /// evaluated response to gate the absolute RL / insertion-loss / zero-depth
+    /// requirements (a tightened or infeasible spec reports `Fail`/`Skipped`
+    /// rather than silently passing).
     pub fn synthesize(self) -> Result<FilterDesign> {
         // Validate band-pass parameters at this common choke point. Both
         // `bandpass()` and `bandpass_edges()` (which *derives* center/bandwidth
@@ -399,6 +482,8 @@ impl FilterDesign {
     /// Uses the fast pole-expansion method (O(N) per point) by default.
     /// Automatically verifies against the LU method on first call and falls
     /// back to LU if results don't match.
+    /// A non-transversal (folded/arrow) stored matrix is rejected by the
+    /// fast path's structural precondition up front and evaluated by LU.
     ///
     /// `start` and `stop` are normalized frequencies (0 = center of passband).
     pub fn response_normalized(
@@ -424,22 +509,14 @@ impl FilterDesign {
                 Err(_) => return ResponseSolver.evaluate_normalized(&self.matrix, &grid),
             };
 
-            // Deep-stopband check points (|S21| at the noise floor) are skipped,
-            // so count how many were actually compared; an all-skipped grid
-            // means the fast path was never verified.
-            let mut max_diff = 0.0_f64;
-            let mut compared = 0usize;
-            for (p, l) in pole_check.samples.iter().zip(lu_check.samples.iter()) {
-                let p_mag = p.s21_mag();
-                let l_mag = l.s21_mag();
-                if l_mag > 1e-10 {
-                    let rel_diff = ((p_mag - l_mag) / l_mag).abs();
-                    max_diff = max_diff.max(rel_diff);
-                    compared += 1;
-                }
-            }
-
-            if compared > 0 && max_diff < 1e-3 {
+            // Deep-stopband check points (|S21| at the noise floor) are
+            // skipped; the gate compares complex S21 (magnitude *and* phase)
+            // and S11, and treats any non-finite compared value as a failure,
+            // so the fast path is trusted only when it matches LU on every
+            // comparable point. A magnitude-only gate could pass a
+            // phase-rotated or S11-distorted answer (round-3 review).
+            let verdict = fast_path_gate(&pole_check.samples, &lu_check.samples);
+            if verdict.passes(1e-3) {
                 // Verified fast path; a near-singular full-grid point still
                 // falls back to LU.
                 return pole_data
@@ -533,22 +610,14 @@ impl FilterDesign {
                 Err(_) => return ResponseSolver.evaluate(&self.matrix, &grid, &mapping),
             };
 
-            // Deep-stopband check points (|S21| at the noise floor) are skipped,
-            // so count how many were actually compared; an all-skipped grid
-            // means the fast path was never verified.
-            let mut max_diff = 0.0_f64;
-            let mut compared = 0usize;
-            for (p, l) in pole_check.samples.iter().zip(lu_check.samples.iter()) {
-                let p_mag = p.s21_mag();
-                let l_mag = l.s21_mag();
-                if l_mag > 1e-10 {
-                    let rel_diff = ((p_mag - l_mag) / l_mag).abs();
-                    max_diff = max_diff.max(rel_diff);
-                    compared += 1;
-                }
-            }
-
-            if compared > 0 && max_diff < 1e-3 {
+            // Deep-stopband check points (|S21| at the noise floor) are
+            // skipped; the gate compares complex S21 (magnitude *and* phase)
+            // and S11, and treats any non-finite compared value as a failure,
+            // so the fast path is trusted only when it matches LU on every
+            // comparable point. A magnitude-only gate could pass a
+            // phase-rotated or S11-distorted answer (round-3 review).
+            let verdict = fast_path_gate(&pole_check.samples, &lu_check.samples);
+            if verdict.passes(1e-3) {
                 // Verified fast path; a near-singular full-grid point still
                 // falls back to LU.
                 return pole_data
@@ -978,6 +1047,106 @@ mod tests {
         let d = FilterDesign::prototype(4, 20.0).synthesize()?;
         assert_eq!(d.order(), 4);
         Ok(())
+    }
+
+    // ── fast_path_gate regression tests (round-3 review) ─────────────────
+
+    fn sample(re: f64, im: f64, s11_re: f64, s11_im: f64) -> ResponseSample {
+        ResponseSample {
+            frequency_hz: 0.0,
+            normalized_omega: 0.5,
+            group_delay: None,
+            s11_re,
+            s11_im,
+            s21_re: re,
+            s21_im: im,
+        }
+    }
+
+    /// The regression this gate exists for: the fast path returns an S21 with
+    /// the *right magnitude but a rotated phase* (a dropped/signed coupling
+    /// that leaves |S21| nearly unchanged). The old magnitude-only gate
+    /// (|S21| difference) would pass this; the complex-S21 gate must fail.
+    #[test]
+    fn gate_rejects_same_magnitude_different_phase() {
+        // LU reference: S21 = 1 (phase 0). Fast path: S21 = j·1 (phase 90°),
+        // identical magnitude, identical S11. |p21| == |l21| exactly.
+        let lu = vec![sample(1.0, 0.0, 0.0, 1e-3)];
+        let pole = vec![sample(0.0, 1.0, 0.0, 1e-3)];
+        let verdict = fast_path_gate(&pole, &lu);
+        assert_eq!(verdict.compared, 1);
+        assert!(
+            verdict.all_finite,
+            "finite values should not trip the non-finite flag"
+        );
+        assert!(
+            !verdict.passes(1e-3),
+            "a 90° phase rotation of S21 with equal magnitude must FAIL the gate (old magnitude-only gate would have passed it); max_diff = {}",
+            verdict.max_diff
+        );
+    }
+
+    /// A small phase error that a 1e-3 relative gate must catch while an
+    /// all-pole matched design (relative diff ~1e-16) passes: pins the
+    /// tolerance band between the two.
+    #[test]
+    fn gate_tolerance_band() {
+        let lu = vec![sample(1.0, 0.0, 0.0, -0.4)];
+        // 1e-4 relative phase error — below tolerance, must pass.
+        let pole_ok = vec![sample(1.0, 1e-4, 0.0, -0.4)];
+        assert!(
+            fast_path_gate(&pole_ok, &lu).passes(1e-3),
+            "a 1e-4 deviation is within the 1e-3 tolerance"
+        );
+        // 1e-2 relative phase error — above tolerance, must fail.
+        let pole_bad = vec![sample(1.0, 1e-2, 0.0, -0.4)];
+        assert!(
+            !fast_path_gate(&pole_bad, &lu).passes(1e-3),
+            "a 1e-2 deviation exceeds the 1e-3 tolerance"
+        );
+    }
+
+    /// An S11-only distortion (|S21| and S21 phase untouched) must fail: the
+    /// old gate never looked at S11 at all.
+    #[test]
+    fn gate_rejects_s11_distortion() {
+        let lu = vec![sample(0.8, 0.6, 0.3, -0.5)];
+        let pole = vec![sample(0.8, 0.6, 0.9, -0.5)]; // S11 moved, S21 exact
+        let verdict = fast_path_gate(&pole, &lu);
+        assert_eq!(verdict.compared, 1);
+        assert!(!verdict.passes(1e-3), "an S11 distortion must fail the gate");
+    }
+
+    /// Identical samples pass; a grid where every point is at the |S21| noise
+    /// floor compares nothing and must NOT pass (the fast path was never
+    /// verified — the caller falls back to LU).
+    #[test]
+    fn gate_passes_identical_and_fails_unverified() {
+        let a = vec![sample(0.7, 0.3, -0.2, 0.1)];
+        let b = vec![sample(0.7, 0.3, -0.2, 0.1)];
+        assert!(fast_path_gate(&a, &b).passes(1e-3));
+
+        let null_lu = vec![sample(0.0, 1e-12, 1.0, 0.0)];
+        let null_pole = vec![sample(0.0, 1e-12, 1.0, 0.0)];
+        let verdict = fast_path_gate(&null_pole, &null_lu);
+        assert_eq!(verdict.compared, 0, "all points at the noise floor are skipped");
+        assert!(!verdict.passes(1e-3), "an all-skipped grid must not verify the fast path");
+    }
+
+    /// A non-finite value at a compared point is an automatic gate failure —
+    /// never a silent NaN answer and never a pass.
+    #[test]
+    fn gate_fails_on_non_finite() {
+        let lu = vec![sample(1.0, 0.0, 0.0, 1e-3)];
+        let nan_pole = vec![sample(f64::NAN, 0.0, 0.0, 1e-3)];
+        let v = fast_path_gate(&nan_pole, &lu);
+        assert!(!v.all_finite);
+        assert!(!v.passes(1e-3));
+
+        let inf_lu = vec![sample(f64::INFINITY, 0.0, 0.0, 1e-3)];
+        let v = fast_path_gate(&lu, &inf_lu);
+        assert!(!v.all_finite);
+        assert!(!v.passes(1e-3));
     }
 
     /// A physical-Hz `freq_range` on a prototype design (no center/bw) must

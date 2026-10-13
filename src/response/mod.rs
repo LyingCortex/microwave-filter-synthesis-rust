@@ -190,6 +190,7 @@ mod tests {
     use super::*;
     use crate::freq::{BandPassMapping, LowPassMapping};
     use crate::matrix::CouplingMatrixBuilder;
+    use crate::response::pole_expansion::PoleExpansionData;
 
     fn approx_eq(lhs: f64, rhs: f64, tol: f64) {
         let diff = (lhs - rhs).abs();
@@ -398,6 +399,147 @@ mod tests {
             );
         }
         assert!(checked > 5, "expected to check > 5 interior points, checked {checked}");
+        Ok(())
+    }
+
+    /// P3-2 (round-3): an *independent* value anchor for group delay on a
+    /// design that carries finite transmission zeros — the all-pole phase-
+    /// derivative test does not cover the with-zeros case.
+    ///
+    /// The anchor is a central difference of the LU S21 phase (an independent
+    /// algorithm), run where the phase is smooth: the passband `|ω| ≤ 1`
+    /// with `|S21| ≥ 0.2` (away from band edges and any transmission-zero
+    /// steepness, where a central difference is ill-conditioned). The
+    /// transmission zeros sit outside the comparison band (|zero| = 2/2.5),
+    /// so they shape the band phase without contaminating the anchor. Both
+    /// solver paths (LU and the O(N) pole-expansion fast path) must match the
+    /// anchor.
+    ///
+    /// Two extra guards make this more than "the two paths agree with each
+    /// other": (a) a **step-convergence** check at a fixed ω (FD estimate at
+    /// n=401 vs n=801) proves the anchor is truncation-converging, not just
+    /// some number both paths happen to hit; (b) the **zero-region** check
+    /// confirms `group_delay` is `None` (not a fake 0.0) at a transmission
+    /// zero on *both* backends.
+    #[test]
+    fn group_delay_fd_anchor_on_with_zeros_design() -> Result<()> {
+        use crate::design::FilterDesign;
+        use num_complex::Complex64;
+
+        // Finite transmission zeros at ±2, ±2.5 (stopband; |zero| > 1).
+        let d = FilterDesign::prototype(6, 23.0)
+            .zeros([-2.0, -2.5, 2.0, 2.5])
+            .synthesize()?;
+        let matrix = d.matrix();
+
+        // --- (a) FD value anchor: LU + fast path vs central-diff phase -----
+        let n = 401;
+        let grid = FrequencyGrid::linspace(-1.0, 1.0, n)?;
+        let h = 2.0 / (n as f64 - 1.0);
+        let lu = ResponseSolver {}.evaluate_normalized(matrix, &grid)?;
+        let pe = PoleExpansionData::from_matrix(matrix)?
+            .evaluate_normalized(&grid)?;
+        let s21 = |i: usize| Complex64::new(lu.samples[i].s21_re, lu.samples[i].s21_im);
+        let mut checked = 0usize;
+        let mut max_gap = 0.0_f64;
+        for i in 1..n - 1 {
+            let w = lu.samples[i].normalized_omega;
+            if w.abs() > 1.0 {
+                continue;
+            }
+            let s = s21(i);
+            if s.norm() < 0.2 {
+                continue; // band-edge / steep-phase region: anchor unreliable
+            }
+            let (lu_gd, pe_gd) = match (
+                lu.samples[i].group_delay,
+                pe.samples[i].group_delay,
+            ) {
+                (Some(a), Some(b)) => (a, b),
+                _ => continue,
+            };
+            // Central difference of the LU S21 → independent phase derivative.
+            let ds21 = (s21(i + 1) - s21(i - 1)) / (2.0 * h);
+            let fd = -((ds21 / s).im);
+            let tol = 1e-2 + 2e-3 * fd.abs();
+            max_gap = max_gap.max((lu_gd - fd).abs().max((pe_gd - fd).abs()));
+            checked += 1;
+            assert!(
+                (lu_gd - fd).abs() < tol,
+                "LU group delay at ω={w}: {lu_gd} vs S21 phase derivative {fd}"
+            );
+            assert!(
+                (pe_gd - fd).abs() < tol,
+                "fast group delay at ω={w}: {pe_gd} vs S21 phase derivative {fd}"
+            );
+        }
+        assert!(checked > 100, "expected many interior points, checked {checked}");
+        // The anchor must be a tight value reference, not just "close": the
+        // measured max gap on this design is ~2e-3, so pin a generous-but-meaningful
+        // cap to keep the anchor from silently degrading.
+        assert!(max_gap < 5e-2, "FD anchor max gap {max_gap} is too large");
+
+        // --- (b) step convergence: the FD estimate must be truncation-stable
+        // at a fixed ω (n=401 vs n=801), proving the anchor is converging. ---
+        let mut prev_fd: Option<f64> = None;
+        for (n, grid) in [
+            (401usize, FrequencyGrid::linspace(-1.0, 1.0, 401)?),
+            (801usize, FrequencyGrid::linspace(-1.0, 1.0, 801)?),
+        ] {
+            let h = 2.0 / (n as f64 - 1.0);
+            let r = ResponseSolver {}.evaluate_normalized(matrix, &grid)?;
+            let j = (0..n)
+                .min_by(|&a, &b| {
+                    let da = (r.samples[a].normalized_omega + 0.5).abs();
+                    let db = (r.samples[b].normalized_omega + 0.5).abs();
+                    da.partial_cmp(&db).unwrap()
+                })
+                .unwrap();
+            let s = |i: usize| Complex64::new(r.samples[i].s21_re, r.samples[i].s21_im);
+            let ds = (s(j + 1) - s(j - 1)) / (2.0 * h);
+            let fd = -((ds / s(j)).im);
+            if let Some(p) = prev_fd {
+                assert!(
+                    (fd - p).abs() < 1e-3,
+                    "FD estimate not truncation-converging at ω≈-0.5: {p} → {fd} (gap {})",
+                    (fd - p).abs()
+                );
+            }
+            prev_fd = Some(fd);
+        }
+
+        // --- (c) zero-region: group delay is None (not a fake 0.0) at a
+        // transmission zero, on BOTH backends. ---
+        let dz = FilterDesign::prototype(6, 23.0)
+            .zeros([-1.2, 1.2])
+            .synthesize()?;
+        let mz = dz.matrix();
+        let gz = FrequencyGrid::linspace(-1.3, 1.3, 261)?;
+        let rz = ResponseSolver {}.evaluate_normalized(mz, &gz)?;
+        let pez = PoleExpansionData::from_matrix(mz)?
+            .evaluate_normalized(&gz)?;
+        let mut deep = 0usize;
+        for i in 0..rz.samples.len() {
+            if rz.samples[i].s21_mag() < 1e-6 {
+                deep += 1;
+                assert!(
+                    rz.samples[i].group_delay.is_none(),
+                    "LU group delay must be None at a transmission zero (ω={}), not {:#?}",
+                    rz.samples[i].normalized_omega,
+                    rz.samples[i].group_delay
+                );
+                assert!(
+                    pez.samples[i].group_delay.is_none(),
+                    "fast-path group delay must be None at a transmission zero (ω={}), not {:#?}",
+                    pez.samples[i].normalized_omega,
+                    pez.samples[i].group_delay
+                );
+            }
+        }
+        assert!(
+            deep > 0,
+            "expected at least one near-zero point in the zero-region grid"
+        );
         Ok(())
     }
     #[test]

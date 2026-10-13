@@ -85,14 +85,14 @@ SParameterResponse { s11, s21, group_delay } @ FrequencyGrid
 `√(1−1/z²)` 变虚 ⇒ `F(s)` 非 Hermitian ⇒ 恒等式 O(1) 破坏;`|z|=1` 使其为 0
 ⇒ `F(j)=0` ⇒ eps 无定义(`generalized_chebyshev.rs:16-24`)。
 
-内部 `synthesize_generalized_chebyshev_data` (`helpers.rs:445`) 依次:
+内部 `synthesize_generalized_chebyshev_data` (`generalized_chebyshev_helpers.rs:467`) 依次:
 
 ### 2.1 零点补齐
-`pad_transmission_zeros`:有限零点 + 用 `∞` 补齐到 N 个(`helpers.rs:104-134`)。
+`pad_transmission_zeros`:有限零点 + 用 `∞` 补齐到 N 个(`generalized_chebyshev_helpers.rs:104-134`)。
 `reciprocal_or_zero(∞)=0`,`safe_sqrt_term(∞)=1`。
 
 ### 2.2 Cameron 递推(在 w 域)
-`cameron_recursive` (`helpers.rs:142`)。初值(第 1 个零点 `z₁`):
+`cameron_recursive` (`generalized_chebyshev_helpers.rs:142`)。初值(第 1 个零点 `z₁`):
 ```
 U₀ = 1 − w/z₁                       V₀ = √(1 − 1/z₁²)
 ```
@@ -101,39 +101,44 @@ U₀ = 1 − w/z₁                       V₀ = √(1 − 1/z₁²)
 Uₙ = (1 − w/zₙ)·Uₙ₋₁ + temp·(1 − w²)·Vₙ₋₁
 Vₙ = (1 − w/zₙ)·Vₙ₋₁ + temp·Uₙ₋₁
 ```
-(代码 `helpers.rs:179-199` 是就地展开的卷积:U 更新 = `U·(1−w/z)`(长度 +1)
+(代码 `generalized_chebyshev_helpers.rs:179-199` 是就地展开的卷积:U 更新 = `U·(1−w/z)`(长度 +1)
 加 `temp·V·(1−w²)`(同下标加、下标+2 减);V 更新 = `V·(1−w/z)` 加 `temp·U`
 —— 注意 V 的第二项是 `temp·U`,**不带 w 因子**。)结果 `U` 转成 `F(s)`
 (降幂 w → 升幂 s,`descending_w_to_ascending_s`,`generalized_ops.rs:33`)。
 **F(s) 的根即反射零点(在 ±j·z 处)**。
 
 ### 2.3 P(s)(传输零点)
-`find_p_polynomial` (`helpers.rs:214`):`P(s) = ∏(s² + z_k²)`(有限零点),
+`find_p_polynomial` (`generalized_chebyshev_helpers.rs:214`):`P(s) = ∏(s² + z_k²)`(有限零点),
 若 `(N − finite_count)` 为偶再乘 `j`。P 承载**传输零点**。
 
 ### 2.4 eps 与 eps_r(纹波参数)
-`find_eps` (`helpers.rs:247`):
+`find_eps` (`generalized_chebyshev_helpers.rs:247`):
 ```
 rl_linear = 10^(RL/10) − 1
 eps   = |P(j)| / |F(j)| / √rl_linear
 eps_r = 1                                   （有无穷零点,即 finite_count < N）
       = eps / √(eps² − 1)                   （全有限零点）
 ```
+> **全有限零点的有效域**:`eps_r = eps/√(eps²−1)` 仅当 `eps > 1` 才有有限实值。
+近带边零点(`|z| ≈ 1`)或高 RL 会使 `eps ≤ 1`,该配置对全有限公式不可行 ——
+`find_eps` 在入口以带域信息的 typed error(`PreconditionViolation`,含 eps 值与
+替代建议:改用 mixed 零点,即至少保留一个无穷零点,eps_r ≡ 1)拒绝,而非让 NaN
+流到 E 多项式阶段后被通用有限性检查拦下(2026-10-12 修复,review P1-1)。
 
 ### 2.5 辅助 A 多项式
-`build_a_polynomial_stage` (`helpers.rs:306`):`P(s)→P(w)`,对每个有限零点求
+`build_a_polynomial_stage` (`generalized_chebyshev_helpers.rs:328`):`P(s)→P(w)`,对每个有限零点求
 `Ψ` 求和(`Ψₙ = rₙ·∏_{m≠n}(w²−z_m²)`,`rₙ = zₙ·safe_sqrt_term(zₙ)`),
 `A(w) = (N − finite_count)·P(w) + Ψ_sum`,求根后旋回 s 域。全极点时 A = None。
 
 ### 2.6 E 多项式(关键:在 w 域做,强制上半平面,再做 monic)
-`build_e_polynomial_stage` (`helpers.rs:385`):
+`build_e_polynomial_stage` (`generalized_chebyshev_helpers.rs:407`):
 1. `F(s),P(s) → F(w),P(w)`,各自 **normalize to monic**(s→w 旋转会让首项变
    `j^N` 而非 1,不归一会破坏 F/eps_r 与 P/eps 的相对权重 —— 这正是奇数阶曾产生
-   虚假通带零点的根因,`helpers.rs:395-402`);
-2. **Cameron 公式 `E(w) = F(w)/eps_r + j·P(w)/eps`**(`helpers.rs:409-411`)。
+   虚假通带零点的根因,`generalized_chebyshev_helpers.rs:417-424`);
+2. **Cameron 公式 `E(w) = F(w)/eps_r + j·P(w)/eps`**(`generalized_chebyshev_helpers.rs:426-433`)。
    那个 `j` 至关重要 —— 缺了它奇数阶的 P 贡献变实部,E 的根结构全错;
 3. 求根(AdaptiveRootSolver),`reflect_to_upper_half_plane` 把根映到稳定上半平面,
-   重建、旋回 s 域、**再 monic**(`helpers.rs:424-425`,w→s 首项带 `(−j)^N`)。
+   重建、旋回 s 域、**再 monic**(`generalized_chebyshev_helpers.rs:443-447`,w→s 首项带 `(−j)^N`)。
 E 的根 = 网络的极点(左半 s 平面)。
 
 ### 2.7 求根器链(所有求根共用)
@@ -154,9 +159,14 @@ P 拼成二端口短路导纳矩阵 `[Y] = (Y11, Y12, Y22)`,共享一个分母�
 (全局 `(−1)^N` 因子是 Cameron 公式与朴素 `alternating_conjugate` 的差别,
 `admittance.rs:58-65`;奇数阶缺它会丢阶、极点离开虚轴、得到全反射矩阵)。
 
-**首项抵消守卫**(`admittance.rs:43-52`):`N mod 4 == 2` 时 `E_lead = −1` 而
-`F/eps_r` 首项 `+1`,直接相加首项抵消。代码检测 `|e_lead + f_lead|² < 1e-20`
-且 `e_lead.re < −1e-15` 时**取反 E** 使首项相加(≈2)而非相消。
+**首项抵消守卫**(`admittance.rs:40-54`):防御性检查 —— 仅当 E(s) 首项系数为**负**
+且与 `F/eps_r` 首项相消(`|e_lead + f_lead|² < 1e-20` 且 `e_lead.re < −1e-15`)时**取反 E**。
+库内部路径上 E 在 `build_e_polynomial_stage` 末尾已 monic(首项恒 `+1+0j`,实测
+order 4/6/8),`F/eps_r` 首项 `1/eps_r ∈ (0,1]`,两首项相加恒在 `(1,2]`,守卫
+**不触发**(no-op);它只保护经公共 `pub` 字段直接构造非 monic `e_s` 的误用路径
+(用户手搓 `GeneralizedChebyshevData` 时 E 首项可为负,守卫此时生效)。
+注:旧版注释曾声称 "N mod 4 == 2 时 E_lead = −1 导致相消" —— 那是 re-monic
+(`:447`)引入**之前**的状态,现已失效,勿据此"修复"守卫。
 
 四元构造:
 ```
@@ -481,5 +491,5 @@ D(ω) = 1 + Σ r22,k/(ω−pole_k) + …（网络分母）
 
 ---
 
-*本文档基于 `e0c2699`(0.6.2-unreleased)源码核对;行号锚点以该版本为准,
+*本文档基于 `7dd617a`(0.6.3-unreleased)源码核对;行号锚点以该版本为准,
 重构可能使其漂移,但算法描述不受影响。*

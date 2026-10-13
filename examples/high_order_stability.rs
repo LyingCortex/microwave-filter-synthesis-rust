@@ -60,7 +60,10 @@ fn check_matrix_sanity(matrix: &CouplingMatrix, label: &str) -> bool {
     ok
 }
 
-fn test_order(order: usize, return_loss_db: f64, zeros: &[f64]) {
+/// Synthesizes one design and checks the resulting matrices. Returns
+/// `true` when the transversal matrix was produced (the Folded/Arrow
+/// variants are best-effort and do not affect the return value).
+fn test_order(order: usize, return_loss_db: f64, zeros: &[f64]) -> bool {
     let label = if zeros.is_empty() {
         format!("Order {order}, all-pole, {return_loss_db} dB")
     } else {
@@ -78,7 +81,7 @@ fn test_order(order: usize, return_loss_db: f64, zeros: &[f64]) {
         }
         Err(e) => {
             eprintln!("  Spec creation failed: {e}");
-            return;
+            return false;
         }
     };
 
@@ -86,7 +89,7 @@ fn test_order(order: usize, return_loss_db: f64, zeros: &[f64]) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("  Polynomial synthesis failed: {e}");
-            return;
+            return false;
         }
     };
 
@@ -111,32 +114,92 @@ fn test_order(order: usize, return_loss_db: f64, zeros: &[f64]) {
                 }
                 Err(e) => eprintln!("  Arrow transform failed: {e}"),
             }
+            true
         }
-        Err(e) => eprintln!("  Matrix synthesis failed: {e}"),
+        Err(e) => {
+            // A typed `NumericalFailure` here is an *expected, honest* outcome
+            // past the adaptive pole-axis tolerance boundary — report it, do
+            // not let it masquerade as a crash or a silent success.
+            eprintln!("  Matrix synthesis REJECTED: {e}");
+            false
+        }
     }
 }
 
 fn main() {
     println!("=== High-Order Filter Numerical Stability Test ===");
+    println!(
+        "Verified boundary (RL 20-22 dB, measured 2026-10-13): all-pole OK \
+         through order 28, finite-TZ OK through order 24; order 30+ is \
+         rejected by the adaptive pole-axis tolerance with a typed \
+         NumericalFailure. The verified set below MUST succeed; the \
+         exploratory set (order 30+) may be rejected and that is expected."
+    );
 
-    // All-pole filters at increasing orders
-    for &order in &[10, 12, 15, 18, 20, 22, 24, 26, 28, 30] {
-        test_order(order, 20.0, &[]);
+    // ---- Verified set: these MUST synthesize (regression-anchored) ----
+    // All-pole through the measured boundary.
+    for &order in &[10, 12, 15, 18, 20, 22, 24, 26, 28] {
+        if !test_order(order, 20.0, &[]) {
+            eprintln!("\nVERIFIED-SET FAILURE: all-pole order {order} was rejected");
+            std::process::exit(1);
+        }
+    }
+    // Finite-TZ through the measured boundary.
+    let verified_tz: &[(usize, &[f64], f64)] = &[
+        (10, &[1.5, -1.5, 2.0, -2.0], 20.0),
+        (12, &[1.3, -1.3, 1.8, -1.8, 2.5, -2.5], 20.0),
+        (16, &[1.2, -1.2, 1.5, -1.5, 2.0, -2.0, 3.0, -3.0], 20.0),
+        (20, &[1.2, -1.2, 1.5, -1.5, 2.0, -2.0, 3.0, -3.0, 5.0, -5.0], 20.0),
+        (24, &[1.3, -1.3, 1.6, -1.6, 2.0, -2.0], 22.0),
+    ];
+    for &(order, zeros, rl) in verified_tz {
+        if !test_order(order, rl, zeros) {
+            eprintln!("\nVERIFIED-SET FAILURE: finite-TZ order {order} was rejected");
+            std::process::exit(1);
+        }
+    }
+    println!("\n--- Verified set: all succeeded ---");
+
+    // ---- Exploratory set: order 30+ (informational; rejection is expected) ----
+    println!("\n=== Exploratory scan (order 30+; rejection is expected) ===");
+    let mut rejected = Vec::new();
+    for &order in &[30, 32, 40] {
+        if !test_order(order, 20.0, &[]) {
+            rejected.push(format!("all-pole {order}"));
+        }
+    }
+    if !test_order(30, 20.0, &[1.5, -1.5, 2.0, -2.0, 3.0, -3.0]) {
+        rejected.push("finite-TZ 30".to_string());
+    }
+    if !rejected.is_empty() {
+        println!("\nExploratory rejections (expected past the boundary): {rejected:?}");
     }
 
-    // Filters with transmission zeros
-    test_order(10, 20.0, &[1.5, -1.5, 2.0, -2.0]);
-    test_order(12, 20.0, &[1.3, -1.3, 1.8, -1.8, 2.5, -2.5]);
-    test_order(16, 20.0, &[1.2, -1.2, 1.5, -1.5, 2.0, -2.0, 3.0, -3.0]);
-    test_order(
-        20,
-        20.0,
-        &[1.2, -1.2, 1.5, -1.5, 2.0, -2.0, 3.0, -3.0, 5.0, -5.0],
-    );
-    test_order(24, 22.0, &[1.3, -1.3, 1.6, -1.6, 2.0, -2.0]);
+}
 
-    // Extreme: order 30 with zeros
-    test_order(30, 20.0, &[1.5, -1.5, 2.0, -2.0, 3.0, -3.0]);
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    println!("\n=== Done ===");
+    /// Regression anchor for the verified high-order boundary (P2-1): the
+    /// all-pole boundary (order 28) must synthesize and order 30 must be
+    /// rejected with a typed `NumericalFailure`. If the adaptive pole-axis
+    /// tolerance or root-finding changes and order 30 starts succeeding (or
+    /// order 28 starts failing), this test fails so the documented boundary
+    /// in README/architecture is forced to be re-checked.
+    #[test]
+    fn verified_high_order_boundary() {
+        // The verified all-pole boundary must synthesize.
+        assert!(
+            test_order(28, 20.0, &[]),
+            "order 28 all-pole must synthesize (documented boundary)"
+        );
+        // Order 30 all-pole is past the adaptive pole-axis tolerance and must
+        // be rejected (not silently succeed, not panic).
+        assert!(
+            !test_order(30, 20.0, &[]),
+            "order 30 all-pole should be rejected by the pole-axis tolerance; \
+             if it now succeeds, the documented boundary is stale"
+        );
+    }
 }

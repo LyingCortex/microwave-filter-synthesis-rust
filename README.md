@@ -45,9 +45,13 @@ fn main() -> Result<()> {
 - **Coupling matrix topologies** — Transversal, Folded, Arrow
 - **Fast S-parameter evaluation** — Pole-expansion method (O(N) per frequency
   point) with automatic LU fallback
-- **High-order support** — Numerically stable up to order 30+ with adaptive
-  root-finding (faer companion-matrix eigenvalues → Durand-Kerner →
-  Aberth-Ehrlich fallback)
+- **High-order support** — verified numerically stable through order 28
+  (all-pole) and order 24 (finite transmission zeros), RL 20–22 dB, via
+  adaptive root-finding (faer companion-matrix eigenvalues → Durand-Kerner →
+  Aberth-Ehrlich fallback). Order 30+ may be rejected with a typed
+  `NumericalFailure` (the adaptive pole-axis tolerance) — see
+  `examples/high_order_stability.rs` for the verified boundary and a
+  reproducible rejection.
 - **Band-pass scaling** — Convert normalized matrices to physical units
 - **Python bindings** (optional) — `pip install .` via maturin
 

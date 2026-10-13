@@ -1,34 +1,50 @@
 # MFS TODO List
 
-**Status as of 0.6.2-unreleased (2026-10-12).** This file is maintained as the single
+**Status as of 0.6.3-unreleased (2026-10-13).** This file is maintained as the single
 open-item list. Closed items are listed with the version that closed them so
 history is traceable. Authoritative architecture/limitation references:
 `docs/architecture.md` (Known Limitations / Future Roadmap),
 `docs/algorithms.md` (implementation-grounded algorithm reference), and
 `docs/internal/architecture-review-2026-09-25.md`.
 
-## Current state (0.6.2-unreleased, 2026-10-12)
+## Current state (0.6.3-unreleased, 2026-10-13)
 
-Working tree clean; `master` head `e0c2699` (bit-exact A/B doc for the
-`flip_sign` dedup on top of `353f506`).
-All CI-parity checks green on that head (local, WSL2 / Rust 1.95.0):
+`master` head `7dd617a`; the working tree carries the round-2 and round-3
+review remediation (uncommitted). Round-2 report:
+`docs/reviews/mfs-review-round2.md`; round-3 report:
+`docs/reviews/mfs-review-round3.md`. All CI-parity checks green on this tree
+(local, WSL2 / Rust 1.95.0):
 
-- `cargo test` — **435 passed, 0 failed** across 22 binaries (lib 289 + 20
-  integration suites: `benchmark_standard` 20 conformance gates,
-  `folded_response_invariance` 10, `multiplexer` 15, `literature_fixtures` 5,
-  `passband_tz` 4, `prelude_smoke` 3, `optimizer_integration` 2, etc.)
+- `cargo test` — **457 passed, 0 failed** (default features; = lib 308 +
+  integration 132 + doctests 17; does not build examples/benches as test
+  targets)
+- `cargo test --features cli,python` — **473 passed, 0 failed** (adds the
+  `mfs_cli` binary + `cli_integration` / `cli_save_resume_e2e` suites, +16)
+- `cargo test --all-targets` — **441 passed, 0 failed** (= lib 308 +
+  integration 132 + 1 example `#[test]` in
+  `examples/high_order_stability.rs`; runs benches/example unit tests but
+  **not** doctests). The 457 vs 441 gap: default runs 17 doctests and no
+  example test; all-targets runs the 1 example test and no doctests.
 - `cargo clippy --all-targets -- -D warnings` — zero warnings
-- `cargo clippy --features cli,python --all-targets -- -D warnings` — zero warnings
+- `cargo clippy --features cli,python --all-targets -- -D warnings` — zero
+  warnings
 
-Since the 0.6.1 snapshot: the 0.6.1 whole-crate review wave (3 P1 +
-14 P2 + 11 P3 + round-2) is **fully closed and gate-anchored** (released as
-0.6.2, 2026-10-11: fast-path group delay + three-algorithm verification,
-§D.7 dB single source, CI wheel/FFI gate). On top of 0.6.2:
-`flip_sign` / `flip_sign_inplace` deduplicated into one shared
-`pub(crate)` helper (`matrix/mod.rs`), bit-exact A/B verified (9 prototype
-cases, orders 4–10: folded/CT/CQ matrices + 401-point folded response
-byte-identical between `353f506~1` and `353f506`; 5364-line dump, `diff`
-empty), plus a regression test pinning the diagonal-preservation invariant.
+Since the 0.6.1 snapshot: the 0.6.1 whole-crate review wave (3 P1 + 14 P2 +
+11 P3) is **fully closed and gate-anchored** (released as 0.6.2, 2026-10-11:
+fast-path group delay + three-algorithm verification, §D.7 dB single source,
+CI wheel/FFI gate). On top of 0.6.2, in 0.6.3-unreleased: `flip_sign` /
+`flip_sign_inplace` deduplicated into one shared `pub(crate)` helper
+(`matrix/mod.rs`), bit-exact A/B verified (9 prototype cases, orders 4–10,
+byte-identical folded/CT/CQ matrices + 401-point response); the P2-1
+`PoleExpansionData::from_matrix` transversality guard (structural
+precondition + LU fallback, 5 regression tests); and the P1-1 all-finite
+feasibility domain guard in `find_eps` (typed `PreconditionViolation` for
+`eps <= 1`, 7 tests), with the `eps > 1` domain documented in
+`docs/algorithms.md` §2.4 and `docs/architecture.md`. Round-3 (P2-2
+port-diagonal guard + 3 tests, complex S21+S11 fast-path gate + 5 tests,
+measured high-order boundary 28/24 + example regression test, `synthesize`
+doc + `verify_against_spec` doctest, with-zeros group-delay FD anchor test)
+is fully closed and test-anchored — see the 0.6.3-unreleased CHANGELOG entry.
 The Open sections below hold the remaining low-priority ecosystem items and
 the refuted passband-TZ work.
 

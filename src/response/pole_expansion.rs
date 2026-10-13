@@ -84,9 +84,23 @@ impl PoleExpansionData {
     /// `ω`. The transversal matrix is purely real, so `−B_k` is real; a
     /// non-transversal (folded/arrow) matrix has complex couplings and must be
     /// transformed to transversal form first.
+    ///
+    /// **Input contract (enforced):** the resonator block `M[1..=N][1..=N]`
+    /// must be diagonal — each resonator couples only to source and load,
+    /// never to another resonator — and the port diagonals `M[0,0]` /
+    /// `M[N+1,N+1]` must be zero (pure series terminations, no port shunt).
+    /// A non-transversal (folded/arrow/wheel) matrix carries inter-resonator
+    /// couplings, and a port-shunted matrix carries a port diagonal, that this
+    /// O(N) partial-fraction path cannot model; passing either would silently
+    /// drop the unmodeled entries and return a wrong response (measured
+    /// ~1e-1 in |S21| for a source shunt). `from_matrix` rejects both with
+    /// `MfsError::PreconditionViolation` rather than computing a silent
+    /// misanswer. Use the LU-based `ResponseSolver` for arbitrary symmetric
+    /// matrices, or transform to transversal form with series terminations.
     pub fn from_matrix(matrix: &crate::matrix::CouplingMatrix) -> Result<Self> {
         let order = matrix.order();
         let side = matrix.side();
+        Self::assert_transversal_structure(matrix)?;
 
         let mut poles = Vec::with_capacity(order);
         let mut residues_y11 = Vec::with_capacity(order);
@@ -124,6 +138,75 @@ impl PoleExpansionData {
             source_r: 1.0,
             load_r: 1.0,
         })
+    }
+
+    /// Structural precondition for [`from_matrix`]: the resonator block
+    /// `M[1..=N][1..=N]` must be diagonal (each resonator couples only to
+    /// source and load, never to another resonator).
+    ///
+    /// This is a *structural* check on the actual entries, not a test of the
+    /// topology label. Folded/arrow/wheel matrices carry inter-resonator
+    /// couplings `M[k][k']` (k≠k') that the O(N) partial-fraction model
+    /// cannot represent; dropping them would yield a physically wrong but
+    /// silently computed response. The Schur-2×2 model further assumes the
+    /// port diagonals `M[0,0]` / `M[N+1,N+1]` are zero (pure series
+    /// terminations); a nonzero port diagonal is dropped silently by the
+    /// model, so it is rejected as well. We reject any off-diagonal resonator
+    /// entry or port diagonal above a scale-aware tolerance.
+    ///
+    /// The tolerance is `1e-9 × max(1, largest |M| entry)`. It sits far above
+    /// f64 rounding on a normalized matrix (~1e-16) and far below any
+    /// physically meaningful normalized coupling (O(1)), so it accepts a
+    /// genuinely transversal (up to round-off) matrix while rejecting any real
+    /// inter-resonator coupling. It is deliberately not the main path's 1e-3
+    /// S-parameter threshold, which measures response error and is unrelated
+    /// to this structural precondition.
+    fn assert_transversal_structure(matrix: &crate::matrix::CouplingMatrix) -> Result<()> {
+        let order = matrix.order();
+        let side = matrix.side();
+        let data = matrix.as_slice();
+        let max_entry = data.iter().fold(0.0f64, |m, &v| m.max(v.abs()));
+        let tol = 1e-9 * max_entry.max(1.0);
+        for (i, row) in data.chunks_exact(side).enumerate() {
+            if i < 1 || i > order {
+                continue; // source (row 0) and load (row side-1) are not resonators
+            }
+            for (j, &value) in row.iter().enumerate() {
+                if j == i || j < 1 || j > order {
+                    continue; // skip the diagonal and the port columns
+                }
+                if value.abs() > tol {
+                    return Err(MfsError::PreconditionViolation(format!(
+                        "PoleExpansionData::from_matrix requires a transversal matrix, \
+                         but the resonator-resonator coupling M[{i}][{j}] = {value} \
+                         (|M| > {tol}) is present. Folded/arrow and other non-transversal \
+                         topologies carry inter-resonator couplings that the O(N) fast path \
+                         cannot model; transform to transversal form first, or use the \
+                         LU-based ResponseSolver, which handles arbitrary symmetric matrices."
+                    )));
+                }
+            }
+        }
+        // Port diagonals: the Schur-2×2 model assumes M[0,0] = M[N+1,N+1] = 0
+        // (pure series terminations; port shunts are not part of the
+        // coupling-matrix convention this path models). A nonzero port
+        // diagonal would be silently dropped by the model, so reject it with
+        // the same scale-aware tolerance as the resonator block.
+        for (i, j) in [(0, 0), (order + 1, order + 1)] {
+            if data[i * side + j].abs() > tol {
+                return Err(MfsError::PreconditionViolation(format!(
+                    "PoleExpansionData::from_matrix requires a transversal \
+                     matrix with pure series terminations, but the port \
+                     diagonal M[{i}][{j}] = {} (|M| > {tol}) is nonzero. The \
+                     O(N) fast path models only M[0,k], M[k,k], M[k,N+1] and \
+                     M[0,N+1]; a port shunt is not modeled. Use the LU-based \
+                     ResponseSolver, which handles arbitrary symmetric \
+                     matrices, or zero the port diagonal if it is spurious.",
+                    data[i * side + j]
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Evaluates S11, S21 and the group delay at a single normalized frequency
@@ -344,6 +427,10 @@ impl PoleExpansionData {
 #[cfg(test)]
 mod tests {
     use super::PoleExpansionData;
+    use crate::design::FilterDesign;
+    use crate::freq::FrequencyGrid;
+    use crate::response::ResponseSolver;
+    use crate::transform::{transform_matrix, TopologyKind};
     use num_complex::Complex64;
 
     /// Verify that a repeated pole contributes its full Laurent principal
@@ -470,5 +557,243 @@ mod tests {
         );
         let msg = format!("{err}");
         assert!(msg.contains("near-singular"), "message: {msg}");
+    }
+
+    /// A genuinely transversal 2-resonator matrix: the resonator block
+    /// `M[1..=2][1..=2]` is diagonal and the ports are series-terminated
+    /// (`M[0,0] = M[3,3] = 0`), so `from_matrix` must succeed.
+    #[test]
+    fn transversal_matrix_is_accepted() -> Result<(), Box<dyn std::error::Error>> {
+        use crate::matrix::CouplingMatrix;
+        // side = 4 (2 resonators + source + load). Row-major.
+        // Resonator block (rows/cols 1,2) is diagonal: M[1][2] = M[2][1] = 0.
+        // Port diagonals are zero (pure series terminations): the O(N) fast
+        // path's Schur form is exact only when M[0,0] = M[N+1,N+1] = 0, and a
+        // nonzero port diagonal is outside its domain (rejected → LU).
+        let data = vec![
+            // col0(src) col1(res1) col2(res2) col3(load)
+            0.0, 0.40, 0.30, 0.0, // row0 (source)
+            0.40, 0.10, 0.0, 0.20, // row1 (res 1)
+            0.30, 0.0, -0.10, 0.15, // row2 (res 2)
+            0.0, 0.20, 0.15, 0.0, // row3 (load) — M[3][3] = 0 (series)
+        ];
+        let m = CouplingMatrix::new(2, data)?;
+        assert_eq!(m.topology(), crate::matrix::MatrixTopology::Transversal);
+        PoleExpansionData::from_matrix(&m)?; // must not error
+        Ok(())
+    }
+
+    /// A transversal matrix whose resonator block carries only f64 round-off
+    /// level off-diagonal entries (~1e-12, the residue of a similarity
+    /// rotation that happened to land transversal) must be accepted — the
+    /// check must not treat `!= 0.0` as "non-transversal".
+    #[test]
+    fn tiny_roundoff_residual_is_not_rejected() -> Result<(), Box<dyn std::error::Error>> {
+        use crate::matrix::CouplingMatrix;
+        // Identical to the accepted matrix above except M[1][2] = M[2][1] = 1e-12
+        // — far above exact zero, far below any real coupling, well inside the
+        // 1e-9 * max(1, max|M|) structural tolerance.
+        let data = vec![
+            0.0, 0.40, 0.30, 0.0, // row0 (source)
+            0.40, 0.10, 1e-12, 0.20, // row1 (res 1)
+            0.30, 1e-12, -0.10, 0.15, // row2 (res 2)
+            0.0, 0.20, 0.15, 0.0, // row3 (load) — M[3][3] = 0 (series)
+        ];
+        let m = CouplingMatrix::new(2, data)?;
+        PoleExpansionData::from_matrix(&m)?; // round-off residual is accepted
+
+        // The same matrix with a real O(1) resonator-resonator coupling must be
+        // rejected — proving the check is not a no-op. (Port diagonals stay
+        // zero so the rejection is attributable to M[1][2], not a port shunt.)
+        let data_bad = vec![
+            0.0, 0.40, 0.30, 0.0, // row0 (source)
+            0.40, 0.10, 0.5, 0.20, // row1 (res 1)
+            0.30, 0.5, -0.10, 0.15, // row2 (res 2)
+            0.0, 0.20, 0.15, 0.0, // row3 (load) — M[3][3] = 0 (series)
+        ];
+        let m_bad = CouplingMatrix::new(2, data_bad)?;
+        let err = PoleExpansionData::from_matrix(&m_bad).unwrap_err();
+        assert!(
+            matches!(err, crate::error::MfsError::PreconditionViolation(_)),
+            "a real O(1) inter-resonator coupling must be rejected, got: {err:?}"
+        );
+        Ok(())
+    }
+
+    /// A folded topology matrix (carries nearest-neighbor resonator
+    /// couplings the O(N) fast path cannot model) must be rejected with a
+    /// typed `PreconditionViolation`, not silently answered.
+    #[test]
+    fn folded_matrix_is_rejected_with_typed_error() {
+        let d = FilterDesign::prototype(4, 20.0)
+            .zeros([1.5, -1.5])
+            .synthesize()
+            .expect("synthesis");
+        let folded = transform_matrix(d.matrix(), TopologyKind::Folded)
+            .expect("folded transform")
+            .matrix;
+        assert_eq!(folded.topology(), crate::matrix::MatrixTopology::Folded);
+        let err = PoleExpansionData::from_matrix(&folded).unwrap_err();
+        assert!(
+            matches!(err, crate::error::MfsError::PreconditionViolation(_)),
+            "expected PreconditionViolation for a folded matrix, got: {err:?}"
+        );
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("transversal"),
+            "error message should name the transversal precondition: {msg}"
+        );
+    }
+
+    /// An arrow topology matrix (dense upper-triangular resonator couplings)
+    /// must also be rejected with a typed `PreconditionViolation`.
+    #[test]
+    fn arrow_matrix_is_rejected_with_typed_error() {
+        let d = FilterDesign::prototype(4, 20.0)
+            .zeros([1.5, -1.5])
+            .synthesize()
+            .expect("synthesis");
+        let arrow = transform_matrix(d.matrix(), TopologyKind::Arrow)
+            .expect("arrow transform")
+            .matrix;
+        assert_eq!(arrow.topology(), crate::matrix::MatrixTopology::Arrow);
+        let err = PoleExpansionData::from_matrix(&arrow).unwrap_err();
+        assert!(
+            matches!(err, crate::error::MfsError::PreconditionViolation(_)),
+            "expected PreconditionViolation for an arrow matrix, got: {err:?}"
+        );
+    }
+
+    /// A transversal resonator block with a nonzero *source* port diagonal
+    /// `M[0,0]` (a source shunt) is not modeled by the Schur-2×2 fast path:
+    /// `from_matrix` must reject it with a typed `PreconditionViolation`
+    /// rather than silently dropping the shunt (round-3 review P2-2).
+    #[test]
+    fn source_port_diagonal_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+        use crate::matrix::CouplingMatrix;
+        // Same base as `transversal_matrix_is_accepted`, but M[0,0] = 4.0
+        // (a source shunt). The resonator block stays diagonal, so only the
+        // port-diagonal check can catch this.
+        let data = vec![
+            4.0, 0.40, 0.30, 0.0, // row0 (source) — M[0,0] nonzero
+            0.40, 0.10, 0.0, 0.20, // row1 (res 1)
+            0.30, 0.0, -0.10, 0.15, // row2 (res 2)
+            0.0, 0.20, 0.15, 0.05, // row3 (load)
+        ];
+        let m = CouplingMatrix::new(2, data)?;
+        let err = PoleExpansionData::from_matrix(&m).unwrap_err();
+        assert!(
+            matches!(err, crate::error::MfsError::PreconditionViolation(_)),
+            "a nonzero source port diagonal must be rejected, got: {err:?}"
+        );
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("M[0][0]"),
+            "error message should name the offending entry: {msg}"
+        );
+        Ok(())
+    }
+
+    /// The same contract applies to the *load* port diagonal `M[N+1,N+1]` —
+    /// not just the source side (round-3 review P2-2, requirement: both ends).
+    #[test]
+    fn load_port_diagonal_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+        use crate::matrix::CouplingMatrix;
+        let data = vec![
+            0.0, 0.40, 0.30, 0.0, // row0 (source)
+            0.40, 0.10, 0.0, 0.20, // row1 (res 1)
+            0.30, 0.0, -0.10, 0.15, // row2 (res 2)
+            0.0, 0.20, 0.15, 2.5, // row3 (load) — M[3][3] nonzero
+        ];
+        let m = CouplingMatrix::new(2, data)?;
+        let err = PoleExpansionData::from_matrix(&m).unwrap_err();
+        assert!(
+            matches!(err, crate::error::MfsError::PreconditionViolation(_)),
+            "a nonzero load port diagonal must be rejected, got: {err:?}"
+        );
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("M[3][3]"),
+            "error message should name the offending entry: {msg}"
+        );
+        Ok(())
+    }
+
+    /// Tolerance boundary for the port diagonal: a round-off level residual
+    /// (1e-12, inside `1e-9 · max(1, max|M|)`) is accepted, a physical shunt
+    /// above the tolerance is rejected. Same policy as the resonator block.
+    #[test]
+    fn port_diagonal_tolerance_boundary() -> Result<(), Box<dyn std::error::Error>> {
+        use crate::matrix::CouplingMatrix;
+        // Only the SOURCE port diagonal M[0,0] varies here; the load diagonal
+        // is series-terminated (M[3][3] = 0) so it is never the cause of a
+        // reject. tol = 1e-9 * max(1, max|M|) = 1e-9 (max|M| = 0.40).
+        let tiny = vec![
+            1e-12, 0.40, 0.30, 0.0, // M[0,0] = 1e-12 < tol: accepted
+            0.40, 0.10, 0.0, 0.20,
+            0.30, 0.0, -0.10, 0.15,
+            0.0, 0.20, 0.15, 0.0, // M[3][3] = 0 (series)
+        ];
+        let m_tiny = CouplingMatrix::new(2, tiny)?;
+        PoleExpansionData::from_matrix(&m_tiny)?; // round-off accepted
+
+        // 1e-8 > 1e-9: a real (if small) source shunt.
+        let real = vec![
+            1e-8, 0.40, 0.30, 0.0, // M[0,0] = 1e-8 > tol: rejected
+            0.40, 0.10, 0.0, 0.20,
+            0.30, 0.0, -0.10, 0.15,
+            0.0, 0.20, 0.15, 0.0, // M[3][3] = 0 (series)
+        ];
+        let m_real = CouplingMatrix::new(2, real)?;
+        let err = PoleExpansionData::from_matrix(&m_real).unwrap_err();
+        assert!(
+            matches!(err, crate::error::MfsError::PreconditionViolation(_)),
+            "a 1e-8 port shunt exceeds the 4e-9 tolerance and must be rejected"
+        );
+        Ok(())
+    }
+
+    /// The main-flow `response_normalized` on a design whose stored matrix is
+    /// *folded* must still return a correct response: the structural check now
+    /// rejects the O(N) fast path up front, so the call falls through to the
+    /// LU backend. This pins the fallback-protection behaviour end to end.
+    #[test]
+    fn main_path_on_folded_design_matches_lu() -> Result<(), Box<dyn std::error::Error>> {
+        let d = FilterDesign::prototype(4, 20.0)
+            .zeros([1.5, -1.5])
+            .synthesize()?;
+        let folded = transform_matrix(d.matrix(), TopologyKind::Folded)?
+            .matrix
+            .clone();
+        // Build a design whose stored matrix is the folded one.
+        let folded_design = FilterDesign::from_polynomials_and_matrix(
+            d.order(),
+            20.0,
+            6.75e9,
+            300e6,
+            d.polynomials().clone(),
+            folded.clone(),
+        )?;
+
+        // Main-flow response on the folded-matrix design.
+        let main = folded_design.response_normalized(-3.0, 3.0, 201)?;
+        // Independent LU reference on the identical folded matrix.
+        let grid = FrequencyGrid::linspace(-3.0, 3.0, 201)?;
+        let lu = ResponseSolver.evaluate_normalized(&folded, &grid)?;
+
+        assert_eq!(main.samples.len(), lu.samples.len());
+        for (a, b) in main.samples.iter().zip(lu.samples.iter()) {
+            if b.s21_mag() > 1e-10 {
+                let rel = ((a.s21_mag() - b.s21_mag()) / b.s21_mag()).abs();
+                assert!(
+                    rel < 1e-6,
+                    "main path on folded design diverges from LU at ω={}: main={}, lu={}",
+                    b.normalized_omega,
+                    a.s21_mag(),
+                    b.s21_mag()
+                );
+            }
+        }
+        Ok(())
     }
 }

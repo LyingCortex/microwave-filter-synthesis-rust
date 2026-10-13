@@ -4,6 +4,109 @@
 
 ### Changed
 
+- **Round-3 review remediation: port-diagonal guard, complex fast-path
+  gate, measured high-order boundary, and with-zeros group-delay anchor.**
+  Closes the three round-3 findings (`docs/reviews/mfs-review-round3.md`).
+  (1) **`from_matrix` port-diagonal guard (P2-2):** the Schur-2×2 fast path
+  assumes pure series terminations (`M[0,0] = M[N+1,N+1] = 0`), but
+  `assert_transversal_structure` only scanned the resonator block, so a
+  legitimate `CouplingMatrix` carrying a port shunt was accepted and its
+  shunt **silently dropped** (measured ~1e-1 in |S21|). The structure check
+  now rejects a nonzero port diagonal above the same scale-aware tolerance
+  as the resonator block; the `from_matrix` contract doc now states the port
+  requirement. Three new `pole_expansion` tests pin it (source reject, load
+  reject, tolerance boundary: 1e-12 accepted / 1e-8 rejected).
+  (2) **Fast-path verification gate now compares complex S21 + S11 (P2-2 /
+  §六):** the 5-point cross-check behind `response_normalized` /
+  `response_bandpass` compared only `|S21|`, so a phase-rotated or S11-only
+  distortion would slip. It is now a shared `fast_path_gate` helper comparing
+  the **complex** S21 (magnitude and phase) and S11, treating any non-finite
+  compared value as an automatic LU fallback. Five `design` tests pin it,
+  including the regression case (equal |S21|, rotated phase) the old
+  magnitude-only gate would have passed.
+  (3) **High-order boundary made honest and test-anchored (P2-1):** README
+  and `architecture.md` no longer claim "stable to 30+"; the measured
+  boundary (all-pole OK through order 28, finite-TZ through order 24 at
+  RL 20–22 dB; order 30+ typed-rejected by the adaptive pole-axis tolerance)
+  is now the documented claim. `examples/high_order_stability.rs` splits into
+  a **verified set that must succeed** (exit non-zero on any regression) and
+  an **explicitly-labeled exploratory scan** (order 30+, rejection expected),
+  and a `#[test]` in the example locks the boundary (order 28 succeeds,
+  order 30 rejected).
+  (4) **`synthesize` doc + with-zeros group-delay anchor (P3-1 / P3-2):** the
+  `synthesize` doc now states a successful result does not certify the design
+  meets its RL spec (use `verify_against_spec`), with a failure-handling
+  doctest on `verify_against_spec`. A new `response` test adds the
+  previously-missing *independent* group-delay value anchor on a finite-TZ
+  design (central difference of S21 phase, where the phase is smooth), plus
+  a step-convergence guard (n=401 vs n=801) and a zero-region check that
+  `group_delay` is `None` (not a fake 0.0) at a transmission zero on both
+  backends.
+
+- **O(N) pole-expansion fast path now enforces its transversal precondition
+  instead of silently dropping resonator-resonator couplings.**
+  `PoleExpansionData::from_matrix` (the O(N) partial-fraction fast path behind
+  `FilterDesign::response_normalized` / `response_bandpass`) only models a
+  *transversal* coupling matrix: the resonator block `M[1..=N][1..=N]` is
+  diagonal and each resonator couples only to the source (`M[0,k]`) and the
+  load (`M[k,N+1]`). Folded / arrow / wheel matrices carry inter-resonator
+  couplings `M[k,k']` that this path *cannot* represent — but it read only
+  `M[0,k]`, `M[k,k]`, `M[k,N+1]` and `M[0,N+1]`, so any real `M[k,k']` was
+  **silently discarded** and a physically wrong (but silently computed)
+  response was returned. The only existing safeguard was the 5-point LU
+  cross-check in `design.rs`, which compares |S21| and therefore can *miss*
+  the error when the dropped coupling does not move |S21| (e.g. a complex
+  phase-only or source/load-only perturbation), and it only fires when the
+  `from_matrix` fast path is even attempted.
+  `from_matrix` now runs a **structural** precondition
+  (`assert_transversal_structure`): it scans every off-diagonal resonator
+  entry and rejects any whose magnitude exceeds a scale-aware tolerance
+  `1e-9 · max(1, max|M|)` — far above f64 round-off (~1e-16 on a normalized
+  matrix) and far below any meaningful O(1) coupling — returning
+  `MfsError::PreconditionViolation` (the same structural variant
+  `assert_symmetric` uses; no new public variant, so no serde /
+  exhaustive-match break). The check inspects the *entries*, not the
+  topology label, so a matrix labelled `Transversal` that still holds an
+  inter-resonator coupling is caught too. On rejection the main-flow
+  `response_normalized` / `response_bandpass` fall through to the LU backend
+  (`ResponseSolver`), which handles arbitrary symmetric matrices, so a
+  folded/arrow design still returns the *correct* response — just via LU.
+  Five regression tests in `pole_expansion::tests` pin the contract: a
+  genuinely transversal matrix is accepted; a ~1e-12 round-off residual is
+  accepted while an O(1) coupling in the same matrix is rejected (proving
+  the check is not a no-op); folded and arrow matrices from
+  `transform_matrix` are rejected with a typed `PreconditionViolation`; and
+  `response_normalized` on a folded-matrix design matches the LU reference to
+  1e-6 (the fallback-protection behaviour, end to end).
+
+- **Infeasible all-finite transmission-zero specs now return a
+  domain-specific `PreconditionViolation` instead of a misleading generic
+  "coefficients must be finite" error.**
+  The all-finite formulation uses `eps_r = eps / sqrt(eps^2 - 1)`, which is
+  real-valued only for `eps > 1`. When every transmission zero is finite and
+  lies near the band edge (`|z| ~ 1`) or the return loss is high, `eps <= 1`
+  and the square root is `0` (at `eps = 1`) or `NaN` (below), so `eps_r` is
+  singular/complex. Previously this propagated a `NaN 1/eps_r` into the
+  E-polynomial stage and surfaced later, in
+  `complex_poly::ComplexPolynomial::new`, as the unrelated
+  `"coefficients must be finite"` finiteness error with no hint of the actual
+  cause. `find_eps` (shared by the single-band
+  `synthesize_generalized_chebyshev_data` and the multi-band
+  `multi_band_chebyshev_polynomials` paths) now rejects `eps <= 1` up front
+  with a `PreconditionViolation` that names the value, the domain, and the
+  feasible alternative (a mixed zero set — keep at least one zero at
+  infinity, which forces `eps_r = 1` and is always synthesizable — or move
+  the finite zeros off the band edge). No new public error variant, so no
+  serde / exhaustive-match break. The feasible all-finite domain (`eps > 1`)
+  is unchanged: well-separated zeros still synthesize and hit the RL spec.
+  Seven new tests pin the contract (5 unit tests in
+  `generalized_chebyshev_helpers` — mixed-zero control, `eps < 1` reject, the
+  exact `eps = 1` singular reject, and two pipeline-level infeasible-spec
+  rejects — plus 2 integration tests in `synthesis_regression` through the
+  public `generalized_chebyshev_polynomials` API). The all-finite feasibility
+  domain (`eps > 1`) is now documented in `docs/algorithms.md` §2.4 and
+  `docs/architecture.md` Known Limitations.
+
 - **`flip_sign` / `flip_sign_inplace` deduplicated into one shared helper.**
   Two copies of the similarity sign flip (`R·M·Rᵀ`, `R[i][i] = -1`: negate
   resonator `i`'s row and column, leaving the diagonal unchanged) lived in

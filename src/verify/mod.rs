@@ -368,6 +368,28 @@ impl SpecCheckReport {
 /// assert!(report.passes());
 /// # Ok::<(), MfsError>(())
 /// ```
+///
+/// A report whose gates `Fail` is a *result*, not an error: it carries the
+/// measured value and the threshold so the caller can decide (tighten the
+/// design, relax the spec, or reject it). `Ok(())`/no-error does not mean
+/// the design met the spec — check [`SpecCheckReport::passes`].
+///
+/// ```rust
+/// # use mfs::prelude::*;
+/// let design = FilterDesign::prototype(4, 20.0)
+///     .zeros([-2.0, 2.0])
+///     .synthesize()?;
+/// let response = design.response_normalized(-3.0, 3.0, 601)?;
+/// // A tightened 33 dB RL spec the ~20 dB design cannot meet.
+/// let tightened = FilterSpec::new(4, 33.0)?.with_normalized_transmission_zeros([-2.0, 2.0]);
+/// let report = verify_against_spec(&tightened, &response);
+/// assert!(!report.passes());
+/// let rl = report.gate("passband_return_loss").expect("RL gate present");
+/// assert_eq!(rl.outcome, CheckOutcome::Fail);
+/// // The failure is actionable: measured ~20 dB vs the 33 dB requirement.
+/// assert_eq!(rl.threshold, Some(33.0));
+/// # Ok::<(), MfsError>(())
+/// ```
 pub fn verify_against_spec(spec: &FilterSpec, response: &SParameterResponse) -> SpecCheckReport {
     let samples = &response.samples;
     let passband: Vec<&ResponseSample> = samples

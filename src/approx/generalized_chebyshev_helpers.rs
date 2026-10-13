@@ -273,6 +273,28 @@ pub fn find_eps(
     let eps_r = if finite_zero_count < order {
         1.0
     } else {
+        // All-finite transmission zeros. The adjusted ripple parameter is
+        // eps_r = eps / sqrt(eps^2 - 1), real-valued only for eps > 1. When
+        // eps <= 1 (all zeros finite and near the band edge, |z| ~ 1, or high
+        // return loss) the square root is 0 or NaN, so eps_r is singular or
+        // complex. Previously this propagated a NaN 1/eps_r into the
+        // E-polynomial stage and surfaced later as the misleading generic
+        // "coefficients must be finite" error (review P1-1). Reject here with
+        // a domain-specific message naming the feasible alternative.
+        if eps <= 1.0 {
+            return Err(MfsError::PreconditionViolation(format!(
+                "all-finite-zero spec is infeasible for the all-finite \
+                 formulation: eps = {eps:.6} <= 1, so eps_r = \
+                 eps/sqrt(eps^2 - 1) has no finite real value (order = \
+                 {order}, return_loss = {return_loss_db} dB, finite_zero_count \
+                 = {finite_zero_count}). This occurs when all transmission \
+                 zeros are finite and lie near the band edge (|z| ~ 1) or the \
+                 return loss is high. Feasible alternative: use a mixed zero \
+                 set (keep at least one zero at infinity, which forces \
+                 eps_r = 1 and is always synthesizable), or move the finite \
+                 zeros away from the band edge."
+            )));
+        }
         eps / (eps * eps - 1.0).sqrt()
     };
     Ok((eps, eps_r))
@@ -575,5 +597,135 @@ mod tests {
         assert_eq!(e_stage.raw_roots.len(), e_stage.reflected_roots.len());
         assert_eq!(e_stage.e_s_roots.len(), e_stage.reflected_roots.len());
         Ok(())
+    }
+
+    /// Mixed-zero spec (finite_zero_count < order): eps_r is forced to 1.0
+    /// regardless of eps; the all-finite infeasibility guard must not fire.
+    #[test]
+    fn find_eps_mixed_zeros_always_feasible_with_eps_r_one() -> Result<()> {
+        let padded = pad_transmission_zeros(4, &[1.5, 2.0])?;
+        let recurrence = cameron_recursive(&padded.padded)?;
+        let p_s = find_p_polynomial(4, &padded.padded, padded.finite_count)?;
+
+        assert_eq!(padded.finite_count, 2); // mixed: 2 finite + 2 at infinity
+        let (eps, eps_r) = find_eps(
+            padded.finite_count,
+            &p_s,
+            &recurrence.f_s,
+            20.0,
+            4,
+        )?;
+        assert!(eps.is_finite() && eps > 0.0, "mixed case should not be gated");
+        approx_eq(eps_r, 1.0, 1e-15);
+        Ok(())
+    }
+
+    /// All-finite spec with eps < 1 (zeros near the band edge): the adjusted
+    /// ripple parameter eps_r = eps/sqrt(eps^2 - 1) has no real value, so
+    /// `find_eps` must reject with a domain-specific PreconditionViolation
+    /// (review P1-1) instead of propagating a NaN to the E stage and surfacing
+    /// the misleading generic "coefficients must be finite" error.
+    #[test]
+    fn find_eps_all_finite_eps_below_one_is_rejected() {
+        // Order-2 all-finite branch (finite_zero_count == order == 2).
+        // F(s) = 0.25·s² + 1, P(s) = 4·s² + 1. At s = j:
+        //   |P(j)| = |−3| = 3, |F(j)| = |0.75| = 0.75, rl_linear = 10² − 1 = 99
+        //   ⇒ eps = 3/(0.75·√99) ≈ 0.402 < 1  (all-finite branch)
+        let f_s = ComplexPolynomial::new(vec![
+            ComplexCoefficient::new(1.0, 0.0),
+            ComplexCoefficient::new(0.0, 0.0),
+            ComplexCoefficient::new(0.25, 0.0),
+        ])
+        .expect("polynomial is well-formed");
+        let p_s = ComplexPolynomial::new(vec![
+            ComplexCoefficient::new(1.0, 0.0),
+            ComplexCoefficient::new(0.0, 0.0),
+            ComplexCoefficient::new(4.0, 0.0),
+        ])
+        .expect("polynomial is well-formed");
+
+        let err = find_eps(2, &p_s, &f_s, 20.0, 2).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            matches!(err, MfsError::PreconditionViolation(_)),
+            "expected PreconditionViolation, got: {err:?}"
+        );
+        assert!(
+            msg.contains("infeasible") && msg.contains("eps"),
+            "error must name the domain, got: {msg}"
+        );
+        assert!(
+            !msg.contains("must be finite"),
+            "must not fall through to the generic finiteness error: {msg}"
+        );
+    }
+
+    /// All-finite spec at exactly eps = 1: eps_r = eps/sqrt(eps^2 - 1) is
+    /// singular (division by zero). Must be rejected like eps < 1, not
+    /// allowed through to the downstream PolynomialSet "eps_r must be finite"
+    /// check with the wrong diagnosis.
+    #[test]
+    fn find_eps_all_finite_eps_at_one_is_rejected() {
+        // Order-2 all-finite branch at the exact singular boundary:
+        // F(s) = 0.25·s² + 1, P(s) = 3.25·s² + 1. At s = j:
+        //   |P(j)| = |−2.25| = 2.25, |F(j)| = |0.75| = 0.75,
+        //   rl_linear = 10¹ − 1 = 9 (√rl = 3)
+        //   ⇒ eps = 2.25/(0.75·3) = 1.0 exactly (all values exact in f64).
+        let f_s = ComplexPolynomial::new(vec![
+            ComplexCoefficient::new(1.0, 0.0),
+            ComplexCoefficient::new(0.0, 0.0),
+            ComplexCoefficient::new(0.25, 0.0),
+        ])
+        .expect("polynomial is well-formed");
+        let p_s = ComplexPolynomial::new(vec![
+            ComplexCoefficient::new(1.0, 0.0),
+            ComplexCoefficient::new(0.0, 0.0),
+            ComplexCoefficient::new(3.25, 0.0),
+        ])
+        .expect("polynomial is well-formed");
+
+        let err = find_eps(2, &p_s, &f_s, 10.0, 2).unwrap_err();
+        assert!(
+            matches!(err, MfsError::PreconditionViolation(_)),
+            "expected PreconditionViolation at eps = 1, got: {err:?}"
+        );
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("no finite real value"),
+            "error must name the singular eps_r, got: {msg}"
+        );
+    }
+
+    /// Pipeline-level: a 4th-order all-finite spec with all four zeros near
+    /// the band edge (|z| ≈ 1.05–1.1) is infeasible (eps < 1) and must be
+    /// rejected with the domain-specific message — the review P1-1 repro.
+    #[test]
+    fn pipeline_rejects_near_edge_all_finite_spec() {
+        let err =
+            synthesize_generalized_chebyshev_data(4, &[1.05, -1.05, 1.1, -1.1], 20.0)
+                .unwrap_err();
+        assert!(
+            matches!(err, MfsError::PreconditionViolation(_)),
+            "expected PreconditionViolation, got: {err:?}"
+        );
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("infeasible"),
+            "error must name the all-finite domain, got: {msg}"
+        );
+    }
+
+    /// Pipeline-level: a 4th-order all-finite spec with well-separated zeros
+    /// but return loss 34 dB is infeasible (the review's RL-scan boundary:
+    /// RL ≤ 33 OK, RL ≥ 34 fails).
+    #[test]
+    fn pipeline_rejects_high_rl_all_finite_spec() {
+        let err =
+            synthesize_generalized_chebyshev_data(4, &[1.5, -1.5, 2.0, -2.0], 34.0)
+                .unwrap_err();
+        assert!(
+            matches!(err, MfsError::PreconditionViolation(_)),
+            "expected PreconditionViolation, got: {err:?}"
+        );
     }
 }

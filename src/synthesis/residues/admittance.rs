@@ -37,17 +37,27 @@ pub fn synthesize_admittance_polynomials(
         .p_s
         .scale(complex_from_real(-2.0 / polynomials.eps))?;
 
-    // Normalize E(s) to prevent leading-coefficient cancellation with F(s)/eps_r.
-    // The w_to_s transform introduces a (-j)^N factor on E's leading coefficient.
-    // For N mod 4 == 2 (orders 2, 6, 10, ...), E_lead = -1 while F_lead = +1,
-    // causing exact cancellation in E + F/eps_r. We detect this and negate E(s)
-    // to make the leading coefficients additive rather than cancelling.
+    // Defensive leading-coefficient guard for E + F/eps_r.
+    //
+    // On the library's own path this never fires: E(s) is re-normalized to
+    // monic at the end of `build_e_polynomial_stage` (leading term +1+0j,
+    // measured on orders 4/6/8) and F/eps_r is built from a monic F(s) scaled
+    // by 1/eps_r in (0, 1], so the sum of leading terms is 1 + 1/eps_r in
+    // (1, 2] and can neither cancel nor have a negative E component. The
+    // guard exists solely for the public API surface: `GeneralizedChebyshevData
+    // .e_s` and `ComplexPolynomial.coefficients` are `pub`, so a caller can
+    // hand this function a non-monic E(s) whose leading term is negative and
+    // cancels the F/eps_r leading term (degree drop, wrong poles). In that
+    // case negate E(s) so the leading terms add instead of cancelling.
+    //
+    // NOTE: an earlier version of this comment claimed the guard resolved an
+    // N mod 4 == 2 leading-coefficient cancellation (E_lead = -1). That state
+    // predates the re-monic step in `build_e_polynomial_stage` and no longer
+    // occurs; do not "fix" or remove the guard based on that claim.
     let e_leading = e_s.leading_coefficient();
     let f_leading = f_over_eps_r.leading_coefficient();
     let sum_leading = e_leading + f_leading;
     let e_normalized = if sum_leading.norm_sqr() < 1e-20 && e_leading.re < -1e-15 {
-        // Leading coefficients cancel because E_lead ≈ -F_lead.
-        // Negate E(s) so that E_lead becomes +1, making the sum ≈ 2.
         e_s.scale(complex_from_real(-1.0))?
     } else {
         e_s.clone()

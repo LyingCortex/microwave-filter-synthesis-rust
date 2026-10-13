@@ -570,7 +570,9 @@ let context = run_full_pipeline(request)?;
 |---------------|--------|
 | All-pole (order 2–8, fixture-anchored) | ✅ Fully supported |
 | Finite TZs, \|zero\| ≥ 1.1 (order 2–8, fixture-anchored) | ✅ Fully supported |
-| High order (10–30), all-pole + finite TZs | ✅ Numerically stable — see `examples/high_order_stability.rs` (no literature fixtures above order 8) |
+| High order, all-pole (order 10–28) | ✅ Verified stable (adaptive pole-axis tolerance; no literature fixtures above order 8) |
+| High order, finite TZs (order 10–24) | ✅ Verified stable (same tolerance; zero placement affects the boundary) |
+| Order 30+ | ⚠️ May be rejected with a typed `NumericalFailure` (pole real part exceeds `1e-6·(N/5)²`); boundary is design-dependent — see `examples/high_order_stability.rs` |
 | Symmetric TZ pairs | ✅ Fully supported |
 | Asymmetric TZ placement | ✅ Fully supported |
 | Complex-residue configurations | ✅ Fixed (conjugate pairing) |
@@ -619,6 +621,17 @@ let context = run_full_pipeline(request)?;
    equiripple needs a complex-rooted (Zolotarev) or multifunction
    characteristic. See `docs/internal/multi-band-synthesis-design.md`
    (§"K ≥ 3: the DOF Wall").
+6. **All-finite transmission-zero feasibility domain.** The all-finite
+   formulation (every transmission zero finite, `finite_count == order`)
+   uses `eps_r = eps / sqrt(eps^2 − 1)`, which is real-valued only for
+   `eps > 1`. When all zeros are finite and lie near the band edge
+   (`|z| ~ 1`) or the return loss is high, `eps <= 1` and the spec is
+   infeasible for the all-finite path; `find_eps` rejects it with a typed
+   `MfsError::PreconditionViolation` (noting the feasible alternative: a
+   mixed zero set, which forces `eps_r = 1` and is always synthesizable).
+   This domain was previously undocumented and surfaced as a misleading
+   generic "coefficients must be finite" error (2026-10-12, review P1-1).
+   See `docs/algorithms.md` §2.4.
 
 ## Future Roadmap
 

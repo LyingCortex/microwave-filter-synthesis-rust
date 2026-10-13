@@ -18,7 +18,7 @@
 // transformation succeeds instead, which is the prerequisite for section extraction.
 
 use mfs::approx::generalized_chebyshev_polynomials;
-use mfs::error::Result;
+use mfs::error::{MfsError, Result};
 use mfs::freq::BandPassMapping;
 use mfs::spec::FilterSpec;
 use mfs::synthesis::MatrixSynthesisEngine;
@@ -393,6 +393,65 @@ fn regression_trisection_extraction_order5_tz_2_0() -> Result<()> {
     assert!(
         outcome.verification.passes(),
         "trisection extraction should pass verification"
+    );
+    Ok(())
+}
+
+// ===========================================================================
+// All-finite zero-set feasibility domain (review P1-1)
+// ===========================================================================
+//
+// The all-finite formulation uses eps_r = eps / sqrt(eps^2 - 1), which is
+// real-valued only for eps > 1. When every transmission zero is finite and
+// lies near the band edge (|z| ~ 1) or the return loss is high, eps <= 1 and
+// the spec is infeasible for the all-finite path. Before the P1-1 fix this
+// propagated a NaN 1/eps_r into the E-polynomial stage and surfaced later as
+// the misleading generic "coefficients must be finite" error. `find_eps` now
+// rejects with a domain-specific PreconditionViolation naming the feasible
+// alternative (a mixed zero set, which forces eps_r = 1).
+
+/// A 4th-order all-finite spec with well-separated zeros but RL = 34 dB has
+/// eps <= 1 and must be rejected with the domain-specific message (the review
+/// measured RL <= 33 feasible, RL >= 34 infeasible for these zeros) — not the
+/// generic "coefficients must be finite" finiteness error.
+#[test]
+fn all_finite_infeasible_high_rl_returns_typed_error() {
+    let spec = build_spec(4, 34.0, &[-1.5, 1.5, -2.0, 2.0]);
+    let err = generalized_chebyshev_polynomials(&spec).unwrap_err();
+    assert!(
+        matches!(err, MfsError::PreconditionViolation(_)),
+        "expected PreconditionViolation for infeasible all-finite spec, got: {err:?}"
+    );
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("infeasible"),
+        "error must name the all-finite domain, got: {msg}"
+    );
+    assert!(
+        !msg.contains("must be finite"),
+        "must not fall through to the generic finiteness error: {msg}"
+    );
+}
+
+/// Control: the same 4th-order all-finite zeros at a lower return loss (RL = 20
+/// dB) are feasible (eps > 1) and the polynomial stage succeeds with a finite,
+/// positive eps_r — proving the guard above is specific to the infeasible
+/// domain and does not reject working all-finite designs.
+#[test]
+fn all_finite_feasible_low_rl_succeeds() -> Result<()> {
+    let spec = build_spec(4, 20.0, &[-1.5, 1.5, -2.0, 2.0]);
+    let polynomials = generalized_chebyshev_polynomials(&spec)?;
+    // Feasible all-finite: eps_r = eps/sqrt(eps^2-1) is a finite positive real,
+    // and the E polynomial is finite. This is the boundary the guard must NOT
+    // trip.
+    assert!(
+        polynomials.eps_r.is_finite() && polynomials.eps_r > 0.0,
+        "feasible all-finite spec must yield a finite positive eps_r, got {}",
+        polynomials.eps_r
+    );
+    assert!(
+        polynomials.e.coefficients.iter().all(|c| c.re.is_finite() && c.im.is_finite()),
+        "E coefficients must all be finite for a feasible spec"
     );
     Ok(())
 }
