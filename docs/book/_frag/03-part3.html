@@ -1,0 +1,323 @@
+<!-- ═══════════════════════ 第三篇 ═══════════════════════ -->
+<div class="part-title" id="part3">
+  <div class="kicker">Part III</div>
+  <h1>第三篇 · 拓扑变换</h1>
+  <p>横向矩阵是"数学正确但物理不便"的形式（每条支路直连源和负载）。本篇章用正交相似变换
+  （保持响应不变）把它改写成折叠、箭头、级联三节/四节等可实现结构。</p>
+</div>
+
+<div class="chapter" id="ch14">
+<h2>14&nbsp; 相似变换、Givens 旋转与响应不变量</h2>
+
+<h3 id="sec141">14.1 本章解决什么问题</h3>
+<p>横向矩阵（第 12 章）每个谐振器都直连源和负载——N 条支路并联。这在物理上意味着
+N 个谐振器全部同时接到输入/输出端口，无法用链式结构实现。工程上需要<b>折叠</b>
+（相邻谐振器串联 + 跨接）或<b>箭头</b>（所有跨接集中到末端）等拓扑。
+本章建立变换的数学基础（相似变换保持响应）与 O(N) Givens 旋转引擎。</p>
+
+<h3 id="sec142">14.2 正交相似变换保持响应</h3>
+<p>设 M 为耦合矩阵，R 为正交矩阵（<code>R·Rᵀ = I</code>）。定义变换后矩阵
+<code>M′ = R·M·Rᵀ</code>（[§3.5](#sec35)，公式 (3.4)）。关键不变量：</p>
+<ul>
+  <li><b>谱不变</b>：M′ 与 M 同特征值（正交相似）；</li>
+  <li><b>响应不变</b>：A(ω) = M + ω·I_r − … 中只有 M 的耦合结构改变，
+      而 (3.3) 的 S₁₁/S₂₁ 只依赖 A⁻¹ 的 (0,0) 和 (n,0) 元素。
+      正交相似变换下 A(ω)′ = R·A(ω)·Rᵀ，故 A′⁻¹ = R·A⁻¹·Rᵀ，
+      其 (0,0) 和 (n,0) 元素在 R 只动谐振器行/列（不动端口行/列）时<b>不变</b>。</li>
+</ul>
+<p><b>实现事实</b>：库的 Givens 旋转只动两个谐振器 pivot（索引 ≥ 1），不碰端口行/列 0 和 N+1，
+因此 (0,0)、(n,0) 元素精确不变，理想 S 参数逐点保持。
+基准测试把不变性容差钉在 <code>1e-10</code>（<code>tests/benchmark_standard.rs</code>
+<code>response_invariance</code> 门）；CT/CQ 变换后 S21 幅度在 21 点网格上保持到 &lt;1e-6
+（<code>docs/algorithms.md</code> §6.4，有测试）。</p>
+
+<h3 id="sec143">14.3 O(N) 原地 Givens 旋转</h3>
+<p><code>apply_givens_similarity_inplace(pivot_a, pivot_b, cosine, sine)</code>
+（<code>matrix/core.rs:336-366</code>）计算 <code>M′ = R·M·Rᵀ</code>，
+R 只非平凡于 2×2 块 <code>{(p,p),(p,q),(q,p),(q,q)}</code>（<code>p=pivot_a, q=pivot_b</code>）。
+<b>两步</b>：</p>
+<ol>
+  <li><b>左乘 R·M</b>（只动两行，<code>core.rs:345-351</code>）：
+      <code>row_a′ = cos·row_a − sin·row_b</code>、<code>row_b′ = sin·row_a + cos·row_b</code>，
+      遍历 <code>col in 0..side</code>，O(N)；</li>
+  <li><b>右乘 M′·Rᵀ</b>（只动两列，<code>core.rs:358-364</code>）：
+      <code>col_a″ = cos·col_a′ − sin·col_b′</code>、<code>col_b″ = sin·col_a′ + cos·col_b′</code>，
+      遍历 <code>row in 0..side</code>，O(N)。</li>
+</ol>
+<p>总计<b>每次旋转 2·side 次乘加</b>（零分配、原地），对比完整矩阵乘 O(N³)。
+全库所有拓扑变换都走这条 O(N) 路径。
+完整的 <code>rotation_matrix_basic</code>（<code>rotations.rs:13-25</code>）构造整个 R 矩阵但
+<b>dead-code-gated</b>——活跃调用点全用原地版。</p>
+
+<h3 id="sec144">14.4 safe_angle 与 Jacobi 角</h3>
+<p><b><code>safe_angle(y, x)</code></b>（<code>rotations.rs:27-37</code>）：计算旋转角以消去目标元素。
+<code>θ = atan(y/x)</code>，但当 <code>|x| &lt; 1e-10</code> 时返回 ±π/2（避免除以极小邻耦合）：
+<code>y &gt; 0 → −π/2</code>、<code>y &lt; 0 → +π/2</code>。符号约定（<code>y &gt; 0 → −π/2</code>）
+保证旋转把目标元清零。</p>
+<p><b><code>diagonal_rotation_angle</code></b>（<code>rotations.rs:39-49</code>）：
+Jacobi 角 <code>θ = ½·safe_angle(2·M[a,b] / (M[b,b]−M[a,a]), 1)</code>，
+用于对角均衡（BOX 节、箭头对角目标）；对角差 <code>|Δ| &lt; 1e-10</code> 时返回 0。</p>
+
+<h3 id="sec145">14.5 transform_matrix facade</h3>
+<p><code>transform_matrix(m, TopologyKind)</code>（<code>transform/mod.rs:64-115</code>）
+只做两件事：调 <code>m.transform_topology</code>（纯 match：<code>Folded→to_folded</code>、
+<code>Arrow→to_arrow</code>、<code>Wheel→to_arrow+改标签</code>、<code>Transversal→clone</code>，
+<code>core.rs:208-220</code>）再附加<b>模式校验</b>（默认不附响应校验）。
+<code>transform_matrix_with_response_check</code> 额外在网格上比较变换前后 S 参数。
+<b>实现事实</b>：<code>Wheel == Arrow</code>（<code>core.rs:224-227</code>，弃用别名）。</p>
+
+<h3 id="sec146">14.6 本章小结</h3>
+<p>所有拓扑变换 = 正交相似变换（Givens 旋转），O(N) 原地实现，只动谐振器 pivot 不动端口，
+因此理想响应逐点不变（基准 1e-10）。下一章给折叠拓扑的具体旋转序列。</p>
+</div>
+
+<div class="chapter" id="ch15">
+<h2>15&nbsp; 折叠拓扑</h2>
+
+<h3 id="sec151">15.1 本章解决什么问题</h3>
+<p>把横向矩阵（N 条支路并联）改写成<b>折叠</b>（folded）形式：谐振器链式串联
+（主链 M[k,k+1]），跨接（cross-coupling）被 Givens 旋转"折"进链中。
+折叠是物理实现最直接的拓扑（对应腔体滤波器的相邻耦合 + 隔腔耦合）。</p>
+
+<h3 id="sec152">15.2 to_folded 旋转序列</h3>
+<p><code>CouplingMatrix::to_folded</code>（<code>matrix/core.rs:381-440</code>）。
+设 <code>end_oper = N/2</code>（偶）或 <code>(N−1)/2</code>（奇）（<code>core.rs:383-388</code>），
+外层循环 <code>row_oper_num in 0..end_oper</code>，每层做<b>列消去</b>再<b>行消去</b>：</p>
+<ol>
+  <li><b>列消去（源耦合）</b>（<code>core.rs:392-409</code>）：<code>col</code> 从
+      <code>N−row_oper_num</code> <b>降序</b>到 <code>row_oper_num+2</code>。
+      若 <code>|M[row_oper_num, col]| &gt; 1e-7</code>（阈值），在平面 <code>(col−1, col)</code> 做列操作，
+      <code>θ = safe_angle(−M[row,col], M[row,col−1])</code>，消去 <code>M[row,col]</code>。
+      否则显式清零。净效果：保留 <code>M[0,1]</code>，消掉 <code>M[0,k], k≥2</code>。</li>
+  <li><b>行消去（负载耦合）</b>（<code>core.rs:411-428</code>）：镜像列
+      <code>col_oper_num = side−1−row_oper_num</code>，<code>row_in_col_oper</code> 升序。
+      平面 <code>(row, row+1)</code>，<code>θ = safe_angle(M[r,c], M[r+1,c])</code>。</li>
+  <li><b>正主链符号规范</b>（<code>core.rs:431-438</code>）：<code>index in 0..side−1</code>，
+      若 <code>M[index,index+1] &lt; 0</code> ⇒ <code>flip_sign(index+1)</code>
+      （第 18 章），使最近邻主链耦合全正。</li>
+  <li><code>clean_small_values()</code>（≤1e-10 清零，<code>core.rs:261-266</code>）+
+      <code>topology = Folded</code>。</li>
+</ol>
+
+<h3 id="sec153">15.3 旋转几何</h3>
+<p>列消去本质：对源行（row 0）的每个远端耦合 M[0,k]，用 (k−1,k) 平面旋转把它"推"到
+M[0,k−1]，迭代后所有源耦合集中到 M[0,1]。行消去是负载侧的镜像。
+因为旋转是相似变换（[§14.2](#sec142)），每次旋转后 S 参数不变；
+整个序列结束后矩阵变成"源只连 1 号、负载只连 N 号、谐振器链式串联"的折叠形。</p>
+
+<h3 id="sec154">15.4 响应不变性验证</h3>
+<p><b>实现事实</b>：<code>tests/benchmark_standard.rs</code> 的
+<code>anchor_four_four_book_matrix_passes_the_invariance_gate</code>、
+<code>anchor_six_three_…</code> 把 Cameron 印刷的横向+折叠矩阵喂进 mfs 响应引擎，
+断言折叠前后响应偏差 &lt; 1e-10（<code>ANCHOR_TOL</code>）。
+<code>tests/folded_response_invariance.rs</code> 对标准 6 个二端口案例做同样的不变性门。
+<code>to_folded</code> 的回归测试（<code>tests/synthesis_regression.rs</code>
+<code>assert_folded_transform_succeeds</code>）验证变换成功 + 报告通过。</p>
+
+<h3 id="sec155">15.5 数值细节</h3>
+<ul>
+  <li>旋转阈值：<code>1e-7</code>（决定"旋转 vs 显式清零"，<code>core.rs:393,412</code>）；
+      清零阈值 <code>1e-10</code>。</li>
+  <li>复杂度：O(N³) 次旋转（外层 ⌊N/2⌋ × 内层 ~N），每次 O(N) ⇒ 总 O(N³) 次乘加，
+      但常数小、零分配。对 N≤28 实测可接受（第 29 章高阶稳定性）。</li>
+  <li>无收敛问题（确定性旋转序列）。</li>
+</ul>
+
+<h3 id="sec156">15.6 带通去归一化（scale）</h3>
+<p><code>denormalize_bandpass</code>（<code>matrix/scaling.rs:14-39</code>）把归一化矩阵变成
+物理频率：谐振器对角 <code>value → denormalize_resonator_frequency(value, center, bw)</code>
+（正频率支二次，<code>scaling.rs:128-131</code>，review P1-2 修正——历史形式取负频率支、
+镜像所有失谐符号）；端口对角置 0；非对角 <code>× bandwidth_hz</code>。
+<code>denormalize_bandpass_with_external_q</code>（<code>:47-67</code>）额外把端口耦合换成
+外部 Q：<code>Q<sub>e</sub> = 1/(M²·Δ)</code>（<code>Δ</code>=相对带宽，<code>scaling.rs:152-161</code>，
+约定由 order-1 带通物理测量锚定），拒绝 <code>|M| ≤ 1e-12</code>。</p>
+
+<h3 id="sec157">15.7 边界与失败模式</h3>
+<div class="fail"><b>注意</b>
+<code>to_folded</code> 本身不返回 error（确定性旋转），但输入矩阵若不对称
+（经 <code>new_with_topology_asymmetric</code>）可能破坏旋转假设——构造端有对称守卫兜底（[§3.4](#sec34)）。
+<code>safe_angle</code> 的 1e-10 门防止除以零。</div>
+
+<h3 id="sec158">15.8 本章小结</h3>
+<p>折叠 = 列消去(源) + 行消去(负载) + 正主链符号，全用 O(N) Givens 相似旋转，响应不变(1e-10)。
+去归一化用正频率支二次 + 外部 Q = 1/(M²Δ)。下一章箭头拓扑。</p>
+</div>
+
+<div class="chapter" id="ch16">
+<h2>16&nbsp; 箭头拓扑</h2>
+
+<h3 id="sec161">16.1 本章解决什么问题</h3>
+<p><b>箭头</b>（arrow）拓扑把所有跨接耦合"聚到最后一个谐振器列"，形成首行简化的箭头形。
+它是 CT/CQ 级联综合的<b>前置形式</b>（[§17](#ch17) 都先转箭头）。
+与折叠不同，箭头<b>不做正主链符号规范</b>。</p>
+
+<h3 id="sec162">16.2 to_arrow 旋转序列</h3>
+<p><code>CouplingMatrix::to_arrow</code>（<code>matrix/core.rs:442-467</code>）：
+对 <code>resonator in 1..N</code>、<code>target in (resonator+1)..=N</code>，
+平面 <code>(resonator, target)</code>，把每个谐振器到<b>更高号</b>谐振器的耦合
+聚到最后一个谐振器列（箭头形）：</p>
+<ul>
+  <li><code>target_index = resonator−1</code>、<code>pivot_a = resonator</code>、<code>pivot_b = target</code>、<code>sign = −1</code>；</li>
+  <li>若 <code>target_index ≠ pivot_a</code>（非对角目标）：<code>θ = safe_angle(−M[target_index][pivot_b], M[target_index][pivot_a])</code>
+      ——消去 <code>M[target_index][pivot_b]</code>；</li>
+  <li>否则（对角目标，<code>target_index == pivot_a</code>）：<code>θ = diagonal_rotation_angle(matrix, pivot_a, pivot_b)</code>
+      （Jacobi 对角旋转）；</li>
+  <li>应用 O(N) Givens 相似旋转（原地）。</li>
+</ul>
+<p><b>无条件旋转</b>：已 ≈0 时 θ≈0 为 no-op；<b>无正主链符号阶段</b>（与折叠的区别）。
+收尾 <code>clean_small_values()</code> + <code>topology = Arrow</code>。</p>
+
+<h3 id="sec163">16.3 Wheel 别名</h3>
+<p><b>实现事实</b>：<code>Wheel</code> 拓扑已弃用，当前是 Arrow 的别名——
+<code>transform_topology</code> 对 <code>Wheel</code> 调 <code>to_arrow()</code> 再改标签
+（<code>core.rs:224-227</code>）。不要为 Wheel 单独设计算法。</p>
+
+<h3 id="sec164">16.4 响应不变性</h3>
+<p>与折叠同：正交相似变换，响应不变（1e-10 门）。箭头是 CT/CQ 的中间形式，
+<code>extract_trisection</code> 要求输入 <code>topology == Arrow</code>
+（<code>sections.rs:101-105</code>，否则 <code>PreconditionViolation</code>）。
+测试 <code>trisection_extraction_rejects_non_arrow_input</code>（<code>matrix/mod.rs:230</code>）钉死该前置。</p>
+
+<h3 id="sec165">16.5 本章小结</h3>
+<p>箭头 = 把跨接聚到末列的旋转序列，无条件旋转、无符号规范；Wheel 是弃用别名。
+箭头是 CT/CQ 的前置。下一章级联三节/四节。</p>
+</div>
+
+<div class="chapter" id="ch17">
+<h2>17&nbsp; CT/CQ 拓扑</h2>
+
+<h3 id="sec171">17.1 本章解决什么问题</h3>
+<p><b>级联三节</b>（Cascaded Trisection, CT）与<b>级联四节</b>（Cascaded Quadruplet, CQ）
+把矩阵分解成可独立综合的"节"（section），每节对应一对/一个传输零点。
+这是实现复杂跨接拓扑（如 Cameron 2011 Fig. 21 的 4-2 不对称三节）的标准路径。
+两条路径都<b>先转 Arrow</b>，再抽取。</p>
+
+<h3 id="sec172">17.2 CT：Cascaded Trisection</h3>
+<p><code>to_cascaded_trisections(zeros)</code>（<code>matrix/cascade.rs:28-51</code>）：</p>
+<ul>
+  <li><b>守卫</b>：<code>zeros</code> 非空（<code>:30-33</code>）；<code>order ≥ zeros.len()+2</code>
+      （<code>:39-46</code>，写成 <code>order &lt; zeros.len()+2</code> 以避免 order=1 的 usize 下溢，
+      review P2-1；测试 <code>ct_zero_guard_order1_returns_error_not_panic</code>）。</li>
+  <li><b>算法</b>：<code>transform_topology(Arrow)</code> 然后<b>单次</b>
+      <code>arrow.extract_triplet(zeros[0], 1)</code>——条件化负载尾 + 逐左移 peel 到源端。
+      <code>zeros[0]</code> 是主零点（源侧、Fig. 21 锚定 ω₀₁=1.8082）；
+      其余零点已编码在 arrow 里，只用于计数校验。</li>
+</ul>
+<div class="warn"><b>历史修正（review P2-4）</b>
+历史的"逐零点循环"（每趟重新条件化尾）被<b>删除</b>——它会切断主链、产出稠密矩阵。
+现行是<b>单次</b> <code>extract_triplet(zeros[0], 1)</code>。勿"恢复"循环。</div>
+
+<h4 id="sec1721">17.2.1 extract_triplet</h4>
+<p><code>matrix/sections.rs:14-46</code>：</p>
+<ol>
+  <li>验证 <code>center_resonator ∈ [1, order)</code>、零点有限；</li>
+  <li><b>条件化尾</b>：<code>tail = order</code>、<code>denominator = transmission_zero + M[tail][tail]</code>。
+      若 <code>|denominator| &lt; 1e-10</code> → <code>θ = π/2</code>；否则
+      <code>θ = safe_angle(M[tail−1][tail], denominator)</code>。
+      在平面 <code>(tail−1, tail)</code> 旋转——在零点频率把尾三节与尾端解耦；</li>
+  <li><b>peel 到源</b>：<code>move_steps = order − center_resonator − 1</code> 次，
+      每次 <code>rotate_matrix_with_indices(order−step, order−step−2, order−step−1, 1.0, Row)</code>；</li>
+  <li><code>clean_small_values()</code>。</li>
+</ol>
+
+<h3 id="sec173">17.3 CQ：Cascaded Quadruplet</h3>
+<p><code>to_cascaded_quadruplets(zero_pairs)</code>（<code>matrix/cascade.rs:66-101</code>）：</p>
+<ul>
+  <li><b>守卫</b>：<code>zero_pairs</code> 非空；<code>order ≥ 4·num_pairs</code>
+      （<code>:78-86</code>，测试 <code>cq_synthesis_rejects_too_small_order</code>）。</li>
+  <li><b>源侧不重叠平铺</b>（<code>:93-99</code>）：第 i 个 quadruplet（0-based）span 谐振器
+      <code>4i+1..=4i+4</code>。每对推两个 z_loc：<code>[s, s+2]</code>（span 2 = 伴生三节）与
+      <code>[s, s+3]</code>（span 3 = quadruplet 对角），<code>s = 4i+1</code>。</li>
+  <li>委托 <code>extract_cascade_quadruplets(&amp;zeros, &amp;z_locs)</code>
+      （<code>sections.rs:188-249</code>）。</li>
+</ul>
+
+<h4 id="sec1731">17.3.1 extract_cascade_quadruplets 与 extract_quadruplet</h4>
+<p><code>extract_cascade_quadruplets</code>（<code>sections.rs:188-249</code>）：
+按 span 分类（span=3 → quadruplet、span=2 → trisection，非法 span → error）；
+每个 quadruplet 找伴生三节（<b>源侧平铺下 <code>common_resonator</code> 恒 = 1</b>，
+<code>=4</code> 负载端公式不可达）；所有操作<b>按位置从尾到顶交错</b>（尾先），
+<code>extract_quadruplet</code> = 两个相邻三节 + 一次合并旋转（消掉两节间 inline 耦合，
+留下 2-skip 交叉作 quadruplet 签名），收尾 <code>ensure_positive_main_couplings()</code>。</p>
+<p><code>extract_quadruplet</code>（<code>sections.rs:55-91</code>）：提取两个三节
+（可选 <code>swap_zero_order</code>），<code>tail = position+2</code>，合并旋转
+（<code>common_resonator==4</code>：<code>θ = −safe_angle(M[tail−1][tail−3], M[tail−3][tail−2])</code>；
+<code>==1</code>：<code>θ = safe_angle(M[tail][tail−2], M[tail−1][tail])</code>），
+平面 <code>(tail−2, tail−1)</code>。</p>
+
+<h3 id="sec174">17.4 验证布局与响应不变</h3>
+<p><b>实现事实</b>：验证布局（<code>docs/algorithms.md</code> §6.4）——
+order-6 1 对 → <code>[[1,3],[1,4]]</code>；order-8 2 对 → <code>[[1,3],[1,4],[5,7],[5,8]]</code>。
+CT/CQ 都是相似度变换 ⇒ S21 幅度在 21 点网格上保持到 &lt;1e-6（有测试）。
+第 13 章的 4-2 不对称三节矩阵就是 CT 的产物（<code>to_ct(&amp;[1.8082])</code>）。</p>
+
+<h3 id="sec175">17.5 边界与失败模式</h3>
+<div class="fail"><b>拒绝</b>
+zeros 空 / order 不足 → 守卫 error（order=1 下溢已防）；非法 span → error；
+<code>extract_trisection</code> 非箭头输入 → <code>PreconditionViolation</code>；
+trisection 位置差不为 2 → error（<code>validate_trisection_positions</code>）。
+<code>common_resonator ∉ {1,4}</code> → error。</div>
+
+<h3 id="sec176">17.6 本章小结</h3>
+<p>CT = 箭头 + 单次 extract_triplet（主零点条件化尾 + peel）；CQ = 箭头 + 源侧平铺 quadruplet
+（每对 = 两个三节 + 合并旋转）。都是相似变换，响应保持 &lt;1e-6。
+下一章统一讲符号翻转与结构约束。</p>
+</div>
+
+<div class="chapter" id="ch18">
+<h2>18&nbsp; 符号翻转、结构约束与失败条件</h2>
+
+<h3 id="sec181">18.1 本章解决什么问题</h3>
+<p>拓扑变换反复用到一个共享原语——<b>相似度符号翻转</b>
+<code>flip_sign_inplace</code>（整行+整列取负，对角不变）。它是折叠正主链规范与
+CT/CQ 收尾共用的"符号规约"。本章固定它的正确性不变量（历史上因对角被取负第三次而丢传输零点），
+并汇总第三篇的结构约束与失败条件。</p>
+
+<h3 id="sec182">18.2 flip_sign_inplace 与对角不变量</h3>
+<p><code>flip_sign_inplace(index)</code>（<code>matrix/mod.rs:30-44</code>）：
+对谐振器 <code>index</code> 做 <code>R·M·Rᵀ</code>（<code>R[index][index]=−1</code>）：
+<b>整行取负 + 整列取负</b>。对角元被取负<b>两次</b>（行一次、列一次）⇒ <b>净不变</b>。</p>
+<div class="fail"><b>关键正确性不变量</b>
+<b>绝不能取负第三次</b>。历史 bug：偶数阶非对称滤波器对角被多取负一次，
+翻转自耦合符号、<b>丢传输零点</b>（<code>docs/folded-fidelity-flip-sign-fix.md</code>）。
+回归测试 <code>flip_sign_negates_row_and_column_only_and_preserves_diagonal</code>
+（<code>core.rs:642</code>）钉死：对角不变 / 仅行列变号 / 两种形式（不可变
+<code>flip_sign</code> = clone + 共享原语，<code>core.rs:375-379</code>）逐位一致 /
+双翻为恒等。</div>
+<p>共享原语的两个消费者：折叠的 <code>flip_sign</code>（不可变包装）与
+<code>ensure_positive_main_couplings</code>（CT/CQ 收尾，<code>sections.rs:283-290</code>）
+直接调它。两者用同一符号规约：<code>index in 0..side−1</code>，<code>M[index,index+1] &lt; 0</code> ⇒
+<code>flip_sign_inplace(index+1)</code>。</p>
+
+<h3 id="sec183">18.3 结构约束汇总</h3>
+<div class="tablewrap"><table>
+<tr><th>约束</th><th>检查</th><th>失败行为</th><th>出处</th></tr>
+<tr><td>矩阵对称</td><td>构造器 <code>assert_symmetric</code>，<code>tol = 1e-12·max(1,|a|,|b|)</code></td>
+  <td>拒绝明显单边项（接受旋转级 ~1e-15）</td><td><code>core.rs:93-119</code></td></tr>
+<tr><td>阶数/维度</td><td><code>order ≥ 1</code>、<code>data.len() == (order+2)²</code></td>
+  <td><code>InvalidOrder</code> / <code>DimensionMismatch</code></td><td><code>core.rs:531-543</code></td></tr>
+<tr><td>CT 零点计数</td><td><code>order ≥ zeros.len()+2</code></td>
+  <td>守卫 error（order=1 下溢已防）</td><td><code>cascade.rs:39-46</code></td></tr>
+<tr><td>CQ 阶数</td><td><code>order ≥ 4·num_pairs</code></td><td>拒绝重叠 quadruplet</td><td><code>cascade.rs:78-86</code></td></tr>
+<tr><td>trisection 前置</td><td><code>topology == Arrow</code></td>
+  <td><code>PreconditionViolation</code></td><td><code>sections.rs:101-105</code></td></tr>
+<tr><td>trisection 位置</td><td>两位置差恰为 2、有序、在 1..=order</td>
+  <td>error</td><td><code>sections.rs:380-416</code></td></tr>
+<tr><td>quadruplet 位置</td><td><code>position ∈ [1, order-1)</code>、<code>common_resonator ∈ {1,4}</code></td>
+  <td>error</td><td><code>sections.rs:380-416</code></td></tr>
+</table></div>
+
+<h3 id="sec184">18.4 响应不变性验证门</h3>
+<p><code>transform_matrix_with_response_check</code> 在变换前后网格上比较 S 参数。
+验证工具（<code>src/verify/</code>）：<code>ResponseTolerance</code>（可配阈值）、
+<code>ResponseCheckReport</code>（pass/fail + 偏差指标）、<code>MatrixPatternTolerance</code>
+（结构零检测，容差 <code>1e-6</code>，<code>verify/mod.rs:51</code>）。
+基准门（<code>tests/benchmark_standard.rs</code>）：
+<code>response_invariance</code>（1e-10）、<code>folded_mask</code>（0.0，规范∪镜像）、
+<code>coupling_abs</code>（0.02）、<code>cross_backend_equivalence</code>（1e-6，对 Python 参考）。</p>
+
+<h3 id="sec185">18.5 本章小结</h3>
+<p>符号翻转 = 整行+整列取负、对角净不变（勿第三次）；它统一了折叠与 CT/CQ 的符号规约。
+结构约束（对称、阶数、CT/CQ 计数、trisection/CQ 位置）都在构造/变换入口以 typed error 拒绝。
+第三篇结束；第四篇讲如何从矩阵算 S 参数与群延迟。</p>
+</div>

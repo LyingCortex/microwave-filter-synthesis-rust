@@ -1,0 +1,479 @@
+<div class="chapter" id="preface">
+<h2>前言</h2>
+
+<h3>本书目标</h3>
+<p>本书把 MFS（Microwave Filter Synthesis，微波耦合谐振滤波器综合）Rust 库中<b>实际实现</b>的算法，
+按概念依赖关系组织成一册技术书。它回答六个问题：</p>
+<ul>
+  <li>一个设计规格如何逐步变成滤波器多项式和耦合矩阵？</li>
+  <li>每一步为什么这样计算，公式如何推导？</li>
+  <li>代码实际采用什么算法，与理论表达有什么差异？</li>
+  <li>如何计算响应、群延迟并验证结果？</li>
+  <li>高级功能（双工器、多工器、多频带、优化）如何复用基础算法？</li>
+  <li>哪些输入可支持、哪些会被拒绝、为什么？</li>
+</ul>
+<p>本书<b>不是</b> README 的扩写，不是 API 列表，不是源码的逐行翻译，也不是按 Rust 文件顺序拼接的说明。
+数学内容按"问题 → 模型 → 推导 → 算法步骤 → 实现映射 → 数值细节 → 可复现算例 → 边界与失败模式"的统一顺序展开。</p>
+
+<h3>阅读路线</h3>
+<p>读者具备基本 RF/滤波器知识（S 参数、低通原型、带通变换），但不一定熟悉广义 Chebyshev 综合理论或 Rust 代码。</p>
+<ul>
+  <li><b>最短路线</b>（理解主流程）：第 1、2、6、7、9、11、12 章（综合主链），第 19 章（响应）。</li>
+  <li><b>完整路线</b>：按篇顺序通读。第二篇是全书核心；第三、四篇可独立阅读（只要先读第 3、5 章）。</li>
+  <li><b>进阶读者</b>：直接从第五篇进入，但需先掌握第二篇的 E/F/P 多项式与第 11 章的残差展开。</li>
+</ul>
+
+<h3>内容依据与验证范围</h3>
+<p>本书内容以 commit <code>483d7616d6c94072ee561ec24b16c0f9bdd91248</code>（2026-10-13，分支
+<code>master</code>，工作树除一个未跟踪的 <code>mfs_win_build2.ps1</code> 外干净）的源码为准。
+每个算法章节标注真实的文件路径与函数名；数值阈值给出具体出处；算例区分三类：</p>
+<ul>
+  <li><b>实测</b>：来自本仓库测试、示例或基准中已执行的代码路径，注明命令与断言；</li>
+  <li><b>文献锚定</b>：来自 <code>tests/cameron1999_fixtures.json</code>、<code>tests/cameron2011_fixtures.json</code>
+      与 <code>tests/benchmark_standard.rs</code> 的公开矩阵/响应基准；</li>
+  <li><b>未执行</b>：明确标注"未执行"，仅作为理论示意。</li>
+</ul>
+<p>本书区分三类陈述：<b>理论结论</b>（来自综合理论的一般性命题）、<b>实现事实</b>（源码确实如此，
+标注文件与函数）、<b>实验观察</b>（测试/基准实测结果，标注容差）。三者冲突时以源码和测试为准，并说明原因。</p>
+
+<h3>结构选择说明</h3>
+<p>建议目录按"概念依赖"重组：原第 8 章（ε 与 RL）并入第二篇作为独立章；"网络级 cascade"与
+"Touchstone"合并为第四篇两章（它们是同一网络操作的两种暴露面）；"验证门"不单列一章，而作为
+第 21 章与第 32 章的共同主题（验证门是信任策略的一部分，也是回归测试的一部分）；
+双工器与多工器合并为一章（共享同一个 Macchiarella–Tamiazzo 迭代核心）。
+章节编号连续，与左侧目录一致。</p>
+
+<div class="info"><b>离线阅读</b>
+本书为单 HTML 文件，不依赖 CDN、远程字体或远程脚本。全部数学以 HTML/Unicode 排版（非图片），
+可选择、可复制、可打印。公式编号形如 (6.3)，交叉引用以 <code>[§7.2](#sec72)</code> 风格链接。</div>
+</div>
+
+<!-- ═══════════════════════ 第一篇 ═══════════════════════ -->
+<div class="part-title" id="part1">
+  <div class="kicker">Part I</div>
+  <h1>第一篇 · 问题与数学基础</h1>
+  <p>建立全书共用的语言：设计规格、归一化频率轴、二端口网络与耦合矩阵、多项式约定。</p>
+</div>
+
+<div class="chapter" id="ch1">
+<h2>1&nbsp; 从滤波器规格到综合任务</h2>
+
+<h3 id="sec11">1.1 本章解决什么问题</h3>
+<p>输入是一个<b>滤波器规格</b>（filter specification）：阶数 <code>N</code>、带内最小回波损耗
+（return loss, RL）、期望的传输零点位置、可选的无载 Q。输出是满足规格的理想二端口网络的
+<b>耦合矩阵</b>（coupling matrix）——一个 <code>(N+2)×(N+2)</code> 实对称矩阵，
+可直接映射到 N 个谐振器加源/负载的物理结构。</p>
+<p>综合任务的核心数学问题是：给定期望的幅度响应 <code>|S<sub>11</sub>(jω)|</code> 与
+<code>|S<sub>21</sub>(jω)|</code>，求一个无耗、互易、与单位阻抗源/负载匹配的二端口网络。
+MFS 采用 <b>Cameron 广义 Chebyshev 方法</b>：先在归一化低通原型域构造三个复多项式
+E(s)、F(s)、P(s)（第 6–9 章），再通过部分分式残差展开把它们变成横向耦合矩阵（第 10–12 章）。</p>
+
+<h3 id="sec12">1.2 前置知识与依赖</h3>
+<p>本章不需要前文。后续章节的依赖关系见第 5 章的符号表与全书结构图。</p>
+
+<h3 id="sec13">1.3 设计规格的数学模型</h3>
+<p>一个规格由五个量描述（<code>src/spec/types.rs</code>，<code>NormalizedFilterSpec</code> 结构体，
+<code>types.rs:164</code>）：</p>
+<ul>
+  <li><b>阶数</b> <code>N</code>（<code>order: usize</code>）：谐振器数目。约束 <code>1 ≤ N ≤ 256</code>
+      （<code>MAX_ORDER = 256</code>，<code>types.rs:186</code>；上限防止 <code>(N+2)²</code> 矩阵的无界内存）。</li>
+  <li><b>回波损耗</b> <code>RL ≥ 0 dB</code>（<code>return_loss_db: f64</code>，必须有限且 &gt; 0）。
+      带内最小 <code>|S<sub>11</sub>|</code> 为 <code>10<sup>−RL/20</sup></code>。</li>
+  <li><b>传输零点</b>（<code>transmission_zeros: Vec&lt;TransmissionZero&gt;</code>）：
+      归一化原型坐标下的期望 <code>S<sub>21</sub> = 0</code> 位置。
+      <code>TransmissionZero.value = f64::INFINITY</code> 表示无穷零点（<code>types.rs:16-40</code>）。
+      <b>注意</b>：规格层只拒绝 <code>NaN</code>；<code>|z| ≤ 1</code>（通带内/带边上）的零点在规格层被接受，
+      在近似入口被拒绝（第 6.4 节）。</li>
+  <li><b>无载 Q</b>（<code>unloaded_q: Option&lt;f64&gt;</code>）：响应评估时把极点移出虚轴的损耗参数；
+      默认无穷（无耗）。</li>
+  <li><b>带外衰减窗</b>（<code>out_of_band_attenuation</code>）：物理频率下的额外衰减要求，
+      由 <code>verify::verify_against_spec</code> 检查（第 32 章），不参与综合。</li>
+</ul>
+<p>物理频率（中心频率、带宽）不在规格内，而属于<b>频率映射</b>（第 2 章）。
+综合在归一化域完成；带通频率参数只影响零点归一化（<code>zeros_hz</code> → 归一化）
+与最终的物理尺度变换（第 14 章 <code>scale()</code>）。</p>
+
+<h3 id="sec14">1.4 综合流水线总览</h3>
+<p>库的主数据流（<code>src/design.rs:167-210</code>，<code>FilterDesignBuilder::synthesize</code>）：</p>
+<figure>
+<svg viewBox="0 0 860 220" width="860" role="img" aria-label="综合流水线">
+  <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker></defs>
+  <g font-family="system-ui,sans-serif" font-size="13" fill="currentColor">
+    <rect x="8" y="30" width="130" height="46" rx="8" fill="var(--surface)" stroke="var(--border)"/>
+    <text x="73" y="50" text-anchor="middle">FilterSpec</text>
+    <text x="73" y="66" text-anchor="middle" font-size="11" fill="var(--muted)">N, RL, zeros</text>
+    <rect x="170" y="24" width="150" height="58" rx="8" fill="var(--info-bg)" stroke="var(--info-bd)"/>
+    <text x="245" y="45" text-anchor="middle">approx/</text>
+    <text x="245" y="61" text-anchor="middle" font-size="11">Cameron 递推 → E,F,P</text>
+    <text x="245" y="75" text-anchor="middle" font-size="11" fill="var(--muted)">第二篇 §6–§9</text>
+    <rect x="352" y="24" width="150" height="58" rx="8" fill="var(--info-bg)" stroke="var(--info-bd)"/>
+    <text x="427" y="45" text-anchor="middle">synthesis/</text>
+    <text x="427" y="61" text-anchor="middle" font-size="11">Y 多项式 → 残差 → 横向 M</text>
+    <text x="427" y="75" text-anchor="middle" font-size="11" fill="var(--muted)">第二篇 §10–§12</text>
+    <rect x="534" y="24" width="130" height="58" rx="8" fill="var(--note-bg)" stroke="var(--note-bd)"/>
+    <text x="599" y="45" text-anchor="middle">transform/</text>
+    <text x="599" y="61" text-anchor="middle" font-size="11">Folded/Arrow/CT/CQ</text>
+    <text x="599" y="75" text-anchor="middle" font-size="11" fill="var(--muted)">第三篇 §14–§18</text>
+    <rect x="696" y="24" width="150" height="58" rx="8" fill="var(--warn-bg)" stroke="var(--warn-bd)"/>
+    <text x="771" y="45" text-anchor="middle">response/</text>
+    <text x="771" y="61" text-anchor="middle" font-size="11">LU / 极点展开 → S 参数</text>
+    <text x="771" y="75" text-anchor="middle" font-size="11" fill="var(--muted)">第四篇 §19–§22</text>
+    <line x1="138" y1="53" x2="168" y2="53" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#arr)"/>
+    <line x1="320" y1="53" x2="350" y2="53" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#arr)"/>
+    <line x1="502" y1="53" x2="532" y2="53" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#arr)"/>
+    <line x1="664" y1="53" x2="694" y2="53" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#arr)"/>
+    <text x="430" y="120" text-anchor="middle" font-size="12" fill="var(--muted)">高级功能（第五篇）复用上述原语：</text>
+    <text x="430" y="140" text-anchor="middle" font-size="12">duplexer/multiplexer（M–T 全谱迭代 + 谱分解） · multi_band（route-α 等纹波） · optimize（LM 提取/调谐）</text>
+    <text x="430" y="176" text-anchor="middle" font-size="12" fill="var(--muted)">工程使用（第六篇）：求根器链、容差与病态、支持边界、验证与基准、Rust/Python/CLI 接口、可复现算例集</text>
+  </g>
+</svg>
+<figcaption>图 1.1 — MFS 综合流水线与模块分工。每个模块的输入/输出类型在第 5 章符号表列出。</figcaption>
+</figure>
+
+<h3 id="sec15">1.5 算法步骤（语言无关）</h3>
+<p><b>输入</b>：规格 <code>(N, RL, z₁,…,z_K)</code>（z 为归一化传输零点，可为 ∞）。</p>
+<ol>
+  <li><b>近似</b>（第二篇）：构造 E(s)、F(s)、P(s) 与 ε、ε<sub>r</sub>，满足 Feldtkeller 恒等式（第 6.3 节）。</li>
+  <li><b>综合</b>（第二篇）：由 E,F,P 构造短路导纳多项式 Y₁₁、Y₁₂、Y₂₂（第 10 章），
+      分母求根 + 聚类 + Laurent 主部（第 11 章），组装横向矩阵 M（第 12 章）。</li>
+  <li><b>变换</b>（第三篇，可选）：Givens 相似变换得到 Folded/Arrow/CT/CQ 结构（响应不变，第 14 章）。</li>
+  <li><b>评估</b>（第四篇，可选）：在频率网格上计算 S₁₁、S₂₁、群延迟（LU 或 O(N) 极点展开，第 19–21 章）。</li>
+  <li><b>验证</b>（第 32 章）：对照规格与独立基准检查响应（<code>verify_against_spec</code>、
+      文献锚定矩阵）。</li>
+</ol>
+
+<h3 id="sec16">1.6 Rust 实现映射</h3>
+<p>入口是 <code>FilterDesign</code>（<code>src/design.rs:222</code>），它持有序列化后不可变的三件套：
+<code>spec: FilterSpec</code>、<code>polynomials: PolynomialSet</code>、<code>matrix: CouplingMatrix</code>
+（外加可选的带通 <code>center_hz</code>/<code>bandwidth_hz</code>）。构造路径：</p>
+<pre><code>FilterDesign::bandpass(order, rl_db, center_hz, bandwidth_hz)   // design.rs:255
+    .zeros_hz([...]) / .zeros([...])                            // design.rs:127,136
+    .unloaded_q(q)                                              // design.rs:154
+    .synthesize()                                               // design.rs:167
+    │  ① BandPassMapping::new 校验（design.rs:174-176）
+    │  ② zeros_hz 经 mapping.map_hz_to_normalized 归一化（design.rs:191-195）
+    │  ③ build_filter_spec → FilterSpec（design.rs:198）
+    │  ④ generalized_chebyshev_polynomials(&amp;spec) → PolynomialSet（design.rs:200）
+    │  ⑤ MatrixSynthesisEngine::synthesize(&amp;polynomials) → CouplingMatrix（design.rs:201）
+    └→ FilterDesign</code></pre>
+<p>另有 <code>prototype(order, rl)</code>（<code>design.rs:322</code>，纯归一化原型）、
+<code>bandpass_edges(order, rl, f_start, f_stop)</code>（<code>design.rs:291</code>，
+几何均值中心）、<code>from_spec(&amp;spec)</code>（<code>design.rs:340</code>）。
+成功返回 <code>FilterDesign</code> <b>不意味着</b>响应满足 RL 规格——规格验证是独立的
+<code>verify_against_spec</code>（第 32 章）；这一点在 <code>synthesize</code> 的文档注释
+（<code>design.rs:161-166</code>）中明确。</p>
+
+<h3 id="sec17">1.7 边界与失败模式</h3>
+<div class="fail"><b>规格层拒绝（构造时）</b>
+<code>N = 0</code> 或 <code>N &gt; 256</code> → <code>InvalidOrder</code>；<code>RL ≤ 0</code> 或非有限 →
+<code>InvalidReturnLoss</code>（<code>types.rs:190-196</code>）；零点 <code>NaN</code> →
+<code>InvalidTransmissionZero</code>（<code>freq.rs:47-55</code>）。
+带通构造中 <code>center_hz ≤ 0</code>、<code>bandwidth_hz ≤ 0</code> → <code>InvalidFrequency</code>
+（<code>freq.rs:124-134</code>）；<code>bandpass_edges</code> 倒置边缘 → 派生出 <code>bw &lt; 0</code> → 同样拒绝。</div>
+<p>更深的拒绝（通带零点、全有限不可行域、重复极点）发生在下游，见第 6.4、8.4、11.5 节。</p>
+
+<h3 id="sec18">1.8 本章小结</h3>
+<p>规格是归一化域的量；综合 = 近似（多项式）+ 综合（矩阵）+ 变换（结构）+ 评估（响应）四段流水线，
+全部由类型系统串联，失败走统一的 <code>MfsError</code>（8 个变体，第 31 章）。下一章建立频率轴。</p>
+</div>
+
+<div class="chapter" id="ch2">
+<h2>2&nbsp; 归一化频率、物理频率及映射</h2>
+
+<h3 id="sec21">2.1 本章解决什么问题</h3>
+<p>综合与响应公式在<b>归一化低通原型</b>频率轴 <code>ω</code> 上成立（通带 <code>|ω| ≤ 1</code>）。
+工程规格用物理频率 <code>f</code>（Hz）。本章给出两者之间的映射 <code>ω = Ω(f)</code> 的
+全部形式、逆映射、奇异点处理，以及 <code>src/freq.rs</code> 的五个实现。</p>
+
+<h3 id="sec22">2.2 归一化轴与 s 域</h3>
+<p>归一化低通原型：通带 <code>|ω| ≤ 1</code>，阻带 <code>|ω| &gt; 1</code>；<code>ω</code> 为实数，
+对应复频率 <code>s = jω</code>（<code>j = √−1</code>）。库中 <code>ResponseSample.normalized_omega</code>
+即此 <code>ω</code>；多项式以 <code>s</code> 为变量（第 4 章）。</p>
+
+<h3 id="sec23">2.3 低通映射</h3>
+<p><code>LowPassMapping</code>（<code>freq.rs:66-113</code>），参数：截止频率 <code>f<sub>c</sub> &gt; 0</code>。</p>
+<div class="eq mrow">ω = <span class="frac"><span class="top">f</span><span class="bot">f<sub>c</sub></span></span>
+<span class="num">(2.1)</span></div>
+<p>逆：<code>f = ω·f<sub>c</sub></code>。前向要求 <code>f ≥ 0</code> 有限；<code>ω(f<sub>c</sub>) = 1</code> 精确。</p>
+
+<h3 id="sec24">2.4 带通映射</h3>
+<p><code>BandPassMapping</code>（<code>freq.rs:115-188</code>），参数：几何中心 <code>f<sub>0</sub> &gt; 0</code>、
+带宽 <code>B = f<sub>H</sub> − f<sub>L</sub> &gt; 0</code>。定义相对带宽
+<code>FB = B/f<sub>0</sub></code>。标准低通→带通变换（<code>freq.rs:161-164</code>）：</p>
+<div class="eq mrow">ω = <span class="frac"><span class="top">1</span><span class="bot">FB</span></span>
+    · ( <span class="frac"><span class="top">f</span><span class="bot">f<sub>0</sub></span></span> − <span class="frac"><span class="top">f<sub>0</sub></span><span class="bot">f</span></span> )
+<span class="num">(2.2)</span></div>
+<p>当 <code>f<sub>0</sub> = √(f<sub>L</sub>·f<sub>H</sub>)</code>（几何均值）时，带边精确映到
+<code>ω = ±1</code>。带边公式（<code>freq.rs:626</code> <code>band_edge_pair</code>）：</p>
+<div class="eq mrow">spread = <span class="sqrt">B² + 4f<sub>0</sub>²</span>, &nbsp;
+f<sub>L</sub> = <span class="frac"><span class="top">−B + spread</span><span class="bot">2</span></span>, &nbsp;
+f<sub>H</sub> = f<sub>L</sub> + B
+<span class="num">(2.3)</span></div>
+<p><b>实现事实</b>：这不是算术均值 <code>f<sub>0</sub> ± B/2</code>（review P2-2 修正）。
+<code>FilterDesign::f_start_hz()/f_stop_hz()</code>（<code>design.rs:424-439</code>）使用同一公式。</p>
+<p>逆映射取正频率支（<code>freq.rs:168-187</code>）：</p>
+<div class="eq mrow">f = <span class="frac"><span class="top">ωB + <span class="sqrt">(ωB)² + 4f<sub>0</sub>²</span></span><span class="bot">2</span></span>
+<span class="num">(2.4)</span></div>
+
+<h3 id="sec25">2.5 高通与带阻映射</h3>
+<p><b>高通</b>（<code>HighPassMapping</code>，<code>freq.rs:198-266</code>）：频率倒置
+<code>ω = −f<sub>c</sub>/f</code>（<code>freq.rs:238</code>）。通带 <code>f ≥ f<sub>c</sub></code> 映到
+<code>ω ≤ −1</code>。<code>f = 0</code> 是奇异点，钳位到 <code>ω = −SINGULAR_CLAMP</code>
+（<code>SINGULAR_CLAMP = 1e6</code>，<code>freq.rs:196</code>）而非报错。</p>
+<p><b>带阻</b>（<code>BandStopMapping</code>，<code>freq.rs:268-316</code>）：
+<code>ω = −1/Ω<sub>BPF</sub>(f)</code>，即带通变换的倒数加负号（<code>freq.rs:272-276</code> 文档）。
+阻带边映到 <code>+1</code>（下边）/ <code>−1</code>（上边）；<code>f = f<sub>0</sub></code> 奇异，
+钳位 <code>−SINGULAR_CLAMP</code>。逆映射分两支：
+<code>ω &gt; 0</code>（下通带）<code>f = 2ωc²/(w + √(w² + 4ω²c²))</code>，
+<code>ω &lt; 0</code>（上通带）<code>f = (w + √(w² + 4ω²c²))/(−2ω)</code>（<code>freq.rs:306-316</code>）。</p>
+
+<h3 id="sec26">2.6 多频带映射</h3>
+<p><code>MultiBandMapping</code>（<code>freq.rs:472-608</code>）持有 K 个互不相交、按中心排序的
+<code>BandPassMapping</code>。<b>不实现</b> <code>FrequencyMapping</code> trait（逆映射需要带索引）。
+前向映射 <code>map_hz_to_normalized</code>（<code>freq.rs:559-580</code>）：把 <code>f</code> 分给
+<code>|Ω<sub>b</sub>(f)|</code> 最小的带（平手取中心较低者），返回 <code>(band_index, NormalizedSample)</code>。
+每个带在自己的归一化域里把带边映到 <code>±1</code>。</p>
+
+<h3 id="sec27">2.7 频率网格</h3>
+<p><code>FrequencyGrid::linspace(start, stop, points)</code>（<code>freq.rs:645-680</code>）：
+等距网格，要求 <code>2 ≤ points ≤ MAX_GRID_POINTS = 100_000</code>、有限、<code>stop &gt; start</code>。
+<code>map_grid_hz_to_normalized</code>（trait 默认实现，<code>freq.rs:35-41</code>）逐点前向映射。</p>
+
+<h3 id="sec28">2.8 Rust 实现映射与群延迟换算</h3>
+<p>五个映射都是 <code>Copy</code> 结构体，构造即校验。物理网格响应经由
+<code>ResponseSolver::evaluate(matrix, grid, mapping)</code>（<code>response/mod.rs:142-149</code>）：
+先把整个网格映成 <code>normalized_omegas</code>（<code>mod.rs:159-163</code>），再逐点求解。</p>
+<p><b>群延迟换算</b>（第 22 章细节）：响应里的群延迟是 <code>dτ/dω</code>（归一化单位）。
+换算成秒需要链式法则；对带通映射 <code>dω/df = (1/FB)(1/f<sub>c</sub> + f<sub>c</sub>/f²)</code>，
+故 <code>τ[秒] = gd·(1/FB)(1/f<sub>c</sub> + f<sub>c</sub>/f²)/(2π)</code>。
+源码文档（<code>response/mod.rs:23-41</code>）并记录了 2026-10-11 的 2π 陷阱：
+数值 <code>−dφ/df</code> 是"每赫兹"，比"每秒"大 2π 倍；直接比较会读出
+<code>(2π−1)·gd</code> 的假偏差，且该偏差随 |S₂₁| 增大、细化网格不缩小——这是单位错配而非算法错误。</p>
+
+<h3 id="sec29">2.9 边界与失败模式</h3>
+<div class="fail"><b>拒绝</b>
+物理频率非有限或负数（带通要求 &gt; 0）→ <code>InvalidFrequency</code>；
+带通逆映射产生 ≤ 0 或非有限的 f → <code>InvalidFrequency</code>（<code>freq.rs:180-183</code>）；
+高通逆映射要求 <code>ω &lt; 0</code> 且有限（<code>freq.rs:246-251</code>）；
+网格点数越界 → <code>InvalidGridSize</code>（<code>freq.rs:648</code> 区域）。</div>
+
+<h3 id="sec210">2.10 本章小结</h3>
+<p>所有物理频率都先变成归一化 <code>ω</code> 再进入综合/响应公式。带通映射用几何中心 + 相对带宽；
+带边由 (2.3) 定义。奇异点钳位（而非报错）是有意选择，与跨语言基准标准一致。
+下一章定义网络与矩阵。</p>
+</div>
+
+<div class="chapter" id="ch3">
+<h2>3&nbsp; S 参数、导纳与耦合矩阵</h2>
+
+<h3 id="sec31">3.1 本章解决什么问题</h3>
+<p>综合的中间产物与最终产物都是网络。本章固定全书的网络模型：二端口、短路导纳表示、
+耦合矩阵的结构与不变量，以及"相似变换保持响应"这一拓扑变换篇的基础事实。</p>
+
+<h3 id="sec32">3.2 二端口与 S 参数</h3>
+<p>设二端口与单位阻抗（归一化 <code>R<sub>S</sub> = R<sub>L</sub> = 1</code>）源/负载连接。
+归一化散射参数满足无耗性（unitarity）：</p>
+<div class="eq mrow">|S₁₁(jω)|² + |S₂₁(jω)|² = 1
+<span class="num">(3.1)</span></div>
+<p>回波损耗规格 <code>RL</code> 即带内 <code>|S₁₁| ≤ 10<sup>−RL/20</sup></code>。
+<b>实现事实</b>：测试把 unitarity 作为硬门限（<code>tests/multi_band.rs:95</code>：
+<code>max‖|S₁₁|²+|S₂₁|²−1‖ &lt; 1e-10</code>）；<code>S₁₁</code> 零点的 dB 值有 −300 dB 地板
+（<code>magnitude_to_db</code>，<code>response/mod.rs:100-106</code>，见第 22 章）。</p>
+
+<h3 id="sec33">3.3 短路导纳与耦合矩阵</h3>
+<p>耦合谐振器网络用<b>短路导纳矩阵</b>表示。在归一化频率 <code>ω</code> 下，
+N 个谐振器加源(节点 0)/负载(节点 N+1)的 (N+2) 节点导纳矩阵：</p>
+<div class="eq mrow">
+A(ω) = M + ω·I<sub>r</sub> − jR<sub>S</sub>·e<sub>0</sub>e<sub>0</sub><sup>⊤</sup> − jR<sub>L</sub>·e<sub>n</sub>e<sub>n</sub><sup>⊤</sup>
+<span class="num">(3.2)</span></div>
+<p>其中 <code>M</code> 是<b>耦合矩阵</b>（实对称，<code>(N+2)×(N+2)</code>），
+<code>I<sub>r</sub></code> 只在谐振器对角（索引 1…N）为 1、端口对角为 0，
+<code>e<sub>0</sub></code>、<code>e<sub>n</sub></code> 是源/负载单位向量。
+有耗（Q 有限）时谐振器对角再减 <code>j/Q<sub>u</sub></code>（<code>response/backend.rs:130-138</code>），
+把极点移出虚轴。</p>
+<p>给定 A(ω)，散射参数（第 19 章推导）：</p>
+<div class="eq mrow">S₁₁ = 1 + 2jR<sub>S</sub>[A⁻¹]₀₀, &nbsp;&nbsp;
+S₂₁ = −2j√(R<sub>S</sub>R<sub>L</sub>)[A⁻¹]<sub>n,0</sub>
+<span class="num">(3.3)</span></div>
+
+<h3 id="sec34">3.4 CouplingMatrix 数据结构与不变量</h3>
+<p><code>CouplingMatrix</code>（<code>matrix/core.rs:31-36</code>）：</p>
+<pre><code>struct CouplingMatrix {
+    order: usize,            // 谐振器数 N
+    topology: MatrixTopology, // Transversal / Folded / Arrow / Wheel(弃用)
+    data: Vec&lt;f64&gt;,          // 行主序 (N+2)²，data[row*side + col]
+}</code></pre>
+<p><b>结构约定</b>（横向拓扑，第 12 章产物）：</p>
+<ul>
+  <li>谐振器块 <code>M[1..=N][1..=N]</code> 为对角阵，对角 <code>M[k,k] = −ω<sub>k</sub></code>
+      （实 ω 域的失谐量 B<sub>k</sub>，<code>transversal.rs:95</code> 区域；见第 5 章极点约定）；</li>
+  <li><code>M[0,k]</code> = 源耦合 M<sub>Sk</sub>（恒正）；<code>M[k,N+1]</code> = 负载耦合 M<sub>kL</sub>（带符号）；</li>
+  <li>无谐振器间耦合；可选的直接源-负载耦合 <code>M[0,N+1] = M<sub>SL</sub></code>；</li>
+  <li>端口对角 <code>M[0,0] = M[N+1,N+1] = 0</code>（纯串联终端）。</li>
+</ul>
+<p><b>对称性不变量</b>：构造器 <code>new_with_topology</code>（<code>core.rs:69-91</code>）默认调用
+<code>assert_symmetric</code>（<code>core.rs:93-119</code>），容差为<b>尺度感知</b>的
+<code>tol = 1e-12·max(1, |a|, |b|)</code>（<code>core.rs:109</code>）——接受 Givens 旋转后的
+<code>~1e-15</code> 级不对称（测试 <code>core.rs:607</code> 接受 1e-13），拒绝 1e-6 级的明显单边项
+（测试 <code>core.rs:619</code>）。存在显式绕过 <code>new_with_topology_asymmetric</code>
+（<code>core.rs:121-145</code>），仅用于折叠掩模 fixture；经此路径喂入非对称矩阵时，
+LU 路径的群延迟会静默算错（幅度仍对）——见第 19.5 节的已知限制。</p>
+<p>访问器：<code>source_coupling()</code> = <code>|M[0,1]|</code>、<code>load_coupling()</code> =
+<code>|M[N,N+1]|</code>、<code>chain_couplings()</code>（<code>core.rs:234-254</code>）。</p>
+
+<h3 id="sec35">3.5 相似变换与响应不变量</h3>
+<p>拓扑变换的全部机制是<b>正交相似变换</b>：取正交矩阵 <code>R</code>，令</p>
+<div class="eq mrow">M′ = R·M·R<sup>⊤</sup>
+<span class="num">(3.4)</span></div>
+<p>由于 <code>R</code> 正交，M′ 与 M 同谱；又因 A(ω) = M + … 中只有 M 的耦合结构改变，
+而 (3.3) 只依赖 A(ω)⁻¹ 的两个元素，<b>理想 S₁₁/S₂₁ 完全不变</b>。
+这就是"改拓扑不改响应"的数学基础（第三篇全部成立的前提）。
+Givens 旋转是只非平凡于 2×2 块的特例正交矩阵；库用 O(N) 原地实现（第 14 章）。</p>
+<p><b>实现事实</b>：变换后库可以（默认不强制）做响应不变性检查——
+<code>transform_matrix_with_response_check</code>（<code>transform/mod.rs:64-115</code>）在网格上比较
+变换前后的 S 参数；基准测试把容差钉死在 <code>1e-10</code>（<code>tests/benchmark_standard.rs</code>
+的 <code>response_invariance</code> 门）。</p>
+
+<h3 id="sec36">3.6 本章小结</h3>
+<p>网络 = 耦合矩阵 M + 频率相关项 A(ω)；S 参数是 A⁻¹ 的两个元素。
+所有拓扑变换都是正交相似变换，因此保持响应——这是全书反复使用的不变量。
+下一章固定多项式记号与复数约定。</p>
+</div>
+
+<div class="chapter" id="ch4">
+<h2>4&nbsp; 多项式、复变量、共轭及奇偶约定</h2>
+
+<h3 id="sec41">4.1 本章解决什么问题</h3>
+<p>综合的数学对象是复系数多项式。本章统一：s 域与 w 域的关系、系数存储顺序、
+monic（首一）约定、共轭/paraconjugate 定义、奇偶阶符号因子。这些约定不一致是
+综合库最常见的数值 bug 来源（本书多处标注了历史修正）。</p>
+
+<h3 id="sec42">4.2 s 域与 w 域</h3>
+<p>公开多项式以 <code>s = jw</code> 为变量（<code>w</code> 为实辅助变量，文献里的 ω 轴）：
+根 <code>s<sub>root</sub> = j·w<sub>root</sub></code>，即 <code>(−im, re)</code>
+（<code>generalized_ops.rs:76-78</code> <code>rotate_w_root_to_s</code>）。
+系数转换（<code>generalized_ops.rs:45-62</code>）：</p>
+<ul>
+  <li><b>w→s 系数</b>（<code>w_to_s_coefficients</code>）：<code>Q(s) = Σ d<sub>k</sub>(−j)<sup>k</sup> s<sup>k</sup></code>
+      ——第 k 个系数乘以 <code>(−j)<sup>k</sup></code>（按 <code>(4−k%4)%4</code> 旋转实/虚部）；</li>
+  <li><b>s→w 系数</b>（<code>s_to_w_coefficients</code>）：第 k 个系数乘以 <code>j<sup>k</sup></code>；</li>
+  <li><b>降幂 w → 升幂 s</b>（<code>descending_w_to_ascending_s</code>，<code>generalized_ops.rs:33-42</code>）：
+      先翻转系数顺序再逐项旋转——Cameron 递推在 w 域降幂进行，产物 F 由此进入 s 域升幂。</li>
+</ul>
+<p>上/下半平面：<code>reflect_to_upper_half_plane</code>（<code>generalized_ops.rs:80-84</code>）
+把 <code>im &lt; 0</code> 的根共轭到上半平面。<b>实现事实</b>：E 多项式在 w 域求根后反射到
+上半平面再重建（第 9 章）——上半平面是 w 域的"稳定"侧（对应 s 左半平面网络极点）。</p>
+
+<h3 id="sec43">4.3 ComplexPolynomial</h3>
+<p><code>ComplexPolynomial</code>（<code>approx/complex_poly.rs:77-81</code>）：
+<b>升幂</b>系数向量（常数项在前），<code>num_complex::Complex64</code> 系数。核心操作：</p>
+<ul>
+  <li><code>evaluate</code>：Horner 降幂折叠（<code>:95</code>）；<code>degree</code> = <code>len−1</code>（<code>:101</code>）；</li>
+  <li><code>add/sub/multiply/scale/derivative</code>（<code>:135-183</code>）：
+      <code>multiply</code> 是系数卷积（升幂）；</li>
+  <li><code>shift(x)</code>（<code>:110</code>）：<code>P(s+x)</code> 精确移位，无求根——
+      Macchiarella 迭代与 Laurent 平移都用它；</li>
+  <li><code>alternating_conjugate()</code>（<code>:186</code>）：Q(−s)<sup>∗</sup>，
+      逐项取共轭并按幂次交替变号；</li>
+  <li><code>from_real_roots / from_complex_roots</code>（<code>:199-217</code>）：由根重建首一多项式；</li>
+  <li><code>roots_with(&amp;solver)</code>（<code>:226</code>）：显式选择求根器（第 29 章）。</li>
+</ul>
+
+<h3 id="sec44">4.4 paraconjugate 与全局奇偶因子</h3>
+<p>对实系数多项式，<b>paraconjugate</b>（para-Hermitian 伴侣）定义为
+<code>X̃(s) = X(−s)<sup>∗</sup></code>。在 s = jw 约定下，库用
+<code>alternating_conjugate</code> 实现。<b>关键实现事实</b>（第 10 章详述）：
+Cameron 的导纳公式需要的是 <code>(−1)<sup>N</sup>·alternating_conjugate</code>——
+全局 <code>(−1)<sup>N</sup></code> 因子（<code>admittance.rs:58-65</code>）区分了
+"朴素 alternating_conjugate"与"Cameron 公式"：奇数阶缺它会丢阶、极点离开虚轴、得到全反射矩阵
+（review 修正，有回归测试钉死）。</p>
+
+<h3 id="sec45">4.5 monic 约定</h3>
+<p>综合链中三处强制 monic，每处都有具体理由：</p>
+<ol>
+  <li><b>F(s) monic</b>（<code>generalized_chebyshev_helpers.rs:474</code>，Cameron 递推后）——
+      使 F/ε<sub>r</sub> 与 P/ε 的相对权重正确；</li>
+  <li><b>E(w) 构造前 F(w)、P(w) 各自 monic</b>（<code>:417-425</code>）——
+      s→w 旋转使首项变 <code>j<sup>N</sup></code> 而非 1；不归一时 E 的 F/P 权重错，
+      这正是<b>奇数阶虚假通带零点</b>的根因（历史 bug，<code>:420-424</code> 注释）；</li>
+  <li><b>E(s) 重建后再 monic</b>（<code>:443-447</code>）——w→s 首项带 <code>(−j)<sup>N</sup></code>。</li>
+</ol>
+<p><code>normalize_to_monic</code>（<code>:497-505</code>）拒绝 <code>leading.norm_sqr() ≤ 1e-24</code>
+（零首项，<code>NumericalFailure</code>）。</p>
+
+<h3 id="sec46">4.6 极点域约定（P2-12）</h3>
+<p>两个"极点"概念必须区分（<code>docs/algorithms.md</code> §1，<code>response/pole_expansion.rs:81-84</code>）：</p>
+<ul>
+  <li><b>s 域极点</b>：分母多项式的根 <code>p = σ + jω₀</code>，理想无耗网络在虚轴 <code>σ = 0</code>；</li>
+  <li><b>实 ω 域极点</b>：<code>−B<sub>k</sub></code>，其中 B<sub>k</sub> = <code>M[k,k]</code> 是横向矩阵对角。
+      快路径（第 20 章）直接存 <code>pole = −M[k,k]</code>，用实 ω 组 <code>denom = ω − pole</code>。</li>
+</ul>
+<p>横向组装时（<code>transversal.rs:95</code> 区域）<code>M[k,k] = −pole.im</code>（s 域极点 <code>p = jω₀</code>
+⇒ 对角 <code>−ω₀</code>），两边一致。</p>
+
+<h3 id="sec47">4.7 本章小结</h3>
+<p>全书记号：s = jw；升幂系数；三处 monic；paraconjugate 带 (−1)<sup>N</sup> 因子；
+横向对角存实 ω 域失谐。下一章汇总符号表，然后进入第二篇的数学。</p>
+</div>
+
+<div class="chapter" id="ch5">
+<h2>5&nbsp; 全书符号表、单位与数值约定</h2>
+
+<h3 id="sec51">5.1 符号表</h3>
+<div class="tablewrap"><table>
+<tr><th>符号</th><th>含义</th><th>域/单位</th><th>首次出现</th></tr>
+<tr><td>N</td><td>滤波器阶数（谐振器数）</td><td>整数，1…256</td><td>[§1.3](#sec13)</td></tr>
+<tr><td>side = N+2</td><td>耦合矩阵维度（含源/负载）</td><td>整数</td><td>[§3.4](#sec34)</td></tr>
+<tr><td>ω</td><td>归一化低通原型频率（实数）</td><td>无量纲，通带 |ω|≤1</td><td>[§2.2](#sec22)</td></tr>
+<tr><td>s</td><td>复频率，s = jω</td><td>无量纲</td><td>[§4.2](#sec42)</td></tr>
+<tr><td>w</td><td>Cameron 递推的实辅助变量，s = jw</td><td>无量纲</td><td>[§4.2](#sec42)</td></tr>
+<tr><td>E(s)</td><td>特征（E）多项式，首一；根 = 网络极点</td><td>复系数，deg = N</td><td>[§9](#ch9)</td></tr>
+<tr><td>F(s)</td><td>反射零点多项式，首一；根在 ±jz 处</td><td>复系数，deg ≤ N</td><td>[§7](#ch7)</td></tr>
+<tr><td>P(s)</td><td>传输零点多项式</td><td>复系数，deg ≤ N</td><td>[§7](#ch7)</td></tr>
+<tr><td>A(w)</td><td>辅助多项式（全有限零点时存在）</td><td>复系数</td><td>[§9.5](#sec95)</td></tr>
+<tr><td>ε, ε<sub>r</sub></td><td>纹波参数（见 (8.1)–(8.3)）</td><td>无量纲，&gt;0</td><td>[§8](#ch8)</td></tr>
+<tr><td>RL</td><td>带内最小回波损耗</td><td>dB</td><td>[§1.3](#sec13)</td></tr>
+<tr><td>z<sub>k</sub></td><td>第 k 个传输零点（归一化）</td><td>实数 ≥1 或 ∞</td><td>[§1.3](#sec13)</td></tr>
+<tr><td>M</td><td>耦合矩阵，(N+2)×(N+2) 实对称</td><td>无量纲</td><td>[§3.3](#sec33)</td></tr>
+<tr><td>M<sub>Sk</sub>, M<sub>kL</sub></td><td>源/负载与谐振器 k 的耦合</td><td>无量纲</td><td>[§12](#ch12)</td></tr>
+<tr><td>M<sub>SL</sub></td><td>直接源-负载耦合</td><td>无量纲</td><td>[§12.4](#sec124)</td></tr>
+<tr><td>B<sub>k</sub> = M[k,k]</td><td>谐振器 k 的对角（= −ω<sub>k</sub>）</td><td>无量纲</td><td>[§4.6](#sec46)</td></tr>
+<tr><td>Y₁₁, Y₁₂, Y₂₂</td><td>短路导纳参数（分子）+ 共享分母</td><td>复系数多项式</td><td>[§10](#ch10)</td></tr>
+<tr><td>p</td><td>极点（s 域根）；−B<sub>k</sub> 为实 ω 域极点</td><td>复数/实数</td><td>[§11](#ch11)</td></tr>
+<tr><td>r₁₁, r₁₂, r₂₂</td><td>Y 参数在极点 p 的残差</td><td>复数</td><td>[§11](#ch11)</td></tr>
+<tr><td>Q<sub>u</sub></td><td>无载品质因数</td><td>无量纲，∞ = 无耗</td><td>[§3.3](#sec33)</td></tr>
+<tr><td>R<sub>S</sub>, R<sub>L</sub></td><td>源/负载电阻（归一化 = 1）</td><td>无量纲</td><td>[§3.3](#sec33)</td></tr>
+<tr><td>f, f<sub>0</sub>, B, FB</td><td>物理频率/几何中心/带宽/相对带宽</td><td>Hz / 无量纲</td><td>[§2.4](#sec24)</td></tr>
+<tr><td>GD</td><td>群延迟 dτ/dω（归一化单位）</td><td>见 (22.1)</td><td>[§22](#ch22)</td></tr>
+<tr><td>R(s)</td><td>para-Hermitian 谱密度 R = D·D̃</td><td>复系数多项式</td><td>[§26](#ch26)</td></tr>
+<tr><td>N(Ω), D(Ω), Pt<sub>i</sub></td><td>junction 分子/谱因子/通道传输多项式</td><td>复系数多项式</td><td>[§26](#ch26)</td></tr>
+<tr><td>p₀ᵢ²</td><td>通道 i 的 junction 功率标度</td><td>无量纲 ≥0</td><td>[§26.3](#sec263)</td></tr>
+<tr><td>FBW, A<sub>i</sub>, B<sub>i</sub></td><td>公共带通域的仿射参数</td><td>无量纲</td><td>[§26.1](#sec261)</td></tr>
+</table></div>
+
+<h3 id="sec52">5.2 单位约定</h3>
+<ul>
+  <li>综合与响应默认在<b>归一化域</b>：频率无量纲、阻抗 = 1。物理 Hz 只出现在
+      频率映射（第 2 章）与去归一化（<code>matrix/scaling.rs</code>，第 15.6 节）。</li>
+  <li>群延迟字段 <code>group_delay</code> 是<b>归一化单位</b> <code>dτ/dω</code>，不是"每赫兹"也不是"每弧度"
+      （<code>response/mod.rs:15-35</code>；换算公式与 2π 陷阱见 [§22.3](#sec223)）。</li>
+  <li>dB 值统一经 <code>magnitude_to_db</code>：<code>mag ≤ 1e-15 → −300.0</code>（有限地板，JSON 可序列化，
+      跨运行可复现）；否则 <code>20·log₁₀(mag)</code>（<code>response/mod.rs:100-106</code>）。</li>
+</ul>
+
+<h3 id="sec53">5.3 数值约定</h3>
+<ul>
+  <li>全部双精度 <code>f64</code>；复数 <code>num_complex::Complex64</code>。</li>
+  <li>"小值清零"阈值 <code>1e-10</code>（<code>CouplingMatrix::clean_small_values</code>，<code>core.rs:261-266</code>）。</li>
+  <li>全书数值阈值汇总见附录 D（含出处行号）；各章在算法步骤里给出局部阈值。</li>
+  <li>矩阵存储行主序；所有 Givens 旋转 O(N) 原地（第 14 章）。</li>
+</ul>
+
+<h3 id="sec54">5.4 全书结构图</h3>
+<p>章节依赖（→ 表示"需要先读"）：
+1→2→3→4→5 → 6→7→8→9 → 10→11→12 → 13（端到端串讲）。
+3,5 → 14→15,16→17,18。3,5,12 → 19→20→21→22；19,22 → 23,24。
+6,9,11 → 26；26 → 25；7,8,9 → 27；19 → 28。
+6,7,9,11,12 → 29,30；全部 → 31,32,33,34。附录 A–F 随时查阅。</p>
+</div>

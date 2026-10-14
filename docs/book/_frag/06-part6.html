@@ -1,0 +1,504 @@
+<!-- ═══════════════════════ 第六篇 ═══════════════════════ -->
+<div class="part-title" id="part6">
+  <div class="kicker">Part VI</div>
+  <h1>第六篇 · 数值可靠性与工程使用</h1>
+  <p>把前五篇的算法"落地"：求根器链与稳定性（§29）、容差/尺度/病态（§30）、
+  支持边界与 typed error（§31）、规格验证与回归基准（§32）、Rust/Python/CLI 使用（§33）、
+  可复现算例集（§34）。</p>
+</div>
+
+<div class="chapter" id="ch29">
+<h2>29&nbsp; 求根器链与数值稳定性</h2>
+
+<h3 id="sec291">29.1 本章解决什么问题</h3>
+<p>综合链里所有求根（E 多项式、分母、谱密度 R）都走同一条
+<code>AdaptiveRootSolver</code> 链。本章给三级求根器的算法、门限、
+为何<b>不</b>用 nalgebra 伴随矩阵、以及高阶稳定性边界。</p>
+
+<h3 id="sec292">29.2 AdaptiveRootSolver 链</h3>
+<p><code>AdaptiveRootSolver</code>（<code>approx/complex_poly.rs:805-823</code>，
+impl <code>:816-842</code>）按顺序尝试，成功即返回，失败 fall-through：</p>
+<ol>
+  <li><b>FaerRootSolver</b>（faer 复伴随矩阵特征值，<b>首选</b>）；</li>
+  <li><b>DurandKernerRootSolver</b>（迭代法，fallback）；</li>
+  <li><b>AberthRootSolver</b>（last resort）。</li>
+</ol>
+<p><b>关键实现事实</b>（<code>:56-72</code> 文档）：<code>CompanionMatrixRootSolver</code>
+（nalgebra Schur）<b>故意不在链中</b>——其复系数 2n×2n 实嵌入分支会返回
+<b>共轭翻转的伪根</b>（有专门回归测试钉死）。它只保留为<b>实系数测试 oracle</b>。
+<b>不是"DK 优先"</b>——是 faer 优先（旧文档曾误述）。</p>
+
+<h3 id="sec293">29.3 FaerRootSolver（伴随矩阵 + 平衡 + 后向残差门）</h3>
+<p><code>FaerRootSolver</code>（<code>complex_poly.rs:660-810</code>）：</p>
+<ol>
+  <li><b>monic 归一</b>（<code>:679-684</code>）；</li>
+  <li><b>建复伴随矩阵</b>：次对角 1、末列 <code>−c_k</code>（<code>:686-695</code>）；</li>
+  <li><b>Parlett–Reinsch 对角相似平衡</b>（<code>:704-742</code>）：至多 <code>degree</code> 次 sweep；
+      每步 <code>W ← D·W·D⁻¹</code>，<code>d_i = sqrt(col_norm/row_norm)</code> 钳到
+      <code>[1e-100, 1e100]</code>，当 <code>row_norm &lt; 0.5·col_norm || col_norm &lt; 0.5·row_norm</code> 时应用；
+      <code>row_norm ≤ 1e-300 || col_norm ≤ 1e-300</code> 跳过。
+      平衡改善特征值条件数（高阶关键）；</li>
+  <li><code>balanced.eigenvalues::&lt;c64&gt;()</code>（<code>:744</code>）；</li>
+  <li><b>后向残差门</b>（<code>:778-786</code>）：<code>max_backward_residual(&amp;normalized, &amp;roots)</code>，
+      接受当 <code>!roots_contain_non_finite(roots) && max_backward ≤ FAER_BACKWARD_RESIDUAL_TOL (= 1e-3)</code>
+      （<code>:867</code>）。拒绝 → <code>NumericalFailure</code>，让链 fall-through。
+      后向残差 = <code>|p(r)| / Σ_k |c_k|·|r|^k</code>（尺度无关，<code>scale.max(1e-300)</code>，
+      <code>max_backward_residual</code> <code>:880-901</code>）。</li>
+</ol>
+<p><b>为什么有后向残差门</b>：病态伴随矩阵的特征值可能是"伪根"（后向残差大）。
+门把它变成 typed 失败 + fall-through，而非静默出货垃圾特征值。</p>
+
+<h3 id="sec294">29.4 DurandKerner 与 Aberth</h3>
+<p><b>DurandKerner</b>（<code>:266-360</code>）：monic 归一（拒 <code>leading.norm_sqr() ≤ 1e-24</code>）；
+Cauchy 半径 <code>1 + max_k |c_k|</code>；<b>黄金角初始化</b>
+（<code>golden_angle = 2.399_963_229_728_653</code> = 2π/φ²，<code>:304</code>）；
+<code>max_iterations = (128 + (degree−10)·4).min(512)</code>；<code>convergence_tol = 1e-13</code>；
+DK 更新 <code>delta = p(root)/Π(root−root_j)</code>（<code>denom.norm_sqr() ≤ 1e-30</code> 跳过）；
+收敛 <code>max_delta ≤ 1e-13 && 无非有限</code>；<b>残差 fallback</b>
+<code>max_residual &lt; 1e-8</code>（<code>:353</code>）；否则 <code>NumericalFailure</code>。</p>
+<p><b>Aberth-Ehrlich</b>（<code>:374-490</code>）：同初始化；<code>max_iterations = (200+(degree−10)·6).min(800)</code>
+（比 DK 多）；Newton 修正 <code>w = p(z)/p′(z)</code> + Aberth 和 <code>Σ 1/(z_k−z_j)</code>，
+<code>delta = w/(1 − w·aberth_sum)</code>（分母近零退回纯 Newton）；同 <code>1e-8</code> 残差 fallback。</p>
+
+<h3 id="sec295">29.5 数值稳定性：为什么 faer 优先</h3>
+<p>复多项式求根本质病态（根对系数扰动敏感）。三级链的稳定性排序：</p>
+<ul>
+  <li><b>faer 伴随 + 平衡</b>：特征值方法，Parlett–Reinsch 平衡直接改善条件数，
+      对高阶（N≥20）最稳；后向残差门兜住病态情况；</li>
+  <li><b>Durand-Kerner</b>：O(N²) 迭代，精度退化 O(N²ε<sub>mach</sub>)（这就是第 12 章
+      自适应极点容差 <code>1e-6·(N/5)²</code> 的由来）；</li>
+  <li><b>Aberth</b>：带 Newton 修正，局部收敛快，作 last resort。</li>
+</ul>
+<p><b>实现事实</b>：<code>benches/root_solvers.rs</code> 对 4 个求根器
+（DurandKerner、Aberth、CompanionMatrix、Faer）在 degree 10/20/30 测残差，
+<code>examples/solver_accuracy_comparison.rs</code> 做 orders 4–40 的残差对照——
+实测 faer 在高阶残差最小（这是 faer 优先的实测依据）。</p>
+
+<h3 id="sec296">29.6 高阶稳定性边界</h3>
+<p><b>实现事实</b>（README + <code>examples/high_order_stability.rs</code>）：
+无耗全极点验证稳定到<b>阶 28</b>、有限传输零点稳定到<b>阶 24</b>（RL 20–22 dB），
+经自适应极点轴容差。<b>阶 30+ 可能被 typed <code>NumericalFailure</code> 拒绝</b>
+（极点实部超 <code>1e-6·(N/5)²</code> 容差）——边界是<b>设计相关</b>的（零点布局影响）。
+<code>high_order_stability</code> 示例（orders 10–40）给出验证边界 + 可复现的拒绝。</p>
+<div class="warn"><b>不要扩大声明</b>
+"高阶稳定到 28/24"是<b>已验证参数范围</b>（全极点/有限零点、RL 20–22），
+<b>不是</b>对所有输入的保证。阶 30+ 拒绝是 typed 行为（有边界文档），不是静默错。</div>
+
+<h3 id="sec297">29.7 本章小结</h3>
+<p>求根 = faer 伴随+Parlett–Reinsch 平衡+后向残差门(1e-3) → Durand-Kerner(1e-13, 残差 1e-8) →
+Aberth(更多迭代) 三级 fall-through 链。nalgebra 伴随意外的伪根被排除在链外。
+高阶稳定到 28(全极点)/24(有限零点)，30+ 可能 typed 拒绝（设计相关）。
+下一章容差、尺度、聚类与病态。</p>
+</div>
+
+<div class="chapter" id="ch30">
+<h2>30&nbsp; 容差、尺度、聚类与病态问题</h2>
+
+<h3 id="sec301">30.1 本章解决什么问题</h3>
+<p>综合链散布着许多数值阈值（聚类半径、实轴噪声门、共轭匹配、零点裁剪、
+小值清零……）。本章把它们按"作用"分类，解释每个阈值的<b>尺度依据</b>
+（为什么是这个数量级），以及它们如何共同处理病态输入。</p>
+
+<h3 id="sec302">30.2 阈值分类</h3>
+<div class="tablewrap"><table>
+<tr><th>类别</th><th>阈值</th><th>值</th><th>尺度依据</th><th>出处</th></tr>
+<tr><td rowspan="2">求根门</td>
+  <td>faer 后向残差</td><td class="num">1e-3</td><td>尺度无关残差，病态伴随的特征值伪根检测</td><td><code>complex_poly.rs:867</code></td></tr>
+<tr>
+  <td>DK/Aberth 收敛 / 残差</td><td class="num">1e-13 / 1e-8</td><td>迭代收敛 vs 可接受残差（比 1e-3 严两个量级）</td><td><code>:317,353,432,481</code></td></tr>
+<tr><td rowspan="3">聚类</td>
+  <td>重根单链聚类</td><td class="num">1e-5</td><td>真 m 重根被拆到 ~1e-7..1e-5；不同极点间距 ≥1.6e-3（&gt;1e-5×100）</td><td><code>expansion.rs:220</code></td></tr>
+<tr>
+  <td>Laurent 前导零裁剪</td><td class="num">max(1e-10·‖·‖, 1e-14)</td><td>相对最大系数（真小 b₀ 不裁）+ 绝对地板</td><td><code>:368-377</code></td></tr>
+<tr>
+  <td>monic 零首项</td><td class="num">1e-24</td><td>≈ (1e-12)²，远低于有效首项</td><td><code>generalized_chebyshev_helpers.rs:499</code></td></tr>
+<tr><td rowspan="4">极点/残差分类</td>
+  <td>极点实轴噪声</td><td class="num">1e-10</td><td>求根噪声量级（虚轴极点被拆出的虚部）</td><td><code>expansion.rs:98</code></td></tr>
+<tr>
+  <td>残差实/复判定</td><td class="num">1e-6</td><td>物理残差 O(1)，1e-6 区分"虚部是噪声还是真复"</td><td><code>transversal.rs:48</code></td></tr>
+<tr>
+  <td>共轭匹配 im_sum/re_diff</td><td class="num">1e-8</td><td>共轭对对称性（比分类门 1e-6 严）</td><td><code>expansion.rs:140-141</code></td></tr>
+<tr>
+  <td>极点轴容差</td><td class="num">max(1e-6, 1e-6·(N/5)²)</td><td>DK 精度退化 O(N²ε<sub>mach</sub>)，随阶数放大</td><td><code>transversal.rs:53</code></td></tr>
+<tr><td rowspan="4">矩阵小值</td>
+  <td>clean_small_values</td><td class="num">1e-10</td><td>旋转残留（Givens 后 ~1e-16 量级，1e-10 安全上界）</td><td><code>core.rs:261-266</code></td></tr>
+<tr>
+  <td>结构零（折叠/箭头）</td><td class="num">1e-7</td><td>"该不该旋转"判定（高于清零门）</td><td><code>core.rs:386,417</code></td></tr>
+<tr>
+  <td>结构零（模式校验）</td><td class="num">1e-6</td><td>transform facade pattern 容差</td><td><code>verify/mod.rs:51</code></td></tr>
+<tr>
+  <td>矩阵对称</td><td class="num">1e-12·max(1,|a|,|b|)</td><td>尺度感知：接受旋转级 ~1e-15，拒 1e-6 单边</td><td><code>core.rs:109</code></td></tr>
+<tr><td rowspan="2">外部 Q / 快路径</td>
+  <td>外部 Q 耦合门</td><td class="num">1e-12</td><td>耦合过小 Qe→∞ 无意义</td><td><code>scaling.rs:155</code></td></tr>
+<tr>
+  <td>快路径前置</td><td class="num">1e-9·max(|M|,1)</td><td>介于 f64 舍入(~1e-16) 与物理耦合(O(1))</td><td><code>pole_expansion.rs:158</code></td></tr>
+<tr><td rowspan="2">响应</td>
+  <td>群延迟退化</td><td class="num">1e-18</td><td>=(1e-9)²，S₂₁→0 的 norm_sqr 地板</td><td><code>response/mod.rs</code>, <code>pole_expansion.rs:247,336</code></td></tr>
+<tr>
+  <td>dB 地板 / 稳定阈</td><td class="num">−300 / 1e-15</td><td>真零点 mag~1e-17，20log10 放大噪声；1e-15 钳到稳定 −300</td><td><code>response/mod.rs:100-106</code></td></tr>
+</table></div>
+
+<h3 id="sec303">30.3 尺度原则</h3>
+<p>阈值设计遵循三条尺度原则：</p>
+<ol>
+  <li><b>相对优先</b>：凡涉及"大小比较"的阈值尽量相对（<code>1e-10·‖·‖</code>、
+      <code>1e-12·max(1,|a|,|b|)</code>），只对绝对量（如极点实轴噪声、dB 地板）用绝对值；</li>
+  <li><b>分离噪声与信号</b>：阈值设在"求根/旋转噪声量级"（~1e-10..1e-13）与
+      "物理量量级"（~1e-3..O(1)）之间的空隙；空隙不够时（如重根 1e-5 vs 极点间距 1.6e-3）
+      用单链聚类 + 均值/簇大小而非重推系数（病态）；</li>
+  <li><b>随阶数自适应</b>：精度退化 O(N²ε) 的地方（极点轴容差）显式乘 <code>(N/5)²</code>，
+      不固定 1e-6（否则高阶误拒）。</li>
+</ol>
+
+<h3 id="sec304">30.4 病态输入的处理策略</h3>
+<ul>
+  <li><b>病态伴随矩阵</b>（求根）→ faer 后向残差门 fall-through 到迭代法；</li>
+  <li><b>重根</b> → 单链聚类 + Laurent 主部（横向链拒绝 m≥2，[§12.2](#sec122)）；</li>
+  <li><b>近奇异 Schur</b>（快路径）→ 该点 typed 失败 → 落回 LU（[§20.3](#sec203)）；</li>
+  <li><b>病态 LM 步</b>（优化）→ 扰动失败步长减半≤4（[§28.4](#sec284)）；</li>
+  <li><b>全有限 ε≤1</b> → typed PreconditionViolation（[§8.4](#sec84)）；</li>
+  <li><b>非有限值</b> → 门自动失败（[§21.3](#sec213)）/ 求根门拒绝。</li>
+</ul>
+<p>共同点：<b>病态不是静默产出近似答案，而是 typed 失败 / 回退 / 显式拒绝</b>。
+这是库的核心错误策略（[§31](#ch31)）。</p>
+
+<h3 id="sec305">30.5 本章小结</h3>
+<p>阈值分六类（求根门、聚类、极点/残差分类、矩阵小值、对称、退化地板），
+遵循"相对优先、分离噪声与信号、随阶数自适应"三原则。病态一律走 typed 失败/回退/拒绝，
+不静默近似。下一章支持边界与 typed error 体系。</p>
+</div>
+
+<div class="chapter" id="ch31">
+<h2>31&nbsp; 支持边界、typed error 与诊断</h2>
+
+<h3 id="sec311">31.1 本章解决什么问题</h3>
+<p>本章汇总：<b>哪些输入可支持、哪些被拒、为什么</b>（支持边界），
+以及统一的 <code>MfsError</code> typed error 体系（8 个变体、诊断信息、JSON 序列化）。
+目标是让读者能预判"我的规格会不会被拒、被拒时看到什么"。</p>
+
+<h3 id="sec312">31.2 MfsError 体系</h3>
+<p><code>src/error.rs</code>，8 个变体（全部 <code>Serialize + Deserialize</code>，
+JSON 结构化错误报告；<code>Display</code> 给人类可读消息）：</p>
+<div class="tablewrap"><table>
+<tr><th>变体</th><th>字段</th><th>触发</th></tr>
+<tr><td><code>InvalidOrder</code></td><td><code>order</code></td><td>N=0 或 N&gt;256（<code>MAX_ORDER</code>，防 (N+2)² OOM）</td></tr>
+<tr><td><code>InvalidReturnLoss</code></td><td><code>return_loss_db</code></td><td>RL 非正/非有限</td></tr>
+<tr><td><code>InvalidFrequency</code></td><td><code>String</code></td><td>物理/归一化频率校验失败（映射、带边、网格）</td></tr>
+<tr><td><code>InvalidGridSize</code></td><td><code>points</code></td><td>网格 &lt;2 或 &gt;<code>MAX_GRID_POINTS</code>(1e5)</td></tr>
+<tr><td><code>InvalidTransmissionZero</code></td><td><code>String</code></td><td>零点 NaN、|z|≤1（通带/带边）、safe_sqrt_term 失败</td></tr>
+<tr><td><code>DimensionMismatch</code></td><td><code>expected, actual</code></td><td>相关向量/矩阵尺寸不符（残差数、data.len）</td></tr>
+<tr><td><code>NumericalFailure</code></td><td><code>String</code></td><td>算法不收敛/退化（求根、Schur 近奇异、谱因子校验、p₀² 奇异）</td></tr>
+<tr><td><code>NotImplemented</code></td><td><code>String</code></td><td>识别但未实现（横向重根、K≥3 多频带）</td></tr>
+<tr><td><code>PreconditionViolation</code></td><td><code>String</code></td><td>前置不满足（全有限 ε≤1、非理想 Type-I N&gt;2、trisection 非箭头、zeros_hz 无带通参数）</td></tr>
+</table></div>
+<p><b>crate-wide alias</b>：<code>type Result&lt;T&gt; = std::result::Result&lt;T, MfsError&gt;</code>
+（<code>error.rs:63</code>）。<b>合成路径无 panic</b>（<code>docs/architecture.md</code> 设计原则）——
+所有失败走 typed error。</p>
+
+<h3 id="sec313">31.3 支持边界（可支持 vs 拒绝）</h3>
+<div class="tablewrap"><table>
+<tr><th>配置</th><th>状态</th><th>依据</th></tr>
+<tr><td>全极点（阶 2–8，fixture 锚定）</td><td>✅ 完全支持</td><td><code>architecture.md</code> Supported Configurations</td></tr>
+<tr><td>有限 TZ（|z|≥1.1，阶 2–8，fixture 锚定）</td><td>✅ 完全支持</td><td>同上</td></tr>
+<tr><td>高阶全极点（阶 10–28）</td><td>✅ 验证稳定</td><td>自适应容差；无 &gt;8 阶文献 fixture</td></tr>
+<tr><td>高阶有限 TZ（阶 10–24）</td><td>✅ 验证稳定</td><td>同上；零点布局影响边界</td></tr>
+<tr><td>阶 30+</td><td>⚠️ 可能 typed 拒绝</td><td>极点实部超 1e-6·(N/5)²；设计相关（[§29.6](#sec296)）</td></tr>
+<tr><td>对称/非对称 TZ 布局</td><td>✅ 完全支持</td><td>—</td></tr>
+<tr><td>复残差配置</td><td>✅ 已修（共轭配对）</td><td>[§11.5](#sec115)</td></tr>
+<tr><td>通带 TZ（|z|&lt;1）</td><td>❌ 不支持（typed 拒绝）</td><td>Feldtkeller 破坏，[§6.4](#sec64)</td></tr>
+<tr><td>重复极点（横向）</td><td>❌ 横向拒绝（typed NotImplemented）</td><td>链不能表 1/(s−p)^m，[§12.2](#sec122)；残差/快路径能处理</td></tr>
+<tr><td>全有限 + ε≤1</td><td>❌ typed 拒绝（PreconditionViolation）</td><td>[§8.4](#sec84)</td></tr>
+<tr><td>多频带 K≥3</td><td>❌ typed 拒绝（NotImplemented，DOF 墙）</td><td>[§27.5](#sec275)</td></tr>
+<tr><td>多工器 N&gt;2 非理想 Type-I</td><td>❌ typed 拒绝（PreconditionViolation）</td><td>[§26.9](#sec269)</td></tr>
+<tr><td>Wheel 拓扑</td><td>弃用 = Arrow 别名</td><td>[§16.3](#sec163)</td></tr>
+</table></div>
+
+<h3 id="sec314">31.4 诊断信息与处理方向</h3>
+<p>每个 typed error 的 <code>Display</code> 消息带<b>具体值与替代建议</b>：</p>
+<ul>
+  <li>全有限 ε≤1 → 消息含实际 ε 值 + "改用混合零点（至少保留一个 ∞）"；</li>
+  <li>通带零点 → 消息指明 |z| 值与 Feldtkeller 原因；</li>
+  <li>阶 30+ 拒绝 → 消息含极点实部与容差（指向设计相关边界）；</li>
+  <li>多频带 K≥3 → 消息明说"需复根(Zolotarev)/多函数特征"。</li>
+</ul>
+<div class="warn"><b>处理原则</b>
+库<b>不自动建议改设计目标来掩盖失败</b>。拒绝消息给"为什么不行 + 什么配置可行"，
+但不擅自放宽规格。用户据此调整（如改混合零点、降阶、放宽 RL），而非库静默妥协。</div>
+
+<h3 id="sec315">31.5 与验证的关系</h3>
+<p>typed error 是<b>构造/算法期</b>的拒绝；<code>verify_against_spec</code>
+（[§32](#ch32)）是<b>响应期</b>的规格检查（返回 pass/fail/skipped，不抛错）。
+两者互补：前者保证"能综合"，后者保证"综合出的响应满足规格"。
+<code>synthesize()</code> 成功<b>不等于</b>规格满足（[§1.6](#sec16)）。</p>
+
+<h3 id="sec316">31.6 本章小结</h3>
+<p>8 个 typed error 变体覆盖全部失败；支持边界明确（高阶 30+ 设计相关拒绝、
+通带零点/横向重根/K≥3/全有限ε≤1 各 typed 拒绝）。诊断消息带值与替代建议，
+不自动放宽规格。下一章规格验证、独立基准与回归测试。</p>
+</div>
+
+<div class="chapter" id="ch32">
+<h2>32&nbsp; 规格验证、独立基准与回归测试</h2>
+
+<h3 id="sec321">32.1 本章解决什么问题</h3>
+<p>综合成功后，如何<b>独立</b>验证响应满足规格？MFS 提供三层：
+<code>verify_against_spec</code>（绝对规格门）、文献锚定基准
+（Cameron 1999/2011 公开矩阵/响应）、回归测试（历史失败配置）。
+本章给验证 API、独立基准门、回归与 property 测试，以及测试分层。</p>
+
+<h3 id="sec322">32.2 verify_against_spec（绝对规格门）</h3>
+<p><code>crate::verify::verify_against_spec</code>（<code>design.rs:163-165</code> 引用）
+对评估后的响应检查<b>绝对</b>规格：回波损耗 RL、插入损耗、零点深度、带外衰减窗。
+<b>关键语义</b>（<code>design.rs:161-166</code> 文档）：<code>synthesize()</code> 成功
+<b>不</b>保证响应满足 RL 规格——<code>verify_against_spec</code> 对收紧或不可行规格
+返回 <code>Fail</code>/<code>Skipped</code> 而<b>非静默通过</b>。这是"合成 ≠ 规格满足"的落地。</p>
+
+<h3 id="sec323">32.3 独立基准（文献锚定）</h3>
+<p><code>tests/benchmark_standard.rs</code>（868 行）是跨语言一致性 + 文献锚定的核心：</p>
+<ul>
+  <li><b>锚定验证</b>：Cameron 印刷的横向+折叠矩阵喂进 mfs 响应引擎，
+      断言折叠前后响应不变（<code>ANCHOR_TOL = 1e-10</code>）；
+      印刷对一致（<code>ANCHOR_PRINTED_PAIR_TOL = 2e-3</code>，4 位小数印刷量子）；</li>
+  <li><b>覆盖</b>：6 个标准二端口案例（<code>twoport_4_4</code>、<code>6_3</code>、
+      <code>4_2_unity</code>、<code>6_2_culdesac</code>、<code>8_3</code>、<code>7_1_2</code>），
+      强制 <code>folded_response_invariance</code> 从标准读规格（非手抄）；</li>
+  <li><b>漂移守卫</b>：vendored 数据 byte-for-byte 对 <code>../filter-bench/data/</code>
+      + SHA-256 对 <code>MANIFEST.sha256</code>（双层）；</li>
+  <li><b>支持模块自检</b>：SHA-256 对 NIST FIPS 180-4 向量、流式 vs 一次性、
+      折叠掩模（tol 0.0）、mfs 综合折叠矩阵复现印刷书矩阵
+      （<code>coupling_abs</code> 门 &lt;0.02，含 N=8 带边）、
+      <b>跨后端等价对 Python 参考</b>（特征值偏差 1e-6）。</li>
+</ul>
+<p>四道契约门：<code>response_invariance</code>(1e-10)、<code>folded_mask</code>(0.0)、
+<code>coupling_abs</code>(0.02)、<code>cross_backend_equivalence</code>(1e-6)。</p>
+
+<h3 id="sec324">32.4 回归测试（11 个历史失败配置）</h3>
+<p><code>tests/synthesis_regression.rs</code>（457 行）验证 11 个曾失败配置现已成功：</p>
+<ul>
+  <li>order 2/3 全极点（15/20/25 dB）——由 E(s) 首项相消时的 monic 归一修复；</li>
+  <li>order 3 + 2 TZ(±1.5/±2.0) + 1 TZ(1.5)；</li>
+  <li>带通缩放成功、外部 Q 为正、折叠变换成功；</li>
+  <li>高阶节提取（order-5 triplet/trisection）；</li>
+  <li>全有限可行域：<code>all_finite_infeasible_high_rl_returns_typed_error</code>（RL 34 → 拒绝）、
+      <code>all_finite_feasible_low_rl_succeeds</code>（RL 20 → ε<sub>r</sub> 有限）。</li>
+</ul>
+
+<h3 id="sec325">32.5 Property 测试（10 条，proptest）</h3>
+<p><code>tests/synthesis_properties.rs</code>（940 行），proptest 策略
+order[2,8]、RL[15,25]、0..order−1 个 TZ(|z|∈[1.1,3.0])，每条 100 例：</p>
+<div class="tablewrap"><table>
+<tr><th>#</th><th>Property</th><th>验证</th><th>容差</th></tr>
+<tr><td>1</td><td>共轭残差正确配对</td><td>|Im(p_a)+Im(p_b)|&lt;1e-8 且 |Re 差|&lt;1e-8</td><td>1e-8</td></tr>
+<tr><td>2</td><td>残差数据保持（往返）</td><td>Σ r_k/(s−p_k)+常数 匹配 y12_num/den（10 个虚轴点）</td><td>1e-5 相对</td></tr>
+<tr><td>3</td><td>横向矩阵实值</td><td>条目 f64、有限、(N+2)² 维</td><td>—</td></tr>
+<tr><td>4</td><td>矩阵结构不变量</td><td>源→谐振器、谐振器→负载各 ≥1 条目 &gt;1e-12</td><td>1e-12</td></tr>
+<tr><td>5</td><td>综合成功（所有有效配置）</td><td>无 NumericalFailure</td><td>—</td></tr>
+<tr><td>6</td><td>折叠变换成功</td><td>order 3–8 + ≥1 TZ</td><td>—</td></tr>
+<tr><td>7</td><td>求根器精度</td><td>|P(root)|/|lead| &lt;1e-8（每分母极点）</td><td>1e-8</td></tr>
+<tr><td>8</td><td>实残差配置后向兼容</td><td>order≥4：对称 1e-10、对角=−Im(pole)、M_Sk·M_kL=res_12</td><td>1e-10</td></tr>
+<tr><td>9</td><td>导纳多项式度约束</td><td>deg(denominator)==N、deg(y12)≤K</td><td>—</td></tr>
+<tr><td>10</td><td>导纳分母极点在虚轴</td><td>|Re(pole)|&lt;自适应容差 1e-6·(N/5)²</td><td>自适应</td></tr>
+</table></div>
+<p><b>已知限制</b>（测试内文档）：偶数阶全极点配置因导纳分母首项相消产生
+<code>DimensionMismatch</code>，经 <code>prop_assume!</code> 或早退跳过
+（<code>:180,325,372</code>）——这是 [§10.5](#sec105) 守卫覆盖的场景。</p>
+
+<h3 id="sec326">32.6 测试分层</h3>
+<ul>
+  <li><b>单元测试</b>（<code>cargo test --lib</code>，289 passing @ 2026-10-12）；</li>
+  <li><b>Property 测试</b>（10 条 × 100 例）；</li>
+  <li><b>回归测试</b>（11 配置）；</li>
+  <li><b>集成测试</b>（20 文件：端到端、benchmark_standard、folded_response_invariance、
+      multiplexer、multi_band、optimizer、cli、literature_fixtures）；</li>
+  <li><b>文献 fixture</b>（Cameron 教科书/论文参考值）。</li>
+</ul>
+<p>文献 fixture 清单（<code>docs/literature-fixture-catalog.md</code>）：
+<code>cameron_generalized_order4_spec</code>、<code>cameron_style_section_polynomials</code>、
+<code>literature_reference_grid</code>、<code>cameron_single_zero_exact_case</code>（精确一阶递推锚）、
+<code>cameron_order3_generalized_pipeline_exact_case</code>（精确 order-3 全 helper 锚）。
+<b>边界</b>：fixture 是"文献支撑的工作流锚 + 两个精确低阶数值锚"，
+<b>不</b>应解读为"精确复现公开耦合表"（更强的声明需 source-to-output 可追溯，见附录 F）。</p>
+
+<h3 id="sec327">32.7 本章小结</h3>
+<p>验证三层：verify_against_spec（绝对规格，Fail/Skipped 非静默）、
+文献锚定基准（1e-10 不变性、0.02 耦合、1e-6 跨后端）、回归(11)+property(10)。
+测试分五层（单元/property/回归/集成/fixture）。"合成 ≠ 规格满足"由 verify 落地。
+下一章工程使用（Rust/Python/CLI）。</p>
+</div>
+
+<div class="chapter" id="ch33">
+<h2>33&nbsp; Rust、Python 与 CLI 的使用流程</h2>
+
+<h3 id="sec331">33.1 本章解决什么问题</h3>
+<p>把前五篇的算法通过三种接口暴露给使用者：<b>Rust API</b>（主）、
+<b>Python 绑定</b>（可选 feature）、<b>JSON 驱动 CLI</b>。
+本章给各接口的使用流程与差异，强调"接口包装 vs 数学算法"的分离
+（CLI/Python/JSON 是接口，不是核心数学，故放在本篇而非第二篇）。</p>
+
+<h3 id="sec332">33.2 Rust API（主接口）</h3>
+<p>入口 <code>FilterDesign</code>（[§1.6](#sec16)）。典型流程：</p>
+<pre><code>use mfs::prelude::*;
+
+// 带通设计（物理频率）
+let design = FilterDesign::bandpass(6, 23.0, 6.75e9, 300e6)
+    .zeros_hz([6.4e9, 6.5e9, 7.0e9])
+    .unloaded_q(3000.0)        // 可选 Q
+    .synthesize()?;
+
+// 拓扑变换
+let folded  = design.to_folded()?;   // 折叠
+let arrow   = design.to_arrow()?;    // 箭头
+let ct      = design.to_ct(&amp;[1.8082])?; // 级联三节（主零点）
+let cq      = design.to_cq(&amp;[(a,b)])?;  // 级联四节（零点对）
+
+// 响应（自动快路径 + LU 回退，[§21](#ch21)）
+let response = design.response(6.0e9, 7.5e9, 501)?;
+for s in &amp;response.samples {
+    // s.frequency_hz, s.s21_db(), s.s11_db(),
+    // s.s21_phase_deg(), s.group_delay (Option, 归一化单位)
+}
+
+// 去归一化（物理 Hz + 外部 Q）
+let scaled = design.scale()?;
+
+// Touchstone 导出 / 活动网络 / 级联
+design.save_touchstone("filter.s2p")?;
+let network  = design.build_network()?;
+let cascaded = design.cascade(&amp;other_design)?;
+
+// 规格验证（[§32.2](#sec322)）
+// verify_against_spec(&amp;response, &amp;spec)?;</code></pre>
+<p>归一化原型：<code>FilterDesign::prototype(4, 20.0).zeros([-1.5,1.5]).synthesize()</code> +
+<code>response_normalized(-3.0, 3.0, 201)</code>。
+带边入口：<code>bandpass_edges(order, rl, f_start, f_stop)</code>（几何均值中心）。
+低层控制：<code>MatrixSynthesisEngine::synthesize(&amp;polynomials)</code>、
+<code>synthesize_residue_expansions</code>、<code>classify_residues</code>（[§10–12](#ch10)）。</p>
+
+<h3 id="sec333">33.3 Python 绑定</h3>
+<p>可选 feature（<code>python</code>，pyo3 0.23，<code>extension-module</code>）。
+需 Rust ≥ 1.86 + 匹配 ABI 的 Python。</p>
+<pre><code># 构建
+pip install maturin
+maturin develop --features python
+
+# 使用
+import mfs
+design = mfs.bandpass(order=6, rl=23.0, center=6.75e9, bw=300e6,
+                      zeros=[6.4e9, 6.5e9, 7.0e9])
+freq, s21, s11 = design.response(6.0e9, 7.5e9, 501)
+m = design.folded()              # 耦合矩阵为 2D list
+design.save_touchstone("filter.s2p")
+design.save_touchstone("f.s2p", freq_unit="MHz", format="DB")</code></pre>
+<p><b>实现事实</b>：<code>src/python.rs</code>（30.6KB）是<b>接口包装</b>——
+把 Rust <code>FilterDesign</code> 方法暴露为 Python 方法，<b>不重复</b>任何数学。
+Python 路径的响应/矩阵与 Rust 路径逐位一致（同一 <code>FilterDesign</code>）。</p>
+
+<h3 id="sec334">33.4 JSON 驱动 CLI</h3>
+<p><code>src/bin/mfs_cli/</code>（feature <code>cli</code>，clap 4）。
+<code>pipeline/</code> 模块实现分阶段编排：</p>
+<pre><code>mfs_cli --input request.json --format json --stage matrix_synthesis
+mfs_cli --input request.json --resume context.json   # 增量恢复</code></pre>
+<p><b>Stage 管道</b>（<code>pipeline/stages.rs</code>，4 个具体 stage）：</p>
+<ol>
+  <li><code>ApproximationStage</code>：FilterSpec → PolynomialSet；</li>
+  <li><code>MatrixSynthesisStage</code>：PolynomialSet → CouplingMatrix；</li>
+  <li><code>TopologyTransformStage</code>：CouplingMatrix → TransformOutcome；</li>
+  <li><code>ResponseEvaluationStage</code>：CouplingMatrix + Grid(+Mapping) → SParameterResponse。</li>
+</ol>
+<p><code>run_full_pipeline(request)</code>（一次全跑）、<code>run_stage</code>（增量单 stage）、
+<code>save_context</code>/<code>load_context</code>（JSON 持久化恢复）、
+<code>describe_schema()</code>（JSON Schema）。
+<b>频率映射</b>：request 带 <code>mapping</code>（bandpass/lowpass）则经
+<code>MappingConfig::build_mapping</code> 评估物理 Hz 网格；否则网格视为已归一化。
+未知/不完整 mapping → <code>InvalidFrequency</code>（<b>不再静默忽略</b>，历史修正）。</p>
+<p>CLI 子命令：<code>design</code>、<code>io</code>、<code>multiplexer</code>、<code>target</code>、
+<code>optimize</code>（调谐/提取，[§28](#ch28)）。
+<code>tests/cli_integration.rs</code>（551 行）验证 JSON/stdin I/O、--stage flag、
+optimize/extract 子命令、save/resume 端到端。</p>
+
+<h3 id="sec335">33.5 接口 vs 算法的分离</h3>
+<div class="info"><b>为什么 CLI/Python/JSON 在本篇</b>
+它们是<b>接口包装</b>（同一 <code>FilterDesign</code> 的三种暴露面），不含独立数学。
+核心数学在第二～五篇。把接口混入数学章节会让"算法在哪实现"的追踪变模糊——
+故按任务要求分离。追踪"某算法在哪"：见附录 C 映射表。</div>
+
+<h3 id="sec336">33.6 可复现命令</h3>
+<pre><code>cargo run --example chebyshev_bandpass     # 带通工作流
+cargo run --example high_order_stability   # 高阶边界
+cargo run --example literature_fixtures    # 文献 fixture
+cargo run --example verify_literature      # Cameron 对照
+cargo run --example solver_accuracy_comparison  # 求根器残差
+cargo test --lib && cargo test --tests     # 单元 + 集成
+cargo bench                                # criterion 基准（synthesis/optimizer/multiplexer/root_solvers）</code></pre>
+
+<h3 id="sec337">33.7 本章小结</h3>
+<p>三接口：Rust（主，FilterDesign 全功能）、Python（pyo3 包装，逐位一致）、
+CLI（JSON 4-stage 管道 + save/resume + 子命令）。接口不重复数学。
+下一章可复现算例集汇总。</p>
+</div>
+
+<div class="chapter" id="ch34">
+<h2>34&nbsp; 可复现算例集</h2>
+
+<h3 id="sec341">34.1 本章目的</h3>
+<p>汇总全书所有可复现算例，标注<b>类型</b>（实测 / 文献锚定 / 未执行）、
+<b>输入</b>、<b>验证指标</b>、<b>复现命令</b>。读者可逐条复现，追踪到实现与测试。
+"未执行"的明确标注，绝不冒充实测。</p>
+
+<h3 id="sec342">34.2 算例清单</h3>
+<div class="tablewrap"><table>
+<tr><th>算例</th><th>类型</th><th>输入</th><th>验证指标</th><th>复现命令 / 出处</th></tr>
+<tr><td>4-2 不对称三节（第 13 章）</td><td>文献锚定</td>
+  <td>N=4, RL 22, TZ {1.3217,1.8082}</td><td>ε=1.1548/ε<sub>r</sub>=1；折叠矩阵耦合偏差&lt;0.02；响应不变 1e-10</td>
+  <td><code>verify_literature</code> / <code>cameron2011_fixtures.json</code> Fig.21</td></tr>
+<tr><td>双通带（第 27 章）</td><td>文献锚定</td>
+  <td>N=10, RL 22, 带[−1,−.35]∪[.35,1], TZ {0,±.25420871,±1.15728568}</td><td>5 门：不变 1e-3、等纹波 −22±1、无耗 1e-10、TZ −40 dB、阻带 −15 dB</td>
+  <td><code>tests/multi_band.rs</code> / Fig.25</td></tr>
+<tr><td>三工器/四工器（第 26 章）</td><td>实测</td>
+  <td>3/4 信道，全谱迭代</td><td>收敛&lt;1e-8、带内 S21&gt;−0.5 dB、天线 RL&lt;−20 dB、para-identity 1e-6</td>
+  <td><code>tests/multiplexer.rs</code> full_iteration 测试</td></tr>
+<tr><td>Zhao N=4 多工器（第 26 章）</td><td>文献锚定</td>
+  <td>4/6/5/4 阶带 TZ，RL 18/22/20/18</td><td>收敛、0 dB 带、准等纹波、para-identity</td>
+  <td><code>multiplexer_full_iteration_vendored_zhao_n4_converges</code>（Zhao 2026 Table I）</td></tr>
+<tr><td>高阶稳定性（第 29 章）</td><td>实测</td>
+  <td>orders 10–40，全极点/有限零点，RL 20–22</td><td>稳定边界 28(全极点)/24(有限)；30+ 可 typed 拒绝</td>
+  <td><code>examples/high_order_stability.rs</code></td></tr>
+<tr><td>求根器残差（第 29 章）</td><td>实测</td>
+  <td>4 求根器，degree 10/20/30；orders 4–40</td><td>faer 高阶残差最小（后向残差门 1e-3）</td>
+  <td><code>benches/root_solvers.rs</code> / <code>solver_accuracy_comparison.rs</code></td></tr>
+<tr><td>LM 调谐/提取（第 28 章）</td><td>实测</td>
+  <td>order 4/6/8，tune + extract</td><td>order-6 恢复/提取收敛</td>
+  <td><code>tests/optimizer_integration.rs</code> / <code>benches/optimizer.rs</code></td></tr>
+<tr><td>11 个回归配置（第 32 章）</td><td>实测</td>
+  <td>order 2–3 全极点/2TZ/1TZ（15/20/25 dB）等</td><td>综合成功、缩放成功、Q&gt;0、折叠成功</td>
+  <td><code>tests/synthesis_regression.rs</code></td></tr>
+<tr><td>10 条 property（第 32 章）</td><td>实测</td>
+  <td>order[2,8]、RL[15,25]、TZ∈[1.1,3.0] ×100</td><td>共轭配对 1e-8、残差往返 1e-5、无耗、度约束等</td>
+  <td><code>tests/synthesis_properties.rs</code></td></tr>
+<tr><td>跨后端等价（第 32 章）</td><td>文献锚定</td>
+  <td>标准二端口案例</td><td>特征值偏差 vs Python 参考 1e-6</td>
+  <td><code>tests/benchmark_standard.rs</code></td></tr>
+<tr><td>带通群延迟换算（第 22 章）</td><td>实测</td>
+  <td>带通映射，归一化 GD</td><td>跨路径一致；独立数值微分（经 2π 换算）</td>
+  <td><code>tests/response/mod.rs</code> 群延迟一致性 + 独立微分基准</td></tr>
+<tr><td>6.75 GHz 带通（README）</td><td>实测</td>
+  <td>N=6, RL 23, 6.75 GHz, 300 MHz, TZ {6.4,6.5,7.0} GHz</td><td>合成成功、折叠、响应</td>
+  <td><code>cargo run --example chebyshev_bandpass</code></td></tr>
+</table></div>
+
+<h3 id="sec343">34.3 未执行 / 理论示意</h3>
+<div class="info"><b>明确标注</b>
+本书<b>未</b>独立重算第 13 章 E/F/P 系数（用 fixture 文献值，复算需运行
+<code>verify_literature</code>）；<b>未</b>提供响应曲线图（避免用示意数据冒充实测——
+若需图，应保留输入与生成脚本后由 <code>design.response()</code> 实际计算，见 [§7](#sec71) 要求）。
+"未执行"的算例在此显式列出，读者不应当作本书实测结果。</div>
+
+<h3 id="sec344">34.4 追踪到实现与测试</h3>
+<p>每个算例的"复现命令/出处"列指向真实测试文件与函数名（[§31](#ch31) 的 typed 行为、
+[§32](#ch32) 的门）。附录 C 给"算法—实现—测试"三列映射表，便于从算法名反查
+源码文件/函数 与 测试/基准。</p>
+
+<h3 id="sec345">34.5 本章小结</h3>
+<p>12 个可复现算例（10 实测/文献锚定 + 2 明确未执行），每个标注类型/输入/指标/命令。
+实测数据注明命令与环境；未执行的明确标注，不冒充实测。全书到此完成主体；附录 A–F 收尾。</p>
+</div>

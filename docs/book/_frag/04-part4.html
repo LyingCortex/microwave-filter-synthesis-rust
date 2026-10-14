@@ -1,0 +1,405 @@
+<!-- ═══════════════════════ 第四篇 ═══════════════════════ -->
+<div class="part-title" id="part4">
+  <div class="kicker">Part IV</div>
+  <h1>第四篇 · 响应计算与网络操作</h1>
+  <p>从耦合矩阵算 S 参数：LU 权威路径（§19）、O(N) 极点展开快路径（§20）、
+  信任策略与验证门（§21）、群延迟（§22），以及 Touchstone I/O 与级联（§23–24）。</p>
+</div>
+
+<div class="chapter" id="ch19">
+<h2>19&nbsp; 基于矩阵的 LU 响应计算</h2>
+
+<h3 id="sec191">19.1 本章解决什么问题</h3>
+<p>给定耦合矩阵 M 与频率网格，逐点算 S₁₁、S₂₁、群延迟。LU 路径是<b>权威</b>参考：
+对所有拓扑（Transversal/Folded/Arrow/CT/CQ）与有耗（Q 有限）情形都正确，
+因此用作快路径的校验基准。本章给 A(ω) 构造、选择性求解与群延迟公式。</p>
+
+<h3 id="sec192">19.2 A(ω) 构造</h3>
+<p>每个频率点（<code>src/response/backend.rs</code>，<code>evaluate_response</code>）构造复响应矩阵：</p>
+<div class="eq mrow">A(ω) = M + ω·I<sub>r</sub> − jR<sub>S</sub>·e₀e₀ᵀ − jR<sub>L</sub>·eₙeₙᵀ
+<span class="num">(19.1)</span></div>
+<p><code>I<sub>r</sub></code> 只在谐振器对角（1…N）为 1，端口对角为 0。
+<b>有耗</b>（Q<sub>u</sub> 有限）时谐振器对角再 <code>− j/Q<sub>u</sub></code>
+（<code>backend.rs:130-138</code>，把极点移出虚轴，避免虚轴奇异）。</p>
+
+<h3 id="sec193">19.3 选择性求解（一次 LU 解两个右端）</h3>
+<p>S 参数只需要 A⁻¹ 的两个元素：(0,0) 与 (n,0)（[§3.3](#sec33) (3.3)）。
+<b>实现事实</b>（<code>backend.rs:172-194</code>）：<b>不</b>做完整求逆——
+只解 <code>A x = e₀</code>（第一列）与 <code>A y = eₙ</code>（最后一列），
+<b>一次 LU 分解解两个右端</b>，省掉完整求逆的 N−2 次回代。
+A 对称 ⇒ 最后一行 = 最后一列，故 (n,0) 元素从 <code>A⁻¹</code> 的 (n,0) 位置读出。</p>
+<div class="eq mrow">S₁₁ = 1 + 2jR<sub>S</sub>[A⁻¹]₀₀, &nbsp;&nbsp;
+S₂₁ = −2j√(R<sub>S</sub>R<sub>L</sub>)[A⁻¹]<sub>n,0</sub>
+<span class="num">(19.2)</span></div>
+
+<h3 id="sec194">19.4 LU 群延迟</h3>
+<p>群延迟（第 22 章定义）在 LU 路径的解析形式（<code>backend.rs:164-169</code> 区域）：</p>
+<div class="eq mrow">τ = Im( <span class="frac"><span class="top">Σ<sub>k</sub> [A⁻¹]<sub>n,k</sub>·[A⁻¹]<sub>k,0</sub></span><span class="bot">[A⁻¹]<sub>n,0</sub></span></span> )
+= −Im( d/dω ln S₂₁ )
+<span class="num">(19.3)</span></div>
+<p>即对 <code>ln S₂₁</code> 关于归一化 ω 求导取负虚部。
+<b>实现事实</b>：LU 群延迟利用对称取"最后一行 = 最后一列"（<code>backend.rs:164-169</code>），
+但<b>消费端不验证对称</b>——若经 <code>new_with_topology_asymmetric</code> /
+<code>allow_asymmetric(true)</code> 喂入非对称矩阵，S₁₁/S₂₁ 幅度仍对、
+<b>群延迟会静默算错</b>（review 0.6.1 P1-3）。构造端现在有对称守卫兜底，但这是已知不变量（[§19.5](#sec195)）。</p>
+
+<h3 id="sec195">19.5 已知限制</h3>
+<div class="fail"><b>对称依赖</b>
+LU 路径的 S₁₁/S₂₁ 幅度对对称性不敏感（只读 A⁻¹ 的 (0,0)、(n,0)），但群延迟公式 (19.3)
+用了"最后一行=最后一列"的对称假设。非对称输入（opt-out 构造）群延迟静默错、幅度不受影响。
+这是 review 记录的已知不变量，不是 bug——构造端的对称守卫是兜底。</div>
+
+<h3 id="sec196">19.6 入口与单位</h3>
+<p><code>ResponseSolver::evaluate_normalized(_with_settings)</code>
+（<code>response/mod.rs:169-185</code>）直接吃归一化网格；
+<code>evaluate(_with_settings)</code>（<code>:142-166</code>）先经 <code>mapping.map_grid_hz_to_normalized</code>
+把物理网格映成归一化 ω（[§2](#ch2)）再逐点求解。
+<code>ResponseSettings</code>（<code>:120-138</code>）：<code>source_resistance</code>、
+<code>load_resistance</code>（默认 1）、<code>unloaded_q</code>（默认 ∞ = 无耗）。
+群延迟单位：归一化 <code>dτ/dω</code>（[§22.1](#sec221)）。</p>
+
+<h3 id="sec197">19.7 复杂度</h3>
+<p>每频率点：构造 A(ω) O(N²)（复数化）+ 一次 LU 分解 O(N³) + 两次回代 O(N²)。
+<b>逐点 O(N³)</b>——这是快路径（第 20 章 O(N)）要替代的成本。
+预处理无（每点独立）。内存 O(N²)（复矩阵）。</p>
+
+<h3 id="sec198">19.8 本章小结</h3>
+<p>LU = A(ω) 构造 + 一次分解解两个右端（e₀、eₙ）→ S₁₁/S₂₁ + 解析群延迟 (19.3)。
+权威、全拓扑通用、支持有耗，但逐点 O(N³)。群延迟依赖对称（已知不变量）。
+下一章 O(N) 极点展开快路径。</p>
+</div>
+
+<div class="chapter" id="ch20">
+<h2>20&nbsp; 极点展开快路径</h2>
+
+<h3 id="sec201">20.1 本章解决什么问题</h3>
+<p>横向矩阵的 S 参数可以解析地写成极点的部分分式，从而把每点 O(N³) 的 LU 降到
+<b>O(N)</b>。这是<b>快路径</b>（fast path）：<code>PoleExpansionData</code> 从横向矩阵
+直接读极点/残差（不求根），逐点用 Schur 2×2 补矩阵解析求 S 参数 + 群延迟。
+本章给极点/残差的读取、Schur 求值、Laurent 求和与近奇异守卫。</p>
+
+<h3 id="sec202">20.2 从矩阵直接读极点与残差</h3>
+<p><code>PoleExpansionData::from_matrix</code>（<code>src/response/pole_expansion.rs:79-148</code>）。
+<b>前置</b>：<code>assert_transversal_structure</code>（<code>:152-207</code>）——
+谐振器块 <code>M[1..=N][1..=N]</code> 必须对角、端口对角 <code>M[0,0]=M[N+1,N+1]=0</code>
+（容差 <code>1e-9·max(|M|,1)</code>，<code>:158</code>）。非横向/端口短路 →
+<code>PreconditionViolation</code>。</p>
+<p>对 <code>k in 1..=N</code>（<code>:96-110</code>），<b>不求根</b>，直接读：</p>
+<div class="tablewrap"><table>
+<tr><th>量</th><th>读法</th><th>物理含义</th></tr>
+<tr><td>极点 <code>pole_k</code></td><td><code>−M[k,k]</code>（= −B<sub>k</sub>，实 ω 域）</td><td>失谐量</td></tr>
+<tr><td>残差 y11</td><td><code>M[0,k]²</code> = M<sub>Sk</sub>²</td><td>源自耦合平方</td></tr>
+<tr><td>残差 y12</td><td><code>M[0,k]·M[k,N+1]</code> = M<sub>Sk</sub>·M<sub>kL</sub></td><td>传输残差</td></tr>
+<tr><td>残差 y22</td><td><code>M[k,N+1]²</code> = M<sub>kL</sub>²</td><td>负载自耦合平方</td></tr>
+<tr><td>常项 y12</td><td><code>M[0,N+1]</code> = M<sub>SL</sub></td><td>直接源-负载耦合</td></tr>
+</table></div>
+<p><b>极点域约定</b>（review P2-12，<code>:73,81-84</code>）：存的是<b>实 ω 域极点 −B<sub>k</sub></b>，
+<code>evaluate_at</code> 用实 ω 组 <code>denom = ω − pole</code>（与 [§4.6](#sec46) 一致）。
+<code>source_r = load_r = 1.0</code>（<code>:121-122</code>）。</p>
+
+<h3 id="sec203">20.3 evaluate_at：Schur 2×2 解析求值</h3>
+<p><code>evaluate_at(ω)</code>（<code>pole_expansion.rs:233-339</code>，私有），返回
+<code>(S11, S21, group_delay)</code>，<b>O(N)/点</b>。
+算法（对谐振器块 <code>D = diag(jω+B_k)</code> 做 Schur 2×2 补）：</p>
+<ol>
+  <li>单遍遍历极点（<code>:263-300</code>），累加三个 Y 的部分分式：
+      <code>Σ r₁₁/(ω−pole_k)</code>、<code>Σ r₁₂/(ω−pole_k)</code>、<code>Σ r₂₂/(ω−pole_k)</code>，
+      以及各自的 ω 导数（群延迟用）。
+      <code>denom.norm_sqr() &gt; 1e-30</code> 才累加（<code>:267</code>，近零分母跳过）。</li>
+  <li>组 Schur 2×2（<code>:303-306</code>）：
+      <code>s00 = −jR_S − Σ₁₁</code>、<code>s01 = M_SL − Σ₁₂</code>（对称 <code>s10 = s01</code>）、
+      <code>s11 = −jR_L − Σ₂₂</code>；ω 导数 <code>ds00 = −ds₁₁</code> 等（<code>:309-310</code>）。</li>
+  <li><b>近奇异守卫</b>（<code>:314-320</code>）：<code>det = s00·s11 − s01·s10</code>，
+      若 <code>det.norm_sqr() ≤ 1e-30</code> → <code>NumericalFailure("pole expansion:
+      near-singular Schur determinant")</code>——防止伪造 (1,0) 全反射样本（review P3 #1）。</li>
+  <li>解析求逆：<code>inv_00 = s11/det</code>、<code>inv_10 = −s10/det</code>（<code>:323-324</code>）。</li>
+  <li><b>S 参数</b>：<code>S11 = 1 + 2j·R_S·inv_00</code>、
+      <code>S21 = −2j·√(R_S·R_L)·inv_10</code>（<code>:327-329</code>）。
+      与 LU 的 (19.2) 同式，只是 A⁻¹ 的元素用 Schur 解析算了。</li>
+  <li><b>群延迟</b>（<code>:333-339</code>）：
+      <code>ddet = ds00·s11 + s00·ds11 − 2·s01·ds01</code>；
+      <code>inv_10.norm_sqr() ≤ 1e-18</code> → <code>None</code>（传输零点，显式未定义）；
+      否则 <code>Some(−(ds01/s01 − ddet/det).im)</code>。
+      与 LU 用同一 <code>1e-18</code> 阈值。</li>
+</ol>
+
+<h3 id="sec204">20.4 Laurent 求和与导数（重根）</h3>
+<p>若某极点带 Laurent 主部（第 11 章，<code>laurent = Some</code>），快路径用<b>自己的</b>
+Laurent 长度精确求和（每个 Y 独立长度，[§11.4](#sec114)）：</p>
+<p><b>求和</b> <code>laurent_sum</code>（<code>:356-371</code>）：
+<code>b₀/denom^m + b₁/denom^{m-1} + … + b_{m-1}/denom</code>
+（累加 <code>1/denom, 1/denom², …, 1/denom^m</code> 再反转，使索引 k 持 <code>1/denom^{m-k}</code>）。</p>
+<p><b>导数</b> <code>laurent_derivative</code>（<code>:343-351</code>）：
+<code>d/dω Σ_k b_k/(jω−p)^{m−k} = −j·Σ_k (m−k)·b_k/(jω−p)^{m−k+1}</code>
+（代码用 <code>denom.powi(power+1)</code>，denom 已含 jω 形式）。</p>
+<p>简单极点（<code>laurent = None</code>）的导数：<code>d/dω[r/(ω−p)] = −r/(ω−p)²</code>。</p>
+
+<h3 id="sec205">20.5 群延迟在传输零点</h3>
+<p><b>实现事实</b>：在传输零点（S₂₁→0），群延迟返回 <code>None</code>
+（<code>inv_10.norm_sqr() ≤ 1e-18</code>，<code>:247,336</code>），<b>与 LU 的退化守卫一致</b>——
+显式未定义，不是假 0。这与 <code>ResponseSample.group_delay: Option&lt;f64&gt;</code>
+的约定一致（[§22.4](#sec224)：只在数值退化处 None，从不静默 0.0）。</p>
+
+<h3 id="sec206">20.6 对外入口</h3>
+<p><code>evaluate_normalized(grid)</code>（<code>:377-394</code>）：逐点 <code>evaluate_at</code>；
+任一点近奇异 → typed error（调用方落回 LU）。
+<code>evaluate_bandpass(grid, mapping)</code>（<code>:399-420</code>）：物理 Hz 先经
+<code>mapping.map_hz_to_normalized</code> 映成 ω 再 <code>evaluate_at</code>。</p>
+
+<h3 id="sec207">20.7 复杂度与适用</h3>
+<p>预处理 O(N)（读极点/残差）；<b>逐点 O(N)</b>（单遍求和 + 2×2 求逆）。
+对比 LU 逐点 O(N³)。仅适用<b>无耗横向</b>矩阵（前置断言）；
+有耗（Q 有限）或非横向 → 前置失败 → 落回 LU（第 21 章信任策略）。</p>
+
+<h3 id="sec208">20.8 边界与失败模式</h3>
+<div class="fail"><b>拒绝 / 退化</b>
+非横向结构或端口短路 → <code>PreconditionViolation</code>（前置）；
+近奇异 Schur 行列式 → <code>NumericalFailure</code>（该点落回 LU）；
+传输零点群延迟 → <code>None</code>（显式未定义）。</div>
+
+<h3 id="sec209">20.9 本章小结</h3>
+<p>快路径 = 从横向矩阵直接读极点(−B_k)/残差(M_Sk², M_SkM_kL, M_kL²) + M_SL，
+Schur 2×2 解析求逆 → S₁₁/S₂₁ + 解析群延迟，O(N)/点，重根用各自 Laurent 长度精确求和。
+仅无耗横向适用。下一章信任策略与验证门如何决定"用快路径还是 LU"。</p>
+</div>
+
+<div class="chapter" id="ch21">
+<h2>21&nbsp; 快路径输入契约、验证门与 LU 回退</h2>
+
+<h3 id="sec211">21.1 本章解决什么问题</h3>
+<p>快路径在数值上对某些输入不可靠（近网络极点、非横向矩阵）。
+库用一个<b>信任策略</b>决定何时用快路径、何时落回 LU：先在 5 点检查网格上
+把快路径与 LU 比对，通过验证门才信任快路径算全网格；
+信任后单点近奇异仍逐点落回 LU。本章给门的全部逻辑与阈值。</p>
+
+<h3 id="sec212">21.2 输入契约</h3>
+<p>快路径的<b>结构前置</b>（<code>assert_transversal_structure</code>，[§20.2](#sec202)）：
+矩阵必须是横向（谐振器块对角、端口对角零）。<b>非 Transversal 标签</b>的矩阵
+（Folded/Arrow/CT/CQ）<b>也</b>被前置拒绝——<code>response_normalized</code> 文档
+（<code>design.rs:485-486</code>）明确："非横向存储矩阵被快路径结构前置 upfront 拒绝，
+改由 LU 评估"。注意这是<b>结构</b>检查（看数值布局），不是看 <code>topology</code> 标签。</p>
+
+<h3 id="sec213">21.3 验证门 fast_path_gate</h3>
+<p><code>fast_path_gate(pole, lu)</code>（<code>src/design.rs:72-105</code>），
+产物 <code>GateVerdict{compared, max_diff, all_finite}</code>（<code>:40-59</code>）：</p>
+<ul>
+  <li>逐检查点对比<b>复数</b> S₂₁（幅度<b>和</b>相位）与 S₁₁，不只 |S₂₁|——
+      一个丢/错符号耦合若只让 |S₂₁| 几乎不变而旋转相位，或只动 S₁₁，会溜过纯幅度门
+      （round-3 review 修正）；</li>
+  <li>每点：若 <code>l.s21_mag() ≤ FAST_PATH_GATE_S21_FLOOR (= 1e-10)</code>
+      （<code>design.rs:37</code>）→ 跳过（深阻带点，无可比对象）；否则 <code>compared += 1</code>；</li>
+  <li>非有限检查：任一比较值非有限 → <code>all_finite = false</code>（该点自动门失败，
+      不是"大但有限的偏差"）；</li>
+  <li><code>max_diff = max(max_diff, |(p21−l21)/l21|, |(p11−l11)/l11|)</code>（复数模）。</li>
+</ul>
+<p><b>通过条件</b>（<code>GateVerdict::passes(tol)</code>，<code>:56-58</code>）：
+<code>compared &gt; 0 && all_finite && max_diff &lt; tol</code>。
+调用点用 <code>tol = 1e-3</code>（<code>design.rs:519,620</code>）。</p>
+
+<h3 id="sec214">21.4 信任策略主流程</h3>
+<p><code>response_normalized</code>（<code>design.rs:489-530</code>）：</p>
+<ol>
+  <li><code>grid = linspace(start, stop, points)</code>；</li>
+  <li><code>PoleExpansionData::from_matrix(&amp;matrix)</code>——
+      <code>Err</code>（非横向/端口短路）→ 跳过快路径，直接 LU 全网格（<code>:529</code>）；</li>
+  <li><b>5 点检查网格</b>：<code>check_grid = linspace(start, stop, 5.min(points))</code>（<code>:505</code>）；</li>
+  <li><code>lu_check = ResponseSolver.evaluate_normalized(matrix, check_grid)</code>（<code>:506</code>）；</li>
+  <li><code>pole_check = pole_data.evaluate_normalized(check_grid)</code>——
+      <code>Err</code>（某点近奇异）→ 直接 LU 全网格（<code>:509</code>）；</li>
+  <li><code>verdict = fast_path_gate(pole_check.samples, lu_check.samples)</code>（<code>:518</code>）；</li>
+  <li>若 <code>verdict.passes(1e-3)</code>（<code>:519</code>）：
+      <code>return pole_data.evaluate_normalized(grid).or_else(|_| LU(grid))</code>（<code>:522-524</code>）——
+      快路径算全网格，<b>单点近奇异仍逐点落回 LU</b>；</li>
+  <li>否则：LU 全网格（<code>:529</code>）。</li>
+</ol>
+<p><code>response_bandpass</code>（<code>design.rs:586-643</code>）是同一逻辑在物理网格上
+（<code>n_check = 5.min(points)</code>，经 <code>mapping</code> 映射）。</p>
+
+<h3 id="sec215">21.5 为什么是 5 点 + 1e-3 + 复数比较</h3>
+<ul>
+  <li><b>5 点</b>：足够采样通带/带边/阻带的代表性点，又便宜（一次 5 点 LU 检查）。
+      <code>5.min(points)</code> 处理小网格。</li>
+  <li><b>1e-3 相对偏差</b>：快路径与 LU 都是同一物理网络的两种算法；
+      1e-3 容许舍入/条件差异，但抓住结构性错误（丢耦合、错符号、相位翻转）。</li>
+  <li><b>复数比较</b>（幅度+相位+S₁₁）：纯幅度门会被"幅度不变但相位旋转"的错答案骗过
+      （round-3 review 明确修正）。</li>
+  <li><b>非有限即失败</b>：NaN/Inf 不是"大偏差"而是自动门失败，防静默 NaN 答案。</li>
+</ul>
+
+<h3 id="sec216">21.6 复杂度</h3>
+<p>信任检查：5 点 × (LU O(N³) + 快路径 O(N)) = O(N³) 一次性成本（常数 5）。
+通过后全网格 O(N)×点数。最坏（门失败）全网格 O(N³)×点数。
+<b>预处理</b>（信任检查）与<b>逐点</b>成本分离——这是"复杂度须注明前提"的实例。</p>
+
+<h3 id="sec217">21.7 边界与失败模式</h3>
+<div class="fail"><b>回退语义</b>
+任何环节失败（前置 Err、检查 Err、门失败、单点近奇异）都<b>落回 LU</b>而非报错——
+响应总是返回（LU 是权威），只是可能慢。真正向调用方报错的只有 LU 本身失败
+（如矩阵病态到 LU 也解不出）。</div>
+
+<h3 id="sec218">21.8 本章小结</h3>
+<p>信任策略 = 结构前置(横向) + 5 点 LU 交叉检查 + 复数门(1e-3, 非有限即失败) →
+通过则快路径全网格(单点近奇异逐点落回 LU)，否则全 LU。
+这保证"快路径只在被验证时信任"。下一章群延迟的定义与独立验证。</p>
+</div>
+
+<div class="chapter" id="ch22">
+<h2>22&nbsp; 群延迟：定义、解析计算与独立验证</h2>
+
+<h3 id="sec221">22.1 本章解决什么问题</h3>
+<p>群延迟 <code>τ = −dφ/d(2πf)</code> 是滤波器相位响应的斜率，决定脉冲展宽与
+信号失真。MFS 在两条求解路径（LU、极点展开）都<b>解析</b>计算群延迟，
+单位是<b>归一化原型</b> <code>dτ/dω</code>。本章固定定义、两条路径的公式、
+单位换算（含 2π 陷阱）与独立验证方法。</p>
+
+<h3 id="sec222">22.2 定义与归一化单位</h3>
+<p>物理群延迟 <code>τ = −dφ/d(2πf)</code>（φ 是 S₂₁ 相位，f 物理频率）。
+MFS 的 <code>group_delay</code> 字段是<b>归一化单位</b>
+<code>dτ/dω</code>（ω = <code>normalized_omega</code>，[§2](#ch2)），即</p>
+<div class="eq mrow">GD ≡ −Im( d/dω ln S₂₁ )
+<span class="num">(22.1)</span></div>
+<p><b>两条路径同单位</b>（<code>response/mod.rs:15-20</code>）。
+<b>不是</b>"每赫兹"也<b>不是</b>"每弧度角频率"。
+<b>实现事实</b>：LU 用 (19.3)、极点展开用 [§20.3](#sec203) 第 6 步，
+都算 (22.1)。</p>
+
+<h3 id="sec223">22.3 换算成秒与 2π 陷阱</h3>
+<p>物理群延迟（秒）由链式法则：
+<code>dτ/d(2πf) = (dτ/dω)·(dω/d(2πf))</code>。
+对带通映射 <code>ω = (1/FB)(f/f<sub>c</sub> − f<sub>c</sub>/f)</code>
+（[§2.4](#sec24) (2.2)），<code>dω/df = (1/FB)(1/f<sub>c</sub> + f<sub>c</sub>/f²)</code>，故</p>
+<div class="eq mrow">τ[秒] = GD·<span class="frac"><span class="top">1</span><span class="bot">FB</span></span>
+(<span class="frac"><span class="top">1</span><span class="bot">f<sub>c</sub></span></span> + <span class="frac"><span class="top">f<sub>c</sub></span><span class="bot">f²</span></span>)·<span class="frac"><span class="top">1</span><span class="bot">2π</span></span>
+<span class="num">(22.2)</span></div>
+<div class="warn"><b>2π 陷阱（2026-10-11 记录，<code>response/mod.rs:26-33</code>）</b>
+数值 <code>−d(phase)/df</code> 参考是"<b>每赫兹</b>"，比"每秒"大 <b>2π</b> 倍。
+直接和秒值比会读出 <code>(2π−1)·gd ≈ 85 ns</code> 的假偏差。
+判据：该偏移<b>随 |S₂₁| 增大</b>、<b>细化网格不缩小</b>——
+指向<b>单位/约定错配</b>而非算法 bug（截断误差会随网格细化缩小）。
+对比时先乘 <code>dω/df</code> 或除以 2π。</div>
+
+<h3 id="sec224">22.4 None 语义</h3>
+<p><code>group_delay: Option&lt;f64&gt;</code> 只在<b>数值退化</b>处（传输零点 S₂₁→0、
+近奇异分母）返回 <code>None</code>，<b>从不</b>静默 <code>0.0</code>
+（<code>response/mod.rs:34-35</code>）。两条路径用同一守卫
+<code>norm_sqr() ≤ 1e-18</code>（LU <code>backend.rs</code>、
+极点展开 <code>pole_expansion.rs:247,336</code>）。
+<b>物理含义</b>：在传输零点 S₂₁ 相位不连续（绕 ±π），群延迟发散/未定义，
+故显式 None 而非给一个假数。</p>
+
+<h3 id="sec225">22.5 独立验证</h3>
+<p>群延迟有三层独立验证：</p>
+<ul>
+  <li><b>跨路径一致性</b>：LU 与极点展开在相同网格算出的群延迟应一致
+      （<code>tests/response/mod.rs</code> 测试钉死跨后端群延迟一致性，
+      容差见 [§32](#ch32)）；</li>
+  <li><b>独立数值微分基准</b>：用中心差分 <code>−(φ(ω+h)−φ(ω−h))/(2h)</code>
+      （经 (22.2) 换算成秒，注意 2π）对照解析值，独立于两条解析路径；</li>
+  <li><b>None 契约</b>：传输零点处必须 None（不是 0），由测试钉死。</li>
+</ul>
+<p><b>实现事实</b>：review round-3（P2-1）记录了群延迟独立锚点覆盖的补全——
+此前只有跨路径一致性，现加了独立数值微分基准，防止"两条路径同错"。</p>
+
+<h3 id="sec226">22.6 群延迟在传输零点附近的行为</h3>
+<p>接近（但不等于）传输零点时，S₂₁ 相位快速绕变，群延迟出现<b>尖锐峰/谷</b>
+（Lorentz 型），数值上对 ω 敏感。这是<b>物理</b>现象（极点-零点对的群延迟特征），
+不是算法错误。库的处理：精确零点 → None；近零点 → 给出大但有限的值
+（由解析导数稳定计算）。<b>不要</b>把近零点的大群延迟当 bug"平滑"掉。</p>
+
+<h3 id="sec227">22.7 本章小结</h3>
+<p>群延迟 = −Im(d/dω ln S₂₁)，归一化单位，两条路径同单位、同 None 守卫(1e-18)。
+换算成秒用 (22.2)，警惕 2π 陷阱。独立验证 = 跨路径 + 数值微分 + None 契约。
+下一章 Touchstone I/O 与端口约定。</p>
+</div>
+
+<div class="chapter" id="ch23">
+<h2>23&nbsp; Touchstone 数据及端口约定</h2>
+
+<h3 id="sec231">23.1 本章解决什么问题</h3>
+<p>Touchstone（.s2p）是射频行业标准的 S 参数文件格式。MFS 提供导出/导入，
+以及基于 <code>touchstone</code> crate 0.14.5 的<b>活动网络</b>操作
+（重采样、Y/Z/ABCD 转换、级联）。本章给格式约定、端口约定与网络操作。</p>
+
+<h3 id="sec232">23.2 格式约定</h3>
+<p><code>src/touchstone.rs</code> 支持：</p>
+<ul>
+  <li><b>版本</b>：v1.0 / v2.0；</li>
+  <li><b>数据格式</b>：<code>RI</code>（实/虚，默认）、<code>MA</code>（幅度/相位）、<code>DB</code>（dB）；</li>
+  <li><b>频率单位</b>：Hz / kHz / MHz / GHz（默认 GHz）；</li>
+  <li><b>参考阻抗</b>：可配（默认 50 Ω）。</li>
+</ul>
+<p>入口（<code>design.rs</code>）：<code>save_touchstone("filter.s2p")</code>
+（一行，默认 GHz/RI/50Ω）、<code>to_touchstone().freq_unit(...).format(...).save(...)</code>
+（可配）、<code>read_touchstone(path)</code>（导入）。
+导入经 <code>touchstone::Network::new</code>（crate 0.14.5）。</p>
+
+<h3 id="sec233">23.3 端口约定</h3>
+<p>2 端口网络的端口约定（与第 3 章一致）：端口 0 = 源（S₁₁ 的入射端）、
+端口 1 = 负载（S₂₁ 的出射端）。Touchstone 的 S 参数矩阵按 <code>[S11 S12; S21 S22]</code>
+排列，MFS 的 <code>ResponseSample</code> 提供 <code>s11_re/im</code>、<code>s21_re/im</code>
+（<code>response/mod.rs:36-44</code>）及 <code>s11_db()</code>、<code>s21_db()</code>、
+<code>s11_phase_deg()</code>、<code>s21_phase_deg()</code>（<code>:47-83</code>）。
+导出时物理频率（<code>frequency_hz</code>）与所选单位/格式一致。</p>
+
+<h3 id="sec234">23.4 活动网络 build_network</h3>
+<p><code>build_network(response, z0)</code> / <code>FilterDesign::build_network()</code>
+（0.5.0 引入）：从响应样本构建一个<b>活动的对称互易 2 端口</b>
+<code>touchstone::Network</code>（经 crate 的 <code>NetworkBuilder</code>），
+支持重采样、Y-Z-ABCD 转换、保存/检视。
+这是"活网络"接口——可在 mfs 外部用 touchstone crate 的完整工具链继续处理。</p>
+
+<h3 id="sec235">23.5 实现细节</h3>
+<p>依赖 <code>touchstone = "0.14.5"</code>（<code>default-features = false</code>，
+<code>Cargo.toml</code>）。导出是纯文本格式化（无算法）；导入是解析。
+网络操作（重采样、转换、级联）委托给 touchstone crate，MFS 只负责
+<b>类型化错误策略</b>——把上游 panic/静默下标配对转成 <code>MfsError</code>（[§24.2](#sec242)）。</p>
+
+<h3 id="sec236">23.6 本章小结</h3>
+<p>Touchstone = 行业 S 参数文本格式，MFS 支持 v1/v2、RI/MA/DB、Hz…GHz、可配阻抗。
+端口约定与第 3 章一致。build_network 给出活动 touchstone::Network。
+下一章网络级 cascade（级联两个 2 端口）。</p>
+</div>
+
+<div class="chapter" id="ch24">
+<h2>24&nbsp; 网络级 cascade</h2>
+
+<h3 id="sec241">24.1 本章解决什么问题</h3>
+<p>把两个 2 端口网络<b>级联</b>（cascade）成一个 2 端口网络（端口 2→端口 1 连接），
+用于多节滤波器串联、或把综合出的网络与外部网络组合。
+基于 <code>touchstone</code> crate 的 ABCD 级联，MFS 在其上加类型化前置校验。</p>
+
+<h3 id="sec242">24.2 cascade 前置校验</h3>
+<p><code>touchstone::cascade(a, b)</code> / <code>FilterDesign::cascade(&amp;other)</code>
+（0.5.0，<code>src/touchstone.rs</code>）在调用 crate 的 <code>Network::cascade</code>
+（ABCD 级联）<b>之前</b>预校验，返回 <code>MfsError</code> 而非继承上游 panic
+或静默逐索引网格配对：</p>
+<ul>
+  <li><b>秩</b>：两个网络都必须是 2 端口；</li>
+  <li><b>参考阻抗</b>：z0 一致（否则 ABCD 级联的物理意义不对）；</li>
+  <li><b>频率单位</b>：一致；</li>
+  <li><b>频率网格</b>：<b>逐点相同</b>（级联要求同网格）。</li>
+</ul>
+<p>任一校验失败 → typed <code>MfsError</code>（具体变体按失败项）。
+这是"把上游 panic/静默配对转成类型化错误"策略的实例（[§23.5](#sec235)）。</p>
+
+<h3 id="sec243">24.3 ABCD 级联数学</h3>
+<p>级联用链矩阵（ABCD/传输矩阵）：每个 2 端口由 ABCD 矩阵描述，
+级联 = 两个 ABCD 矩阵相乘（<code>[A B; C D]_total = [A B; C D]_a · [A B; C D]_b</code>，
+端口 2 of a → 端口 1 of b）。再由总 ABCD 转回 S 参数（参考阻抗一致时）。
+touchstone crate 0.14+ 提供 <code>Network::cascade</code> 实现此转换；
+MFS 不重复实现，只做前置校验 + 错误包装。</p>
+<div class="info"><b>边界</b>
+cascade 要求两网络同网格/同单位/同 z0。若需不同网格级联，先对其中之一重采样
+（经 <code>build_network</code> 得到的活动网络支持重采样，[§23.4](#sec234)）使其同网格，再 cascade。</div>
+
+<h3 id="sec244">24.4 与综合矩阵的关系</h3>
+<p>cascade 是<b>网络级</b>操作（在 S/ABCD 域），区别于第 17 章的<b>矩阵级</b>
+CT/CQ 级联综合（在耦合矩阵域、保持响应的相似变换）。两者不同：
+前者把两个独立网络串成一个大网络（响应是真正的级联响应）；
+后者把一个网络重排成级联节结构（响应不变）。不要混淆。</p>
+
+<h3 id="sec245">24.5 本章小结</h3>
+<p>网络级 cascade = 两 2 端口经 ABCD 串成一个大 2 端口，前置校验秩/z0/单位/同网格，
+失败走 typed error。与矩阵级 CT/CQ（相似变换、响应不变）是不同层面的"级联"。
+第四篇结束；第五篇高级综合（双工器/多工器/多频带/优化）。</p>
+</div>

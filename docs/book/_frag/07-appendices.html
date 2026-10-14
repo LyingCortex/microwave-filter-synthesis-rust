@@ -1,0 +1,347 @@
+<!-- ═══════════════════════ 附录 ═══════════════════════ -->
+<div class="part-title" id="appendices">
+  <div class="kicker">Appendices</div>
+  <h1>附录</h1>
+  <p>A 符号与术语 · B 公式索引 · C 算法—实现—测试映射 · D 数值阈值 · E 参考来源 · F 已知限制与未验证范围</p>
+</div>
+
+<div class="chapter" id="appA">
+<h2>A&nbsp; 符号与术语表</h2>
+<h3>A.1 术语（中英对照）</h3>
+<div class="tablewrap"><table>
+<tr><th>英文</th><th>中文</th><th>定义 / 出处</th></tr>
+<tr><td>coupling matrix</td><td>耦合矩阵</td><td>(N+2)×(N+2) 实对称，含源/负载节点 [§3.4](#sec34)</td></tr>
+<tr><td>transversal (canonical)</td><td>横向（规范）</td><td>每谐振器一阶支路并联源/负载，无谐振器间耦合 [§12](#ch12)</td></tr>
+<tr><td>folded topology</td><td>折叠拓扑</td><td>链式串联 + 跨接，Givens 消去得到 [§15](#ch15)</td></tr>
+<tr><td>arrow topology</td><td>箭头拓扑</td><td>跨接聚到末列；CT/CQ 前置 [§16](#ch16)</td></tr>
+<tr><td>cascaded trisection (CT)</td><td>级联三节</td><td>extract_triplet，主零点条件化尾 + peel [§17.2](#sec172)</td></tr>
+<tr><td>cascaded quadruplet (CQ)</td><td>级联四节</td><td>源侧平铺，每零点对一个四节 [§17.3](#sec173)</td></tr>
+<tr><td>transmission zero (TZ)</td><td>传输零点</td><td>S₂₁ 的零点，归一化坐标，有限/无穷 [§6.3](#sec63)</td></tr>
+<tr><td>reflection zero</td><td>反射零点</td><td>F 的根（S₁₁ 零点），±jz 虚轴成对 [§7.4](#sec74)</td></tr>
+<tr><td>ripple factor ε</td><td>纹波因子</td><td>由 RL 定，(8.2) [§8](#ch8)</td></tr>
+<tr><td>Feldtkeller identity</td><td>Feldtkeller 恒等式</td><td>|E|²=|F|²+|P|²/ε²，要求 K 虚轴实值 (6.2) [§6.2](#sec62)</td></tr>
+<tr><td>residue expansion</td><td>残差展开</td><td>部分分式 + 重根聚类 + Laurent 主部 [§11](#ch11)</td></tr>
+<tr><td>Laurent principal part</td><td>Laurent 主部</td><td>重极点 m≥2 的主部系数 [§11.4](#sec114)</td></tr>
+<tr><td>Givens rotation</td><td>Givens 旋转</td><td>O(N) 原地正交相似变换 [§14.3](#sec143)</td></tr>
+<tr><td>similarity transform</td><td>相似变换</td><td>M′=RMRᵀ，保持响应 (3.4) [§14.2](#sec142)</td></tr>
+<tr><td>pole expansion</td><td>极点展开</td><td>O(N) 快路径，Schur 2×2 解析 [§20](#ch20)</td></tr>
+<tr><td>group delay</td><td>群延迟</td><td>−Im(d/dω ln S₂₁)，归一化单位 (22.1) [§22](#ch22)</td></tr>
+<tr><td>spectral factorization</td><td>谱分解</td><td>R=D·D̃，D 全 LHP（cepstrum/伴随） [§26.6](#sec266)</td></tr>
+<tr><td>para-Hermitian</td><td>para-Hermitian</td><td>R(jω)≥0 的谱密度 [§26.4](#sec264)</td></tr>
+<tr><td>mutual loading</td><td>互载</td><td>多信道间相互影响 [§25.1](#sec251)</td></tr>
+<tr><td>junction (Type-I/II)</td><td>junction（I/II 型）</td><td>T 型节点模型（变压器/电容） [§25.2](#sec252)</td></tr>
+<tr><td>route-α</td><td>route-α</td><td>双频带单正轴区间等纹波 [§27](#ch27)</td></tr>
+<tr><td>degrees-of-freedom wall</td><td>自由度墙</td><td>K≥3 多频带过定 [§27.5](#sec275)</td></tr>
+<tr><td>Levenberg–Marquardt</td><td>Levenberg–Marquardt</td><td>非线性最小二乘，调谐/提取 [§28](#ch28)</td></tr>
+<tr><td>Touchstone (.s2p)</td><td>Touchstone</td><td>行业 S 参数文本格式 [§23](#ch23)</td></tr>
+<tr><td>cascade</td><td>级联</td><td>网络级 ABCD 串联 [§24](#ch24)（区别于矩阵级 CT/CQ）</td></tr>
+<tr><td>AdaptiveRootSolver</td><td>自适应求根器</td><td>faer→DK→Aberth 三级链 [§29](#ch29)</td></tr>
+</table></div>
+
+<h3>A.2 数学符号速查</h3>
+<p>完整符号表见 [§5.1](#sec51)。关键约定速记：s = jw；升幂系数；E/F 首一；
+paraconjugate 带 (−1)<sup>N</sup> 因子；横向对角存实 ω 域失谐 B<sub>k</sub>；
+群延迟归一化单位；dB 有 −300 地板。</p>
+</div>
+
+<div class="chapter" id="appB">
+<h2>B&nbsp; 公式索引</h2>
+<div class="tablewrap"><table>
+<tr><th>编号</th><th>公式</th><th>章节</th></tr>
+<tr><td>(2.1)–(2.4)</td><td>低通/带通映射与逆</td><td>[§2](#ch2)</td></tr>
+<tr><td>(3.1)</td><td>无耗性 |S₁₁|²+|S₂₁|²=1</td><td>[§3.2](#sec32)</td></tr>
+<tr><td>(3.2)–(3.3)</td><td>A(ω) 构造、S 参数</td><td>[§3.3](#sec33)</td></tr>
+<tr><td>(3.4)</td><td>相似变换 M′=RMRᵀ</td><td>[§3.5](#sec35)</td></tr>
+<tr><td>(6.1)–(6.2)</td><td>特征函数 K=F/P、Feldtkeller</td><td>[§6.2](#sec62)</td></tr>
+<tr><td>(7.1)–(7.2)</td><td>Cameron 递推初值与更新</td><td>[§7.3](#sec73)</td></tr>
+<tr><td>(8.1)–(8.3)</td><td>rl_linear、ε、ε<sub>r</sub></td><td>[§8](#ch8)</td></tr>
+<tr><td>(9.1)</td><td>E(w)=F/ε<sub>r</sub>+jP/ε</td><td>[§9.2](#sec92)</td></tr>
+<tr><td>(10.1)–(10.5)</td><td>奇偶因子、导纳四元</td><td>[§10](#ch10)</td></tr>
+<tr><td>(12.1a/b)</td><td>横向源/负载耦合</td><td>[§12.3](#sec123)</td></tr>
+<tr><td>(19.1)–(19.3)</td><td>A(ω)、S 参数、LU 群延迟</td><td>[§19](#ch19)</td></tr>
+<tr><td>(22.1)–(22.2)</td><td>群延迟定义、换算成秒</td><td>[§22](#ch22)</td></tr>
+<tr><td>(26.1)</td><td>公共带通域仿射 Aᵢ/Bᵢ</td><td>[§26.2](#sec262)</td></tr>
+<tr><td>(28.1)</td><td>LM 阻尼正规方程</td><td>[§28.5](#sec285)</td></tr>
+</table></div>
+</div>
+
+<div class="chapter" id="appC">
+<h2>C&nbsp; 算法—实现—测试映射表</h2>
+<p>从算法名反查源码实现（文件:函数）与测试/基准。</p>
+<div class="tablewrap"><table>
+<tr><th>算法</th><th>实现（文件:函数）</th><th>测试 / 基准</th></tr>
+<tr><td>Cameron 递推（F）</td><td><code>approx/generalized_chebyshev_helpers.rs:cameron_recursive</code></td>
+  <td><code>tests/literature_fixtures.rs</code>（精确值）、<code>…_helpers.rs</code> 单测</td></tr>
+<tr><td>P 多项式</td><td><code>…helpers.rs:find_p_polynomial</code></td><td>同上</td></tr>
+<tr><td>ε / ε<sub>r</sub></td><td><code>…helpers.rs:find_eps</code></td><td><code>synthesis_regression.rs</code> 全有限可行域</td></tr>
+<tr><td>E 多项式（三处 monic + 反射）</td><td><code>…helpers.rs:build_e_polynomial_stage</code></td>
+  <td><code>literature_fixtures.rs</code> E-stage 结构、奇数阶回归</td></tr>
+<tr><td>A 多项式</td><td><code>…helpers.rs:build_a_polynomial_stage</code></td><td>order-3 全 helper 精确锚</td></tr>
+<tr><td>AdaptiveRootSolver 链</td><td><code>approx/complex_poly.rs:AdaptiveRootSolver/Faer/DK/Aberth</code></td>
+  <td><code>benches/root_solvers.rs</code>、<code>solver_accuracy_comparison.rs</code>、property 7</td></tr>
+<tr><td>导纳四元（奇偶因子）</td><td><code>synthesis/residues/admittance.rs:synthesize_admittance_polynomials</code></td>
+  <td>property 9/10（度约束、奇偶性）</td></tr>
+<tr><td>残差展开 + 聚类 + Laurent</td><td><code>synthesis/residues/expansion.rs:residue_expansion/principal_part</code></td>
+  <td>property 1/2（配对、往返）</td></tr>
+<tr><td>残差分类</td><td><code>…expansion.rs:classify_residues/residue_real_component</code></td><td>property 1、8</td></tr>
+<tr><td>横向矩阵组装</td><td><code>synthesis/residues/transversal.rs:build_transversal_from_residues</code></td>
+  <td>property 3/4/5、第 13 章算例</td></tr>
+<tr><td>折叠（Givens 序列）</td><td><code>matrix/core.rs:to_folded</code></td><td><code>folded_response_invariance.rs</code>、<code>benchmark_standard.rs</code> 锚定</td></tr>
+<tr><td>箭头</td><td><code>matrix/core.rs:to_arrow</code></td><td>trisection 前置测试</td></tr>
+<tr><td>CT（extract_triplet）</td><td><code>matrix/sections.rs:extract_triplet</code> + <code>cascade.rs:to_cascaded_trisections</code></td>
+  <td>第 13 章 4-2 三节、<code>cq/ct</code> 守卫测试</td></tr>
+<tr><td>CQ（extract_quadruplet）</td><td><code>matrix/sections.rs:extract_quadruplet/extract_cascade_quadruplets</code> + <code>cascade.rs:to_cascaded_quadruplets</code></td>
+  <td>CQ 平铺验证、阶数守卫</td></tr>
+<tr><td>符号翻转</td><td><code>matrix/mod.rs:flip_sign_inplace</code></td><td><code>core.rs</code> flip_sign 回归（对角不变）</td></tr>
+<tr><td>LU 响应 + 选择性求解</td><td><code>response/backend.rs:evaluate_response</code></td><td>跨后端等价、群延迟一致性</td></tr>
+<tr><td>极点展开快路径</td><td><code>response/pole_expansion.rs:PoleExpansionData/evaluate_at</code></td>
+  <td>前置/近奇异守卫测试、跨路径一致性</td></tr>
+<tr><td>信任策略（5 点门）</td><td><code>design.rs:fast_path_gate/response_normalized/response_bandpass</code></td>
+  <td>门测试（复数比较、非有限失败、LU 回退）</td></tr>
+<tr><td>群延迟（两路径 + None）</td><td><code>response/backend.rs</code> + <code>pole_expansion.rs</code></td>
+  <td>跨路径一致性、独立数值微分基准、None 契约</td></tr>
+<tr><td>谱分解（cepstrum/伴随）</td><td><code>spectral.rs:spectral_factor/cepstrum_…/companion_…/select_lhp_roots</code></td>
+  <td>para-identity（<code>multiplexer.rs</code> 257 点 1e-6）</td></tr>
+<tr><td>M–T 全谱迭代</td><td><code>synthesis/machiarella.rs:run_full_iteration/solve_p0/assign_blocks</code></td>
+  <td><code>tests/multiplexer.rs</code> full_iteration（N=2 逐位、N=3/4、Zhao N4）</td></tr>
+<tr><td>双频带 route-α</td><td><code>approx/multi_band.rs:multi_band_chebyshev_polynomials/solve_rz</code></td>
+  <td><code>tests/multi_band.rs</code>（Fig.25 5 门）</td></tr>
+<tr><td>LM 调谐/提取</td><td><code>optimize.rs:optimize_matrix/extract_parameters/compute_jacobian/lm_step</code></td>
+  <td><code>tests/optimizer_integration.rs</code>、<code>benches/optimizer.rs</code></td></tr>
+<tr><td>频率映射（LP/BP/HP/BS/MB）</td><td><code>freq.rs:LowPass/BandPass/HighPass/BandStop/MultiBand Mapping</code></td>
+  <td>映射往返、带边、奇异钳位测试</td></tr>
+<tr><td>Touchstone I/O + cascade</td><td><code>touchstone.rs</code>（含前置校验）</td><td>CLI save/resume、cascade 校验测试</td></tr>
+<tr><td>带通去归一化 + 外部 Q</td><td><code>matrix/scaling.rs:denormalize_bandpass[_with_external_q]</code></td>
+  <td>order-1 带通 Qe 约定锚定</td></tr>
+<tr><td>规格验证</td><td><code>verify/mod.rs:verify_against_spec</code></td><td>规格门测试（Fail/Skipped）</td></tr>
+</table></div>
+</div>
+
+<div class="chapter" id="appD">
+<h2>D&nbsp; 数值阈值及用途</h2>
+<p>全书数值阈值汇总（含出处行号）。按子模块分组。</p>
+<div class="tablewrap"><table>
+<tr><th>阈值</th><th>值</th><th>用途</th><th>出处</th></tr>
+<tr><td colspan="4" style="background:var(--surface);font-weight:600">求根（approx/complex_poly.rs）</td></tr>
+<tr><td>faer 后向残差门</td><td class="num">1e-3</td><td>主求根器有效性硬门，超则 fall-through</td><td><code>:867</code></td></tr>
+<tr><td>DK/Aberth 收敛</td><td class="num">1e-13</td><td>迭代终止</td><td><code>:317,432</code></td></tr>
+<tr><td>DK/Aberth 残差 fallback</td><td class="num">1e-8</td><td>可接受残差</td><td><code>:353,481</code></td></tr>
+<tr><td>monic 零首项</td><td class="num">1e-24</td><td>拒零首项（=（1e-12)²）</td><td><code>:283,392</code></td></tr>
+<tr><td>DK/Aberth 近零分母跳过</td><td class="num">1e-30</td><td>denom.norm_sqr 门</td><td><code>:330,442,452</code></td></tr>
+<tr><td>共轭匹配（伴随意根提取）</td><td class="num">1e-8</td><td>re/im 匹配阈值</td><td><code>:617-618</code></td></tr>
+<tr><td colspan="4" style="background:var(--surface);font-weight:600">综合（synthesis/residues/）</td></tr>
+<tr><td>重根单链聚类</td><td class="num">1e-5</td><td>CLUSTER_TOLERANCE</td><td><code>expansion.rs:220</code></td></tr>
+<tr><td>Laurent 前导零裁剪</td><td class="num">max(1e-10·‖·‖, 1e-14)</td><td>分子分母部分相消</td><td><code>expansion.rs:368-377</code></td></tr>
+<tr><td>极点实轴噪声</td><td class="num">1e-10</td><td>|Im(p)|≤此 ⇒ Real</td><td><code>expansion.rs:98</code></td></tr>
+<tr><td>残差实/复判定</td><td class="num">1e-6</td><td>classify tolerance</td><td><code>transversal.rs:48</code></td></tr>
+<tr><td>共轭极点对匹配</td><td class="num">1e-8 / 1e-8</td><td>im_sum / re_diff</td><td><code>expansion.rs:140-141</code></td></tr>
+<tr><td>极点轴自适应容差</td><td class="num">max(1e-6, 1e-6·(N/5)²)</td><td>高阶 DK 精度退化 O(N²ε)</td><td><code>transversal.rs:53</code></td></tr>
+<tr><td>直接项纯虚检查</td><td class="num">1e-6</td><td>M<sub>SL</sub> 常项实部门</td><td><code>transversal.rs:162</code></td></tr>
+<tr><td>直接项幅值门</td><td class="num">1e-12</td><td>设 M<sub>SL</sub> 阈值</td><td><code>transversal.rs:166</code></td></tr>
+<tr><td>nonzero_sqrt_abs 地板</td><td class="num">1e-12</td><td>耦合过小拒绝</td><td><code>expansion.rs:427</code></td></tr>
+<tr><td>首项抵消守卫</td><td class="num">1e-20 / 1e-15</td><td>导纳四元防御（no-op）</td><td><code>admittance.rs:53</code></td></tr>
+<tr><td>Laurent 退化分母</td><td class="num">f64::EPSILON</td><td>principal_part 守卫</td><td><code>expansion.rs:334-339</code></td></tr>
+<tr><td colspan="4" style="background:var(--surface);font-weight:600">矩阵（matrix/）</td></tr>
+<tr><td>矩阵对称容差</td><td class="num">1e-12·max(1,|a|,|b|)</td><td>assert_symmetric</td><td><code>core.rs:109</code></td></tr>
+<tr><td>clean_small_values</td><td class="num">1e-10</td><td>旋转残留清零</td><td><code>core.rs:263</code></td></tr>
+<tr><td>safe_angle 分母门</td><td class="num">1e-10</td><td>近零 → ±π/2</td><td><code>rotations.rs:28</code></td></tr>
+<tr><td>diagonal_rotation_angle 门</td><td class="num">1e-10</td><td>对角相等 → θ=0</td><td><code>rotations.rs:42</code></td></tr>
+<tr><td>折叠/箭头旋转阈值</td><td class="num">1e-7</td><td>旋转 vs 显式清零</td><td><code>core.rs:393,412</code></td></tr>
+<tr><td>extract_triplet 分母门</td><td class="num">1e-10</td><td>近零 → θ=π/2</td><td><code>sections.rs:29</code></td></tr>
+<tr><td>extract_trisection 分母门</td><td class="num">1e-10</td><td>近零 → θ=π/2</td><td><code>sections.rs:120</code></td></tr>
+<tr><td>extract_box Jacobi 分母</td><td class="num">1e-12</td><td>对角差</td><td><code>sections.rs:330</code></td></tr>
+<tr><td>外部 Q 耦合门</td><td class="num">1e-12</td><td>Qe 计算非零耦合</td><td><code>scaling.rs:155</code></td></tr>
+<tr><td>外部 Q 正值门</td><td class="num">≤0.0 拒</td><td>Q 须正</td><td><code>scaling.rs:166</code></td></tr>
+<tr><td colspan="4" style="background:var(--surface);font-weight:600">响应（response/）</td></tr>
+<tr><td>快路径前置容差</td><td class="num">1e-9·max(|M|,1)</td><td>横向结构断言</td><td><code>pole_expansion.rs:158</code></td></tr>
+<tr><td>快路径近零分母跳过</td><td class="num">1e-30</td><td>denom.norm_sqr</td><td><code>pole_expansion.rs:267</code></td></tr>
+<tr><td>快路径近奇异 Schur</td><td class="num">1e-30</td><td>det.norm_sqr → NumericalFailure</td><td><code>pole_expansion.rs:314-320</code></td></tr>
+<tr><td>群延迟退化（两路径）</td><td class="num">1e-18</td><td>inv_10.norm_sqr → None</td><td><code>pole_expansion.rs:247,336</code>、<code>backend.rs</code></td></tr>
+<tr><td>dB 地板 / 稳定阈</td><td>−300 / 1e-15</td><td>magnitude_to_db</td><td><code>response/mod.rs:100-106</code></td></tr>
+<tr><td>快路径门 S21 地板</td><td class="num">1e-10</td><td>深阻带点跳过</td><td><code>design.rs:37</code></td></tr>
+<tr><td>快路径门容差</td><td class="num">1e-3</td><td>复数 S21/S11 相对偏差</td><td><code>design.rs:519,620</code></td></tr>
+<tr><td colspan="4" style="background:var(--surface);font-weight:600">谱分解（spectral.rs）</td></tr>
+<tr><td>para-product 校验</td><td class="num">0.01</td><td>虚轴 8 点相对误差</td><td><code>:371</code></td></tr>
+<tr><td>cepstrum log 地板</td><td class="num">−690 / 1e-300</td><td>ln 1e-300</td><td><code>:63-67</code></td></tr>
+<tr><td>LHP 严格 / 虚轴 / 兜底</td><td class="num">−1e-12 / 1e-12→−1e-14 / −1e-9</td><td>select_lhp_roots 三遍</td><td><code>:274,302,303,327</code></td></tr>
+<tr><td>镜像匹配</td><td class="num">1e-6·(1+|·|)</td><td>共轭镜像识别</td><td><code>:281-282,309</code></td></tr>
+<tr><td>monic 领先项门</td><td class="num">1e-15</td><td>相位归一 no-op</td><td><code>:426</code></td></tr>
+<tr><td colspan="4" style="background:var(--surface);font-weight:600">M–T 迭代（machiarella.rs）</td></tr>
+<tr><td>STAGNATION_ACCEPT / WINDOW / MIN_ITER</td><td class="num">1e-3 / 3 / 5</td><td>高阶停滞接受</td><td><code>:136-138</code></td></tr>
+<tr><td>P0_SQ_FLOOR / REJECTION_TOL</td><td class="num">1e-15 / 1e-12</td><td>p₀² 地板 / 拒绝真负</td><td><code>:144,154</code></td></tr>
+<tr><td>Cramer det 退化</td><td class="num">1e-30</td><td>N=2 均分</td><td><code>:350-400</code></td></tr>
+<tr><td>D 领先项门</td><td class="num">1e-15</td><td>re-monic 前近零</td><td><code>:456-475</code></td></tr>
+<tr><td>根丢弃界</td><td class="num">|r|≥50</td><td>越界根 → NumericalFailure</td><td><code>assign_blocks</code></td></tr>
+<tr><td colspan="4" style="background:var(--surface);font-weight:600">双频带（multi_band.rs）</td></tr>
+<tr><td>LM 失败门</td><td class="num">√cost &gt; 1e-6</td><td>NumericalFailure</td><td><code>:196</code></td></tr>
+<tr><td>LM 收敛</td><td class="num">√cost &lt; 1e-12</td><td>终止</td><td><code>:129</code></td></tr>
+<tr><td>LM 可行域边距</td><td class="num">1e-9</td><td>零点严格在 (lo,hi)</td><td><code>:167</code></td></tr>
+<tr><td>LM λ 上限</td><td class="num">1e12</td><td>中断</td><td><code>:175,190</code></td></tr>
+<tr><td>LM 奇异枢轴</td><td class="num">1e-30</td><td>NumericalFailure</td><td><code>:224</code></td></tr>
+<tr><td>LM FD 步长</td><td class="num">1e-7·max(1,|rz|)</td><td>Jacobian</td><td><code>:137</code></td></tr>
+<tr><td colspan="4" style="background:var(--surface);font-weight:600">优化（optimize.rs）</td></tr>
+<tr><td>参数非零门</td><td class="num">1e-15</td><td>冻结 ≤1e-15</td><td><code>:61-108</code></td></tr>
+<tr><td>LM FD 步长</td><td class="num">1e-7·max(1,|param|)</td><td>Jacobian（奇异步减半≤4）</td><td><code>compute_jacobian</code></td></tr>
+<tr><td>LM 奇异枢轴</td><td class="num">1e-20</td><td>跳步</td><td><code>solve_linear_system</code></td></tr>
+<tr><td>LM λ 上限 / 默认</td><td class="num">1e12 / 1e-3</td><td>中断 / 初值</td><td><code>OptimizeConfig</code></td></tr>
+<tr><td>LM 容差 / 迭代</td><td class="num">1e-8 / 200</td><td>收敛 / 上限</td><td><code>OptimizeConfig</code></td></tr>
+<tr><td colspan="4" style="background:var(--surface);font-weight:600">验证（verify/mod.rs）</td></tr>
+<tr><td>结构零（模式校验）</td><td class="num">1e-6</td><td>topology pattern 容差</td><td><code>verify/mod.rs:51</code></td></tr>
+<tr><td colspan="4" style="background:var(--surface);font-weight:600">规格上限（spec/types.rs）</td></tr>
+<tr><td>MAX_ORDER</td><td class="num">256</td><td>防 (N+2)² OOM（~26 MB 上限）</td><td><code>types.rs:186</code></td></tr>
+<tr><td>MAX_GRID_POINTS</td><td class="num">100000</td><td>网格上限</td><td><code>freq.rs:588</code></td></tr>
+<tr><td>SINGULAR_CLAMP</td><td class="num">1e6</td><td>高通/带阻奇异点钳位</td><td><code>freq.rs:196</code></td></tr>
+</table></div>
+</div>
+
+<div class="chapter" id="appE">
+<h2>E&nbsp; 参考文献与证据来源</h2>
+<h3>E.1 文献锚定来源</h3>
+<ul>
+  <li>Cameron, R.J. — "Advanced Filter Synthesis"（IEEE Microwave Magazine, 2011,
+      doi:10.1109/MMM.2011.942007）：Fig. 21（4-2 不对称三节）、Fig. 25（10-5 双通带）。
+      锚定于 <code>tests/cameron2011_fixtures.json</code>。</li>
+  <li>Cameron 1999（教科书/论文）：Table I（4 阶非对称 2 TZ）、Table III–V（7 阶 GDE 1 TZ）。
+      锚定于 <code>tests/cameron1999_fixtures.json</code>。</li>
+  <li>Macchiarella &amp; Tamiazzo — "Novel Approach to the Synthesis of Microwave Diplexers"（2006）：
+      全谱迭代理论来源（vendored PDF，<code>docs/…</code>）。双工器 N=2 路径据此实现。</li>
+  <li>Zhao et al. (2026) Table I：N=4 多工器（4/6/5/4 阶带 TZ）。锚定于
+      <code>tests/multiplexer.rs</code> <code>…vendored_zhao_n4…</code>。</li>
+  <li>Feldtkeller / Bode–Fano：无耗二端口幅度恒等式（(6.2)）的理论来源。</li>
+  <li>Parlett–Reinsch：矩阵平衡算法（faer 求根用）。</li>
+</ul>
+<div class="warn"><b>引用边界</b>
+本书对外部资料只做必要引用与原创解释，不复制书籍/论文大段文字。
+文献 fixture 的数值来自 vendored JSON（<code>docs/literature-fixture-catalog.md</code> 记录 provenance），
+<b>不</b>声称每个数值都是逐字抄自某发表表——更强的 source-to-output 可追溯声明需待 crate
+携带精确公开参考案例（见 [§32.6](#sec326) 边界与附录 F）。</div>
+
+<h3>E.2 内部证据来源（代码/测试/文档）</h3>
+<ul>
+  <li>源码：commit <code>483d7616</code>（2026-10-13，master）。全部 <code>file:line</code> 锚点以此为准，
+      重构可能漂移但算法描述不受影响。</li>
+  <li>测试：<code>tests/</code>（20 文件）、<code>benches/</code>（4 文件）、<code>examples/</code>。</li>
+  <li>实现文档：<code>docs/algorithms.md</code>（实现落地算法参考，本书多处与之对齐）、
+      <code>docs/architecture.md</code>（架构）、<code>docs/reviews/mfs-review-round2/3.md</code>
+      （review 修正：P1-1 全有限、P2-1 高阶边界/下溢、P2-2 端口对角/带边、P2-4 CT 循环删除、
+      P3-1/P3-2 快路径门/近奇异）。</li>
+  <li>设计文档：<code>docs/internal/multi-band-synthesis-design.md</code>（route-α、DOF 墙）、
+      <code>docs/ct-cq-topology-design.md</code>、<code>docs/duplexer-synthesis.md</code>、
+      <code>docs/multiplexer-synthesis.md</code>、<code>docs/numerical-optimization-report.md</code>。</li>
+</ul>
+</div>
+
+<div class="chapter" id="appF">
+<h2>F&nbsp; 已知限制和未验证范围</h2>
+<p>明确保留，不扩大声明。每项标注"为什么"与"什么情况下适用"。</p>
+<ol>
+  <li><b>通带传输零点（|z|&lt;1）不支持</b>——单函数实根广义 Chebyshev 原型无法实现带内零点
+      （Feldtkeller 破坏，E1 2026-10-05 调查）。需多函数特征（<b>未实现</b>，研究方向）。
+      入口 typed <code>InvalidTransmissionZero</code> 拒绝（[§6.4](#sec64)）。</li>
+  <li><b>横向综合的重复极点</b>——残差展开（Laurent）与快路径能处理，但横向链每谐振器只表
+      一个简单极点 ⇒ typed <code>NotImplemented</code>（[§12.2](#sec122)）。
+      <b>未验证范围</b>：非横向拓扑（折叠/箭头）下重根的综合未覆盖。</li>
+  <li><b>Wheel 拓扑弃用</b>——当前是 Arrow 别名（[§16.3](#sec163)）。</li>
+  <li><b>LU 群延迟依赖对称</b>——非对称输入（opt-out 构造）静默算错群延迟、幅度不受影响
+      （review 0.6.1 P1-3，[§19.5](#sec195)）。构造端对称守卫兜底，但这是已知不变量。</li>
+  <li><b>多工器简化路径保真度有限</b>（相邻信道）——默认频移微扰不收敛到机器容差。
+      全谱路径 <code>full_iteration(true)</code> 已收敛并门锚定
+      （Type-I 阶 2–8 + Type-II + N=3/4，[§26.7](#sec267)）。
+      <b>未验证范围</b>：N&gt;2 非理想 Type-I 无论文依据，typed 拒绝（不臆造数学）。</li>
+  <li><b>多频带仅双通带（K=2）</b>——K≥3 是 DOF 墙（typed 拒绝，实测残差确认，
+      [§27.5](#sec275)）。真 K≥3 等纹波需复根（Zolotarev）或多函数特征（<b>未实现</b>）。</li>
+  <li><b>全有限 ε≤1 不可行域</b>——近带边零点/高 RL 使 ε≤1，全有限公式不可行，
+      typed <code>PreconditionViolation</code>（[§8.4](#sec84)）。此域 2026-10-12 才文档化
+      （review P1-1），此前表现为误导性通用"系数须有限"错误。</li>
+  <li><b>高阶能力仅描述已验证参数范围</b>——稳定到 28（全极点）/24（有限零点），
+      RL 20–22 dB（[§29.6](#sec296)）。<b>不扩大成所有输入的保证</b>；阶 30+ 设计相关
+      可能 typed 拒绝。无 &gt;8 阶的文献 fixture（高阶靠自验证，非文献锚定）。</li>
+  <li><b>响应曲线未提供</b>——本书不含实测响应图（避免示意数据冒充实测）。
+      复现需运行 <code>design.response()</code> 保留输入与生成脚本（[§34.3](#sec343)）。</li>
+  <li><b>fixture 的 source-to-output 可追溯</b>——当前 fixture 是"文献支撑的工作流锚 +
+      两个精确低阶数值锚"，<b>不</b>是"精确复现公开耦合表"的强声明（[§32.6](#sec326)）。</li>
+  <li><b>M–T 一次性捕获滞后</b>——返回的 <code>common</code> 描述第 k 迭代、<code>s_roots</code> 是 k+1，
+      滞后由 <code>convergence_error</code> 界定，有意不重算（[§26.4](#sec264) 注）。</li>
+  <li><b>Python 绑定 ABI 敏感</b>——需 Rust ≥ 1.86 + 匹配 ABI 的 Python；
+      跨 ABI 行为未逐一验证（接口包装，数学与 Rust 一致）。</li>
+</ol>
+<div class="info"><b>原则</b>
+上述"未验证范围"是本书<b>有意保留</b>的边界，不是遗漏。任何超出已验证参数范围的用法
+（如高阶带内零点、K≥3 多频带、N&gt;2 非理想 junction）都不应有本书的背书——
+遇到时库会给 typed error，本书不为其作保证。</div>
+</div>
+
+<div id="footer">
+  MFS 微波耦合谐振滤波器综合：数学原理、数值算法与 Rust 实现 ·
+  基于 commit <code>483d7616</code>（2026-10-13）· 单文件离线 HTML · 数学以 HTML/Unicode 排版（可选择/复制/打印）
+</div>
+</main>
+</div>
+<script>
+(function(){
+  // ── TOC 折叠（小屏）──
+  var tog=document.getElementById('toggletoc'), sb=document.getElementById('sidebar');
+  if(tog&&sb){tog.addEventListener('click',function(){sb.classList.toggle('open');});}
+  // ── 滚动高亮当前章节 ──
+  var links=[].slice.call(document.querySelectorAll('#sidebar .toc a'));
+  var map={};
+  links.forEach(function(a){var id=a.getAttribute('href').slice(1);var el=document.getElementById(id);if(el)map[id]=a;});
+  var current=null;
+  function onscroll(){
+    var pos=window.scrollY+80, key=null;
+    Object.keys(map).forEach(function(id){var el=document.getElementById(id);if(el&&el.offsetTop<=pos)key=id;});
+    if(key&&key!==current){if(current)map[current].classList.remove('active');if(key)map[key].classList.add('active');current=key;}
+  }
+  var ticking=false;
+  window.addEventListener('scroll',function(){if(!ticking){ticking=true;requestAnimationFrame(function(){onscroll();ticking=false;});}},{passive:true});
+  onscroll();
+  // ── 正文搜索（不依赖外部库）──
+  var inp=document.getElementById('search'), cnt=document.getElementById('searchcount');
+  var main=document.getElementById('main');
+  var markerStack=[];
+  function clearMarks(){
+    markerStack.forEach(function(m){
+      var parent=m.parentNode;
+      parent.replaceChild(document.createTextNode(m.nodeValue),m);
+      parent.normalize();
+    });
+    markerStack=[];
+  }
+  function walk(node){
+    // 只搜正文文本节点，跳过 script/style
+    if(node.nodeType===3){
+      var text=node.nodeValue;
+      var q=inp.value.trim().toLowerCase();
+      if(!q||q.length<2||text.toLowerCase().indexOf(q)<0)return;
+      var idx, frag=document.createDocumentFragment(), last=0, low=text.toLowerCase();
+      while((idx=low.indexOf(q,last))>=0){
+        if(idx>last)frag.appendChild(document.createTextNode(text.slice(last,idx)));
+        var mark=document.createElement('mark');
+        mark.textContent=text.slice(idx,idx+q.length);
+        frag.appendChild(mark);markerStack.push(mark);
+        last=idx+q.length;
+      }
+      if(last<text.length)frag.appendChild(document.createTextNode(text.slice(last)));
+      node.parentNode.replaceChild(frag,node);
+    } else if(node.nodeType===1 && node.tagName!=='SCRIPT' && node.tagName!=='STYLE'){
+      // 迭代遍历子节点（避免在修改树时递归）
+      var kids=[].slice.call(node.childNodes);
+      kids.forEach(walk);
+    }
+  }
+  var debounce=null;
+  inp.addEventListener('input',function(){
+    clearTimeout(debounce);
+    debounce=setTimeout(function(){
+      clearMarks();
+      var q=inp.value.trim();
+      if(q.length>=2){walk(main);}
+      cnt.textContent=markerStack.length?(' '+markerStack.length+' 处'):' ';
+      if(markerStack.length)markerStack[0].scrollIntoView({block:'center'});
+    },200);
+  });
+  inp.addEventListener('keydown',function(e){if(e.key==='Escape'){inp.value='';clearMarks();cnt.textContent=' ';}});
+})();
+</script>
+</body>
+</html>

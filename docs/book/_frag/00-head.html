@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MFS 微波耦合谐振滤波器综合：数学原理、数值算法与 Rust 实现</title>
+<style>
+:root{
+  --fg:#1a1a1a; --muted:#5a6270; --border:#d9dde3; --surface:#f6f7f9;
+  --accent:#1f4e8c; --accent-2:#2e6db4; --code-bg:#f4f5f7; --code-fg:#222;
+  --warn-bg:#fff6e6; --warn-bd:#e3b341; --info-bg:#eef3fa; --info-bd:#9db8d9;
+  --note-bg:#f0f7f1; --note-bd:#7bb28a; --fail-bg:#fdf0f0; --fail-bd:#d98a8a;
+  --sidebar-w:300px;
+}
+*{box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{
+  margin:0; color:var(--fg); background:#fff;
+  font-family:"Source Han Serif SC","Noto Serif CJK SC",Georgia,"Times New Roman",serif;
+  font-size:16px; line-height:1.7; -webkit-font-smoothing:antialiased;
+}
+a{color:var(--accent); text-decoration:none;}
+a:hover{text-decoration:underline;}
+code,pre,kbd{font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;}
+/* ── Layout ── */
+#topbar{
+  position:sticky; top:0; z-index:50; background:#fff; border-bottom:1px solid var(--border);
+  display:flex; align-items:center; gap:12px; padding:8px 16px;
+}
+#topbar .title{font-weight:600; font-size:15px; color:var(--fg); font-family:system-ui,sans-serif;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+#topbar .ver{font-size:12px; color:var(--muted); white-space:nowrap;}
+#searchwrap{margin-left:auto; position:relative;}
+#search{
+  font-family:system-ui,sans-serif; font-size:13px; padding:5px 10px; width:200px;
+  border:1px solid var(--border); border-radius:6px; background:var(--surface);
+}
+#searchcount{font-size:11px; color:var(--muted); position:absolute; right:8px; top:8px; font-family:system-ui,sans-serif;}
+#toggletoc{
+  font-family:system-ui,sans-serif; font-size:13px; padding:5px 10px; cursor:pointer;
+  border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--fg);
+}
+#layout{display:flex; align-items:flex-start; min-width:0;}
+
+
+#sidebar{
+  width:var(--sidebar-w); min-width:var(--sidebar-w); height:calc(100vh - 45px); position:sticky; top:45px;
+  overflow-y:auto; border-right:1px solid var(--border); background:var(--surface);
+  padding:14px 10px 40px; font-family:system-ui,sans-serif; font-size:13.5px;
+}
+#sidebar h2{font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted);
+  margin:14px 8px 6px; font-weight:700;}
+#sidebar .toc{list-style:none; margin:0; padding:0;}
+#sidebar .toc>li{margin:2px 0;}
+#sidebar .toc a{display:block; padding:4px 8px; border-radius:5px; color:var(--fg); line-height:1.4;}
+#sidebar .toc a:hover{background:#e8ebf0; text-decoration:none;}
+#sidebar .toc a.active{background:#e2ecf7; color:var(--accent); font-weight:600;}
+#sidebar .toc .part{font-weight:700; color:var(--accent); padding:6px 8px 2px; cursor:default;}
+#sidebar .toc .ch{padding-left:14px;}
+#sidebar .toc .sub{font-size:12.5px; color:var(--muted);}
+#sidebar .toc .sub a{padding:2px 8px 2px 22px;}
+#main{flex:1; min-width:0; padding:34px 48px 120px; max-width:1000px;}
+/* ── Typography ── */
+h1,h2,h3,h4{font-family:system-ui,-apple-system,"Segoe UI",sans-serif; line-height:1.3; scroll-margin-top:60px;}
+h1{font-size:30px; margin:0 0 8px; color:var(--fg);}
+h2{font-size:23px; margin:44px 0 14px; padding-bottom:8px; border-bottom:2px solid var(--border); color:var(--fg);}
+h3{font-size:18px; margin:28px 0 10px; color:var(--fg);}
+h4{font-size:15.5px; margin:20px 0 8px; color:var(--accent);}
+p{margin:0 0 12px;}
+ul,ol{margin:0 0 12px; padding-left:24px;}
+li{margin:4px 0;}
+.part-title{
+  background:linear-gradient(180deg,#fff, var(--surface)); border:1px solid var(--border);
+  border-left:5px solid var(--accent); padding:26px 30px; margin:40px 0 20px; border-radius:0 8px 8px 0;
+}
+.part-title .kicker{font-family:system-ui,sans-serif; font-size:13px; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--accent); font-weight:700;}
+.part-title h1{font-size:26px; margin:6px 0 4px;}
+.part-title p{color:var(--muted); margin:6px 0 0; font-size:15px;}
+.chapter{margin-top:56px; padding-top:6px;}
+.chapter>h2:first-child{margin-top:0; font-size:26px;}
+/* ── Callouts ── */
+.note,.warn,.info,.fail{
+  border-radius:8px; padding:12px 16px; margin:16px 0; font-size:14.5px;
+  border:1px solid var(--border);
+}
+.note{background:var(--note-bg); border-left:4px solid var(--note-bd);}
+.warn{background:var(--warn-bg); border-left:4px solid var(--warn-bd);}
+.info{background:var(--info-bg); border-left:4px solid var(--info-bd);}
+.fail{background:var(--fail-bg); border-left:4px solid var(--fail-bd);}
+.note b,.warn b,.info b,.fail b{font-family:system-ui,sans-serif; display:block; margin-bottom:4px;}
+.note b{color:#2e6b40;} .warn b{color:#9a6b00;} .info b{color:var(--accent);} .fail b{color:#a33;}
+/* ── Math ── */
+.eq{
+  display:block; text-align:center; margin:14px 0; font-family:"Cambria Math","STIX Two Math",Georgia,serif;
+  font-size:17px; overflow-x:auto; padding:6px 0;
+}
+.eq .num{float:right; color:var(--muted); font-family:system-ui,sans-serif; font-size:13px; margin-left:12px;}
+.frac{display:inline-flex; flex-direction:column; align-items:center; vertical-align:middle; margin:0 2px; line-height:1.1;}
+.frac .top{border-bottom:1px solid var(--fg); padding:0 4px 1px;}
+.frac .bot{padding:1px 4px 0;}
+.sqrt{border-top:1px solid var(--fg); padding:1px 3px 0 2px; margin-left:1px;}
+.sqrt::before{content:"√"; margin-right:1px; font-size:.9em;}
+.mrow{white-space:nowrap;}
+sub,sup{font-size:.72em;}
+/* ── Code ── */
+pre{
+  background:var(--code-bg); border:1px solid var(--border); border-radius:8px;
+  padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.5; color:var(--code-fg);
+  tab-size:4;
+}
+pre code{background:none; padding:0;}
+code{background:var(--code-bg); padding:1px 5px; border-radius:4px; font-size:.9em; color:#b03060;
+  overflow-wrap:anywhere;}
+pre code, code.codeblock{color:var(--code-fg); background:none; overflow-wrap:normal;}
+/* ── Tables ── */
+.tablewrap{overflow-x:auto; border:1px solid var(--border); border-radius:8px; margin:16px 0;}
+table{border-collapse:collapse; width:100%; font-size:14px; font-family:system-ui,sans-serif;}
+th,td{border:1px solid var(--border); padding:7px 11px; text-align:left; vertical-align:top;}
+th{background:var(--surface); font-weight:600; white-space:nowrap;}
+tr:nth-child(even) td{background:#fbfcfd;}
+td.num{text-align:right; font-variant-numeric:tabular-nums;}
+/* ── Figure ── */
+figure{margin:20px 0; text-align:center;}
+figure svg{max-width:100%; height:auto;}
+figcaption{font-size:13px; color:var(--muted); margin-top:8px; font-family:system-ui,sans-serif;}
+/* ── Matrix (text) ── */
+.matrix{display:inline-grid; vertical-align:middle; border-collapse:collapse; font-family:"Cambria Math",Georgia,serif;}
+.matrix td{border:none; padding:2px 8px; text-align:center; background:none;}
+.mbracket{font-size:2em; line-height:.8;}
+/* ── Search highlight ── */
+mark{background:#ffe58a; color:inherit; border-radius:2px; padding:0 1px;}
+/* ── TOC collapse markers ── */
+details.tocgroup>summary{list-style:none; cursor:pointer; user-select:none;}
+details.tocgroup>summary::-webkit-details-marker{display:none;}
+/* ── Footer ── */
+#footer{padding:30px 48px; border-top:1px solid var(--border); color:var(--muted); font-size:13px;
+  font-family:system-ui,sans-serif;}
+/* ── Responsive ── */
+@media (max-width:900px){
+  #layout{flex-direction:column; min-width:0;}
+  #main{width:100%; max-width:100%; min-width:0; padding:24px 20px 80px;}
+  #sidebar{width:100%; min-width:0; height:auto; position:static; border-right:none; border-bottom:1px solid var(--border);
+    max-height:45vh; display:none;}
+  #sidebar.open{display:block;}
+  #search{width:130px;}
+  #topbar .title{display:none;}
+  #topbar .ver{display:none;}
+}
+@media (max-width:600px){
+  body{font-size:15px;}
+  #main{padding:18px 14px 60px;}
+  .eq{font-size:15px;}
+}
+/* ── Print ── */
+@media print{
+  #topbar,#sidebar,#toggletoc,#searchwrap{display:none !important;}
+  #layout{display:block;}
+  #main{max-width:none; padding:0;}
+  body{font-size:11pt;}
+  a{color:inherit; text-decoration:none;}
+  a[href^="#"]::after{content:"";}
+  .chapter{page-break-before:always; margin-top:0;}
+  .part-title{page-break-before:always; background:none; border:1px solid #bbb; border-left:4px solid #555;}
+  pre,figure,.tablewrap{page-break-inside:avoid;}
+  .note,.warn,.info,.fail{page-break-inside:avoid;}
+  .eq{page-break-inside:avoid;}
+}
+</style>
+</head>
+<body>
+<div id="topbar">
+  <button id="toggletoc" aria-label="切换目录">☰ 目录</button>
+  <span class="title">MFS 微波耦合谐振滤波器综合</span>
+  <span class="ver">commit <code>483d7616</code> · 2026-10-13</span>
+  <div id="searchwrap">
+    <input id="search" type="search" placeholder="搜索本书…" autocomplete="off">
+    <span id="searchcount"></span>
+  </div>
+</div>
+<div id="layout">
+<nav id="sidebar" aria-label="目录">
+  <h2>目录</h2>
+  <ul class="toc">
+    <li><a href="#preface">前言</a></li>
+
+    <li><span class="part">第一篇 · 问题与数学基础</span></li>
+    <li><a class="ch" href="#ch1">1&nbsp; 从滤波器规格到综合任务</a></li>
+    <li><a class="ch" href="#ch2">2&nbsp; 归一化频率、物理频率及映射</a></li>
+    <li><a class="ch" href="#ch3">3&nbsp; S 参数、导纳与耦合矩阵</a></li>
+    <li><a class="ch" href="#ch4">4&nbsp; 多项式、复变量、共轭及奇偶约定</a></li>
+    <li><a class="ch" href="#ch5">5&nbsp; 全书符号表、单位与数值约定</a></li>
+
+    <li><span class="part">第二篇 · 单带广义 Chebyshev 综合</span></li>
+    <li><a class="ch" href="#ch6">6&nbsp; 全极点与有限传输零点的设计模型</a></li>
+    <li><a class="ch" href="#ch7">7&nbsp; Cameron 递推及 F/P 多项式</a></li>
+    <li><a class="ch" href="#ch8">8&nbsp; ε、ε_r 与返回损耗的关系</a></li>
+    <li><a class="ch" href="#ch9">9&nbsp; E 多项式构造、求根与归一化</a></li>
+    <li><a class="ch" href="#ch10">10&nbsp; 导纳多项式构造</a></li>
+    <li><a class="ch" href="#ch11">11&nbsp; 极点、残差与 Laurent 展开</a></li>
+    <li><a class="ch" href="#ch12">12&nbsp; 横向耦合矩阵组装</a></li>
+    <li><a class="ch" href="#ch13">13&nbsp; 一个完整的端到端算例</a></li>
+
+    <li><span class="part">第三篇 · 拓扑变换</span></li>
+    <li><a class="ch" href="#ch14">14&nbsp; 相似变换、Givens 旋转与响应不变量</a></li>
+    <li><a class="ch" href="#ch15">15&nbsp; 折叠拓扑</a></li>
+    <li><a class="ch" href="#ch16">16&nbsp; 箭头拓扑</a></li>
+    <li><a class="ch" href="#ch17">17&nbsp; CT/CQ 拓扑</a></li>
+    <li><a class="ch" href="#ch18">18&nbsp; 符号翻转、结构约束与失败条件</a></li>
+
+    <li><span class="part">第四篇 · 响应计算与网络操作</span></li>
+    <li><a class="ch" href="#ch19">19&nbsp; 基于矩阵的 LU 响应计算</a></li>
+    <li><a class="ch" href="#ch20">20&nbsp; 极点展开快路径</a></li>
+    <li><a class="ch" href="#ch21">21&nbsp; 快路径输入契约、验证门与 LU 回退</a></li>
+    <li><a class="ch" href="#ch22">22&nbsp; 群延迟：定义、解析计算与独立验证</a></li>
+    <li><a class="ch" href="#ch23">23&nbsp; Touchstone 数据及端口约定</a></li>
+    <li><a class="ch" href="#ch24">24&nbsp; 网络级 cascade</a></li>
+
+    <li><span class="part">第五篇 · 高级综合与优化</span></li>
+    <li><a class="ch" href="#ch25">25&nbsp; 双工器与多工器</a></li>
+    <li><a class="ch" href="#ch26">26&nbsp; 全谱路径、谱分解与迭代</a></li>
+    <li><a class="ch" href="#ch27">27&nbsp; 双频带 route-α 与自由度限制</a></li>
+    <li><a class="ch" href="#ch28">28&nbsp; LM 优化、参数提取与数值 Jacobian</a></li>
+
+    <li><span class="part">第六篇 · 数值可靠性与工程使用</span></li>
+    <li><a class="ch" href="#ch29">29&nbsp; 求根器链与数值稳定性</a></li>
+    <li><a class="ch" href="#ch30">30&nbsp; 容差、尺度、聚类与病态问题</a></li>
+    <li><a class="ch" href="#ch31">31&nbsp; 支持边界、typed error 与诊断</a></li>
+    <li><a class="ch" href="#ch32">32&nbsp; 规格验证、独立基准与回归测试</a></li>
+    <li><a class="ch" href="#ch33">33&nbsp; Rust、Python 与 CLI 的使用流程</a></li>
+    <li><a class="ch" href="#ch34">34&nbsp; 可复现算例集</a></li>
+
+    <li><span class="part">附录</span></li>
+    <li><a class="ch" href="#appA">A&nbsp; 符号与术语表</a></li>
+    <li><a class="ch" href="#appB">B&nbsp; 公式索引</a></li>
+    <li><a class="ch" href="#appC">C&nbsp; 算法—实现—测试映射表</a></li>
+    <li><a class="ch" href="#appD">D&nbsp; 数值阈值及用途</a></li>
+    <li><a class="ch" href="#appE">E&nbsp; 参考文献与证据来源</a></li>
+    <li><a class="ch" href="#appF">F&nbsp; 已知限制和未验证范围</a></li>
+  </ul>
+</nav>
+<main id="main">
