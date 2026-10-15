@@ -155,7 +155,7 @@ flowchart TD
 flowchart TD
     P[PolynomialSet] --> A[synthesize_admittance_polynomials]
     A --> B[AdmittancePolynomials<br/>y11, y12, y22, denominator]
-    B --> C[residue_expansion<br/>Durand-Kerner root finding]
+    B --> C[residue_expansion<br/>adaptive root finding (faer→DK→Aberth)]
     C --> D[ResidueExpansion × 3]
     D --> E{classify_residues}
     E -->|Real| F[Real-valued extraction]
@@ -183,7 +183,7 @@ Captures engineering intent with validation at construction time.
 **Invariants enforced:**
 - Order ≥ 1
 - Return loss > 0 dB
-- Transmission zeros are finite or infinite; passband zeros (`|zero| < 1`)
+- Transmission zeros are finite or infinite; passband zeros (`|zero| <= 1`)
   are accepted by `spec` but rejected with a typed
   `MfsError::InvalidTransmissionZero` at the approximation entry point
   (`approx::generalized_chebyshev_polynomials`). E1's 2026-10-05 investigation
@@ -206,7 +206,7 @@ Separates physical frequency handling from normalized prototype math.
   The multi-band **synthesis** route is shipped (C2/C3, 2026-10-05, route-α
   in `docs/internal/multi-band-synthesis-design.md`; E1 investigated and is
   **not** a blocker — gap TZs are stopband)
-- `FrequencyGrid` — uniform or custom frequency point sets
+- `FrequencyGrid` — uniform frequency point sets (`FrequencyGrid::linspace`)
 
 ### `approx` — Polynomial Approximation
 
@@ -330,8 +330,8 @@ folded/arrow matrices therefore never enter this path). The fast path is
 cross-checked against LU on a 5-point grid, comparing **complex** S21
 (magnitude and phase) and S11, accept iff `|Δ|/|LU| < 1e-3` on ≥1 point above
 the 1e-10 magnitude floor and all values finite — otherwise full-grid LU
-fallback (a near-singular point after verification still falls back per
-point). It also emits group delay analytically at O(N). See
+fallback (any single non-finite/near-singular point on the verified grid
+falls back to LU over the entire grid). It also emits group delay analytically at O(N). See
 `docs/algorithms.md` §7.
 
 ### `verify` — Verification Utilities
@@ -344,16 +344,16 @@ Provides comparison and pattern-matching tools for validation.
 - `MatrixPatternTolerance` — structural zero detection threshold
 
 **Capabilities:**
-- Response comparison (max deviation, RMS error)
+- Response comparison (max deviation in frequency, `|S11|`, `|S21|`, group delay)
 - Topology pattern verification (folded, arrow sparsity patterns)
-- Matrix symmetry checking
+- Extraction verification (triplet, quadruplet, trisection recovery)
 
 ### `pipeline` — JSON-Driven Orchestration
 
 Composable stage-based pipeline with JSON I/O and incremental execution.
 
 **Key types:**
-- `Stage` trait — `fn execute(&self, context: &mut SynthesisContext) -> Result<()>`
+- `Stage` trait — `type Input; type Output; fn execute(&self, input: &Self::Input) -> Result<Self::Output>`
 - `SynthesisContext` — accumulates artifacts across stages
 - `SynthesisRequest` — JSON-parseable input specification
 - `PipelineMetadata` — execution timing, warnings, version info
@@ -480,7 +480,7 @@ All errors are `Serialize + Deserialize` for structured JSON error reporting.
 
 | Threshold | Value | Purpose |
 |-----------|-------|---------|
-| Root solver convergence | 1e-12 | Durand-Kerner iteration termination |
+| Root solver convergence | 1e-13 | Durand-Kerner / Aberth-Ehrlich iteration termination |
 | Conjugate pole matching | 1e-8 | Match poles as conjugate pairs |
 | Complex residue detection | 1e-6 | Distinguish real from complex residues |
 | Pole real threshold | 1e-10 | Classify poles as essentially real |
@@ -511,10 +511,10 @@ All errors are `Serialize + Deserialize` for structured JSON error reporting.
 | 4 | Matrix structural invariants (dimensions, non-zero couplings) | Builder correctness |
 | 5 | Synthesis succeeds for all valid configurations | No NumericalFailure |
 | 6 | Topology transformation succeeds | Folded transform robustness |
-| 7 | Root solver accuracy | Durand-Kerner precision |
+| 7 | Root solver accuracy | Adaptive root solver (faer→DK→Aberth) precision |
 | 8 | Backward compatibility for real-residue configs | No regressions |
 | 9 | Admittance polynomial degree constraints | Polynomial construction |
-| 10 | Admittance polynomial coefficient parity | Symmetry preservation |
+| 10 | Admittance denominator poles on imaginary axis | Admittance polynomial construction |
 
 ## Dependencies
 
@@ -578,7 +578,15 @@ let matrix = MatrixSynthesisEngine.synthesize(&polynomials)?;
 ```rust
 use mfs::pipeline::{run_full_pipeline, SynthesisRequest};
 
-let request = SynthesisRequest { order: 4, return_loss_db: 20.0, .. };
+let request = SynthesisRequest {
+    order: 4,
+    return_loss_db: 20.0,
+    transmission_zeros: vec![],
+    unloaded_q: None,
+    topology: None,
+    mapping: None,
+    grid: None,
+};
 let context = run_full_pipeline(request)?;
 ```
 
@@ -599,7 +607,7 @@ let context = run_full_pipeline(request)?;
 
 ## Known Limitations
 
-1. **Passband transmission zeros** (`|zero| < 1`) are not supported — the `safe_sqrt_term`
+1. **Passband transmission zeros** (`|zero| <= 1`) are not supported — the `safe_sqrt_term`
    computation restricts zeros to the stopband.
 2. **Repeated poles in transversal matrix synthesis.** The residue expansion
    handles repeated poles (Laurent principal part, plan E2, 2026-10-05) and

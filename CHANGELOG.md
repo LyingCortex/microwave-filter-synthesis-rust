@@ -162,7 +162,7 @@
   `multiplexer.rs` geometric-mean S11 + pairwise isolation + the
   `response_admittance`/`response_matrix` dB; `synthesis/machiarella.rs`
   `junction_response` `to_db`) and the public `ResponseSample::s11_db()`/
-  `s22_db()` all route through it. The `s*_db` threshold tightens from
+  `s21_db()` all route through it. The `s*_db` threshold tightens from
   `mag <= 0.0` to `mag <= 1e-15`, which clamps the machine-epsilon null
   region (a true transmission zero lands at `mag ~ 1e-17`) to a *stable*
   −300.0 — previously `20·log10(1e-17)` amplified run-to-run residual noise

@@ -187,7 +187,7 @@ data = d.response_full(start=1.8e9, stop=2.2e9, points=201)
 # 返回 list of dict:
 # [{'freq': Hz, 's21_db': dB, 's11_db': dB,
 #   's21_mag': linear, 's11_mag': linear,
-#   's21_phase': rad, 's11_phase': rad,
+#   's21_phase': deg, 's11_phase': deg,
 #   'group_delay': float or None}, ...]
 # group_delay 单位是归一化原型单位 dτ/dω(不是秒);LU 与极点展开快路径都会计算,
 # 仅在数值退化处(传输零点 S21→0)为 None —— 显式标记,不是假 0.0

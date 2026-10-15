@@ -299,8 +299,8 @@ y12 = −2P/eps                      （承载传输零点;M_SL 从这里或闭�
   `extract_triplet`(`sections.rs:11-56`):`θ = safe_angle(M[t−1,t], z + M[t,t])`
   消掉 (t−1,t) 主链(在零点频率把尾三节与尾端解耦),然后逐行旋转把三节移向源端。
 - **CQ** `to_cascaded_quadruplets(zero_pairs)`:守卫 `order ≥ 4·pairs`。**源侧不重叠
-  平铺**:第 i 个 quadruplet(0-based)span 谐振器 `4i−3..=4i`,每对推两个 z_loc
-  `[s, s+2]`(span 2 = 伴生三节)和 `[s, s+3]`(span 3 = quadruplet 对角),`s=4i+1`。
+  平铺**:第 i 个 quadruplet(1-based, i=1,2,…)span 谐振器 `4i−3..=4i`,每对推两个 z_loc
+  `[s, s+2]`(span 2 = 伴生三节)和 `[s, s+3]`(span 3 = quadruplet 对角),`s=4i−3`。
   `extract_cascade_quadruplets`(`sections.rs:226-344`)按 span 分类,每个 quadruplet
   找伴生三节(**源侧平铺下 `common_resonator` 恒 = 1**,`=4` 负载端公式不可达),
   所有操作**按位置从尾到顶交错**执行(尾先),`extract_quadruplet` = 两个相邻三节 +
@@ -321,14 +321,14 @@ A(ω) = M + ω·I_r − jR_S·e₀e₀ᵀ − jR_L·eₙeₙᵀ      （I_r 只�
 有耗(Q 有限):谐振器对角再 − j/Qu  （backend.rs:130-138,把极点移出虚轴）
 S11 = 1 + 2jR_S·[A⁻¹]₀₀
 S21 = −2j√(R_S R_L)·[A⁻¹]_{N+1,0}
-群延迟 τ = Im( Σ_k [A⁻¹]_{N+1,k}·[A⁻¹]_{k,0} / [A⁻¹]_{N+1,0} )   （= −Im(d/dω ln S21)）
+群延迟 τ = Im( Σ_k [A⁻¹]_{N+1,k}·[A⁻¹]_{k,0} / [A⁻¹]_{N+1,0} )   （Σ_k 仅谐振器索引 1..N,排除端口;= −Im(d/dω ln S21)）
 ```
 **选择性求解**(`backend.rs:172-194`):只解 `A x = e₀`(第一列)和 `A y = eₙ`(最后一列;
 因 A 对称,最后一行 = 最后一列),**一次 LU 分解解两个右端**,省掉完整求逆的 N−2 次回代。
-> 偏差:LU 群延迟利用对称取 `最后一行=最后一列`(`backend.rs:164-169`),但**消费端不
-> 验证对称** —— 若经 `new_with_topology_asymmetric` / `allow_asymmetric(true)` 喂入非对称
-> 矩阵,S11/S21 幅度仍对、群延迟会**静默算错**(review 0.6.1 P1-3)。构造端现在有对称
-> 守卫兜底,但这是已知不变量。
+> 对称守卫:`evaluate_response` 在解算前先 `matrix.assert_symmetric()?`(消费端兜底,
+> `backend.rs:31`),经 `new_with_topology_asymmetric` / `allow_asymmetric(true)` 喂入的
+> 非对称矩阵会被 **typed 拒绝**(`PreconditionViolation`),不会静默算错群延迟。
+> 对称性是 LU 群延迟与快路径共用的不变量(构造端由 `new_with_topology` 强制)。
 `ResponseSolver::evaluate_normalized(_with_settings)` (`response/mod.rs:169-185`)。
 
 ### 7.2 极点展开快路径(O(N)/点,仅无耗横向)`pole_expansion.rs`
@@ -341,7 +341,7 @@ S21 = −2j√(R_S R_L)·[A⁻¹]_{N+1,0}
 **端口对角** `M[0,0]`/`M[N+1,N+1]`,任何超过 `1e-9·max(1, max|M|)` 者(远高于 f64
 舍入 ~1e-16,远低于任何 O(1) 耦合)即以 typed `PreconditionViolation` 拒绝 ——
 查的是**元素**而非拓扑标签,故标着 `Transversal` 却仍含谐振器间耦合的矩阵也拦得住。
-拒绝后主流程落回 LU(任意对称矩阵都正确,只是慢)。5 个回归测试钉住该契约。
+拒绝后主流程落回 LU(任意对称矩阵都正确,只是慢)。7 个契约测试钉住该契约。
 
 读取本身(不求根):
 ```
@@ -492,13 +492,14 @@ D(ω) = 1 + Σ r22,k/(ω−pole_k) + …（网络分母）
 
 ## 9. 已知限制与不变量(与代码一致)
 
-1. **通带传输零点(`|z|<1`)不支持** —— 单函数实根广义 Chebyshev 原型无法实现
+1. **通带/边缘传输零点(`|z|<=1`)不支持** —— 单函数实根广义 Chebyshev 原型无法实现
    带内零点(Feldtkeller 破坏,E1 2026-10-05);需多函数特征(新研究)。
 2. **横向综合的重复极点** —— 残差展开能处理(Laurent),快路径精确求和,但横向
    链每谐振器只表示一个简单极点 ⇒ typed `NotImplemented`。
 3. **Wheel 拓扑** 已弃用,当前是 Arrow 别名。
-4. **LU 群延迟依赖对称** —— 非对称输入(经 opt-out 构造)会静默算错群延迟,
-   幅度不受影响(review 0.6.1 P1-3)。
+4. **LU/快路径群延迟依赖对称** —— 响应入口先 `assert_symmetric()?`,非对称输入
+   (经 opt-out 构造 `new_with_topology_asymmetric` / `allow_asymmetric(true)`)被
+   **typed 拒绝**(`PreconditionViolation`),不再静默算错(review 0.6.1 P1-3 已闭合)。
 5. **多工器简化路径保真度有限**(相邻通道),全谱路径 `full_iteration(true)`
    已收敛并 gate 锚定(Type-I 阶 2–8 + Type-II + N=3/4)。
 6. **多频带仅双通带(K=2)**,K≥3 是 DOF 墙(typed 拒绝)。

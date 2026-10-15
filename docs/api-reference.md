@@ -317,10 +317,12 @@ let net = touchstone::build_network(&response, 50.0)?;
 // 或直接从设计（默认响应网格，50Ω）
 let net = design.build_network()?;
 
-// 生成的网络可直接操作
-net.resample(&[6.5e9, 6.75e9, 7.0e9],
-    touchstone::Interpolation::Linear,
-    touchstone::Extrapolation::Error)?;
+// 生成的网络可直接操作（注意：resample 返回新 Network，用 `let` 影子绑定接住；
+// Interpolation/Extrapolation 是外部 touchstone crate 的类型，
+// 用 `::touchstone::` 绝对路径访问，而非 mfs::touchstone 模块）
+let net = net.resample([6.5e9, 6.75e9, 7.0e9],
+    ::touchstone::Interpolation::Linear,
+    ::touchstone::Extrapolation::Error)?;
 let s21 = net.try_s_ri_at(1, 2, 1)?;      // S21 @ point 1
 let y   = net.y_matrix_at(0)?;            // 导纳矩阵 @ point 0
 ```

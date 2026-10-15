@@ -96,53 +96,53 @@ M = extract_cascade_quadruplets(M, zeros, z_locs)
 ## Rust实现架构
 
 ### 文件位置
-`src/transform/sections.rs` (已存在，追加新函数)
+`src/matrix/cascade.rs`（公共 API）+ `src/matrix/sections.rs`（`pub(crate)` 提取原语）
 
-### 公共API
+### 公共API（`CouplingMatrix` 方法，`src/matrix/cascade.rs`）
 
 ```rust
-/// 从Arrow矩阵提取单个trisection (CT)
-pub fn extract_trisection_at(
-    matrix: &CouplingMatrix,
+/// 从 Arrow/Transversal 矩阵提取 cascade trisections（完整 CT）。
+/// 位置由零点自动推导（source 侧平铺），无需外部指定。
+pub fn to_cascaded_trisections(&self, zeros: &[f64]) -> Result<Self>;
+
+/// 从 Arrow/Transversal 矩阵提取 cascade quadruplets（完整 CQ）。
+/// 零点须成对（`zero_pairs`），且 `order >= 4 * zero_pairs.len()`
+///（第 *i* 对占用谐振器 `4i+1..=4i+4`，source 侧互不重叠平铺），
+/// 否则返回 `PreconditionViolation`。
+pub fn to_cascaded_quadruplets(&self, zero_pairs: &[(f64, f64)]) -> Result<Self>;
+```
+
+### 内部辅助函数（`pub(crate)`，`src/matrix/sections.rs`）
+
+```rust
+/// 提取单个 trisection（CT 原语；`validate_triplet_center` 允许 center=1）
+pub(crate) fn extract_triplet(
+    &self,
     transmission_zero: f64,
-    target_position: usize,  // 1-indexed resonator position
-) -> Result<CouplingMatrix>;
+    center_resonator: usize,
+) -> Result<Self>;
 
-/// 从Arrow矩阵提取多个trisection (完整CT)
-pub fn extract_cascade_trisections(
-    matrix: &CouplingMatrix,
+/// 级联提取 trisections（完整 CT，位置由零点平铺推导）
+pub(crate) fn extract_cascade_trisections(
+    &self,
     zeros: &[f64],
-    positions: &[[usize; 2]],  // [from_node, to_node] per zero
-) -> Result<CouplingMatrix>;
+    positions: &[(usize, usize)],
+) -> Result<Self>;
 
-/// 从Arrow矩阵提取cascade quadruplets (CQ)
-pub fn extract_cascade_quadruplets(
-    matrix: &CouplingMatrix,
+/// 级联提取 quadruplets（完整 CQ，零点成对 + source 侧平铺）
+pub(crate) fn extract_cascade_quadruplets(
+    &self,
     zeros: &[f64],
-    positions: &[[usize; 2]],
-) -> Result<CouplingMatrix>;
+    z_locs: &[[usize; 2]],
+) -> Result<Self>;
 ```
 
-### 内部辅助函数
+### Python 绑定（`PyFilterDesign`，`src/python.rs`）
 
 ```rust
-/// 末端旋转锁定零点
-fn trisection_end_rotation(matrix: &mut CouplingMatrix, tz: f64);
-
-/// Pull操作：将交叉耦合从末端移到目标位置
-fn pull_trisection(matrix: &mut CouplingMatrix, from: usize, to: usize);
-
-/// 合并两个相邻trisection为quadruplet
-fn merge_to_quadruplet(matrix: &mut CouplingMatrix, position: usize);
-```
-
-### Python绑定扩展
-
-```rust
-// FilterDesign新增方法
 impl PyFilterDesign {
-    fn ct(&self, positions: Vec<[usize; 2]>) -> PyResult<PyObject>;
-    fn cq(&self, positions: Vec<[usize; 2]>) -> PyResult<PyObject>;
+    fn ct(&self, py: Python<'_>, positions: Vec<[usize; 2]>) -> PyResult<PyObject>;
+    fn cq(&self, py: Python<'_>, z_locs: Vec<[usize; 2]>) -> PyResult<PyObject>;
 }
 ```
 

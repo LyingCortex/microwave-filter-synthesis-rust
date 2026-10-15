@@ -27,7 +27,7 @@ internal stage shape.
 
 Location:
 
-- [src/fixtures/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/fixtures/mod.rs)
+- [src/fixtures/mod.rs](../src/fixtures/mod.rs)
 
 Purpose:
 
@@ -49,7 +49,7 @@ Expected behavior:
 
 Location:
 
-- [src/fixtures/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/fixtures/mod.rs)
+- [src/fixtures/mod.rs](../src/fixtures/mod.rs)
 
 Purpose:
 
@@ -72,7 +72,7 @@ Expected behavior:
 
 Location:
 
-- [src/fixtures/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/fixtures/mod.rs)
+- [src/fixtures/mod.rs](../src/fixtures/mod.rs)
 
 Purpose:
 
@@ -88,7 +88,7 @@ Expected behavior:
 
 Location:
 
-- [src/fixtures/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/fixtures/mod.rs)
+- [src/fixtures/mod.rs](../src/fixtures/mod.rs)
 
 Purpose:
 
@@ -110,7 +110,7 @@ Expected behavior:
 
 Location:
 
-- [src/fixtures/mod.rs](/c:/Users/eynulai/Downloads/mfs/src/fixtures/mod.rs)
+- [src/fixtures/mod.rs](../src/fixtures/mod.rs)
 
 Purpose:
 
@@ -133,7 +133,7 @@ Expected behavior:
 
 The current fixture-backed regression coverage lives in:
 
-- [tests/literature_fixtures.rs](/c:/Users/eynulai/Downloads/mfs/tests/literature_fixtures.rs)
+- [tests/literature_fixtures.rs](../tests/literature_fixtures.rs)
 
 These tests currently protect:
 
