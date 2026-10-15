@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.3] — 2026-10-15
 
 ### Changed
 
@@ -187,6 +187,20 @@
   reference to 1e-6 (the same cross-glibc tolerance `build_wheel.sh` uses).
   The glibc-2.36 *runtime* load check still needs docker + credentials (out
   of scope for CI; see review-findings §F).
+
+- **Offline single-file HTML algorithm book** (`docs/book/mfs-algorithms.html`,
+  commit `d4d7a31`, 2026-10-14). A 34-chapter + 6-appendix (A–F) Chinese
+  reference — "MFS 微波耦合谐振滤波器综合：数学原理、数值算法与 Rust 实现" —
+  covering the full pipeline (Cameron recurrence, admittance assembly, residue
+  expansion, transversal assembly, topology transforms, LU + pole-expansion
+  response, Macchiarella N-channel iteration, multi-band route-α, spectral
+  factorization, LM optimization) with `file:line` anchors into the source.
+  Single self-contained file (234.9 KB): no external resources (math is
+  HTML/Unicode typesetting, styles + scripts inline), so it opens offline.
+  190 deduplicated `file:line` references were verified against the code at
+  baseline commit `483d7616`; browser-verified at desktop + mobile widths
+  (TOC nav, scroll-spy, full-text search, wide-table scrolling). Verification
+  record: `docs/book/verification.md`; working fragments in `docs/book/_frag/`.
 
 
 ## [0.6.2] — 2026-10-11

@@ -323,9 +323,16 @@ Complex-matrix solve `[S] = [I] − 2j·[R]^(1/2)·([jΩ] − [M])⁻¹·[R]^(1/
 evaluated with a *selective* LU (one factorization, two right-hand sides `e₀`
 and `eₙ`), valid for every topology and the lossy (`Q`-finite) case. A fast
 O(N) pole-expansion partial-fraction path is used for **lossless transversal**
-matrices, cross-checked against LU on a 5-point grid (accept iff `|ΔS21|/|S21|
-< 1e-3` on ≥1 non-deep-stopband point) with automatic full-grid LU fallback;
-it also emits group delay analytically at O(N). See `docs/algorithms.md` §7.
+matrices: `from_matrix` first enforces a structural transversality precondition
+(any inter-resonator coupling above `1e-9·max(1, max|M|)` — including a
+nonzero port diagonal — is rejected with typed `PreconditionViolation`;
+folded/arrow matrices therefore never enter this path). The fast path is
+cross-checked against LU on a 5-point grid, comparing **complex** S21
+(magnitude and phase) and S11, accept iff `|Δ|/|LU| < 1e-3` on ≥1 point above
+the 1e-10 magnitude floor and all values finite — otherwise full-grid LU
+fallback (a near-singular point after verification still falls back per
+point). It also emits group delay analytically at O(N). See
+`docs/algorithms.md` §7.
 
 ### `verify` — Verification Utilities
 
@@ -431,13 +438,24 @@ Network-level operations (0.5.0), wrapping the crate's `NetworkBuilder` /
 ## CLI Interface
 
 ```
-mfs_cli [OPTIONS]
+mfs_cli [OPTIONS] [INPUT_FILE] [COMMAND]
 
 Options:
-  --input <FILE>     Read JSON request from file (default: stdin)
-  --format <FORMAT>  Output format: json (default) or table
-  --stage <NAME>     Execute only the named stage
-  --resume <FILE>    Resume from a saved context file
+  -i, --input <FILE>       JSON request from file (default: stdin)
+  -f, --format <FORMAT>    Output format: json (default) or table
+  -s, --stage <NAME>       Execute only one stage: approximation |
+                           matrix-synthesis | topology-transform |
+                           response-evaluation
+      --resume <FILE>      Resume from a saved SynthesisContext JSON file
+  [INPUT_FILE]             Positional input (alternative to --input)
+
+Commands (quick usage without JSON):
+  design       Quick filter design from command-line parameters
+               (-n order, -r rl, --center/--bandwidth or --start/--stop,
+                --zeros, --topology, --s2p export, ...)
+  multiplexer  Synthesize an N-channel multiplexer (--channel o:rl:c:bw ×N)
+  optimize     Optimize a coupling matrix against a target response (LM)
+  extract      Extract a coupling matrix from a measured response (.s2p)
 ```
 
 ## Error Model
@@ -475,7 +493,7 @@ All errors are `Serialize + Deserialize` for structured JSON error reporting.
 ### Test Layers
 
 1. **Unit tests** — per-function validation with known inputs (`cargo test --lib`:
-   289 passing as of 2026-10-12)
+   308 passing as of 2026-10-13)
 2. **Property-based tests** (10 properties, 100 iterations each in `tests/synthesis_properties.rs`)
 3. **Regression tests** (`tests/synthesis_regression.rs`) — previously-failing configurations
 4. **Integration tests** (20 files in `tests/`) — end-to-end pipeline validation, incl.

@@ -65,6 +65,9 @@ let design = FilterDesign::bandpass(order, rl_db, center_hz, bandwidth_hz)
     .unloaded_q(3000.0)    // optional Q factor
     .synthesize()?;
 
+// Or specify by passband edges — center = √(f1·f2), bandwidth = f2 − f1:
+// FilterDesign::bandpass_edges(order, rl_db, f_start_hz, f_stop_hz)
+
 let response = design.response(start_hz, stop_hz, points)?;
 let folded = design.to_folded()?;
 let scaled = design.scale()?;
@@ -137,31 +140,69 @@ design.save_touchstone("filter.s2p")
 design.save_touchstone("filter.s2p", freq_unit="MHz", format="DB")
 ```
 
+## Command-Line Interface
+
+The `mfs_cli` binary (behind the `cli` feature) runs the synthesis pipeline
+from a JSON request, or via quick subcommands:
+
+```bash
+# Quick design from the command line (band-pass, 6th order, 23 dB, export .s2p)
+cargo run --features cli --bin mfs_cli -- design \
+    -n 6 -r 23.0 --center 6.75e9 --bandwidth 300e6 \
+    --zeros 6.4e9,6.5e9,7.0e9 --topology folded --s2p filter.s2p
+
+# JSON-driven full pipeline (request from a file or stdin)
+cargo run --features cli --bin mfs_cli -- -f table request.json
+cargo run --features cli --bin mfs_cli -- -s approximation request.json   # one stage only
+cargo run --features cli --bin mfs_cli -- --resume context.json           # resume a saved context
+
+# Other subcommands: multiplexer | optimize | extract   (see `mfs_cli --help`)
+```
+
 ## Examples
 
 ```bash
 cargo run --example chebyshev_bandpass
 cargo run --example high_order_stability
 cargo run --example literature_fixtures
+cargo run --example multi_band_response
+cargo run --example duplexer_macchiarella
 ```
 
 ## Documentation
 
-- [API Reference](docs/api-reference.md) — Complete method reference
-- [Numerical Optimization Report](docs/numerical-optimization-report.md) — Algorithm details
-- [Algorithm Reference](docs/algorithms.md) — what each numerical stage actually computes (formulas, conventions, invariants)
+- [API Reference](docs/api-reference.md) — Complete method reference (Rust)
+- [Python API Usage](docs/python-api-usage.md) — `pip install .` / maturin usage
+- [Algorithm Reference](docs/algorithms.md) — what each numerical stage actually computes (formulas, conventions, invariants, `file:line` anchors)
+- [Architecture](docs/architecture.md) — module layout, data flow, supported configurations, known limitations
+- [Numerical Optimization Report](docs/numerical-optimization-report.md) — performance optimizations (O(N) Givens, selective solve, root finders)
+- [Offline Algorithm Book](docs/book/mfs-algorithms.html) — 34-chapter + 6-appendix single-file HTML book (math + Rust implementation, fully offline); [verification record](docs/book/verification.md)
+- [CHANGELOG](CHANGELOG.md) — per-version change history
 
 ## Project Structure
 
 ```
 src/
-  design.rs     High-level FilterDesign API (start here)
-  approx/       Polynomial approximation (Cameron recurrence, root solvers)
-  matrix/       Coupling matrix operations and topology transforms
-  response/     S-parameter evaluation (LU + pole expansion)
-  synthesis/    Matrix synthesis from polynomials
-  spec/         Filter specification types
-  freq.rs       Frequency mapping helpers
+  design.rs       High-level FilterDesign API (start here)
+  prelude.rs      Convenience re-exports (`use mfs::prelude::*`)
+  duplexer.rs     2-channel (Tx/Rx) duplexer synthesis + analysis
+  multiplexer.rs  N-channel multiplexer synthesis + analysis
+  optimize.rs     Coupling-matrix tuning/extraction (Levenberg-Marquardt)
+  spectral.rs     Spectral factorization (cepstrum + companion eigenvalues)
+  touchstone.rs   Touchstone (.s2p) export/import + network ops
+  error.rs        `MfsError` typed error enum
+  approx/         Polynomial approximation (Cameron recurrence, root solvers)
+  spec/           Filter specification types
+  freq.rs         Frequency mapping helpers
+  matrix/         Coupling matrix operations and topology transforms
+  synthesis/      Matrix synthesis from polynomials
+  transform/      Topology transforms (folded, arrow, sections)
+  response/       S-parameter evaluation (LU + O(N) pole expansion)
+  verify/         Response verification helpers
+  pipeline/       JSON-driven pipeline orchestration (CLI backend)
+  output/         Terminal / markdown report rendering
+  fixtures/       Literature-backed test fixtures
+  bin/mfs_cli/    CLI (design / multiplexer / optimize / extract subcommands)
 ```
 
 ## License

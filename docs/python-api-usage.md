@@ -189,7 +189,8 @@ data = d.response_full(start=1.8e9, stop=2.2e9, points=201)
 #   's21_mag': linear, 's11_mag': linear,
 #   's21_phase': rad, 's11_phase': rad,
 #   'group_delay': float or None}, ...]
-# group_delay 为 None 时该求解路径不计算群延迟（极点展开快路径）
+# group_delay 单位是归一化原型单位 dτ/dω(不是秒);LU 与极点展开快路径都会计算,
+# 仅在数值退化处(传输零点 S21→0)为 None —— 显式标记,不是假 0.0
 ```
 
 ---

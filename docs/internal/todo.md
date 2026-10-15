@@ -1,16 +1,16 @@
 # MFS TODO List
 
-**Status as of 0.6.3-unreleased (2026-10-13).** This file is maintained as the single
+**Status as of 0.6.3 released (2026-10-15).** This file is maintained as the single
 open-item list. Closed items are listed with the version that closed them so
 history is traceable. Authoritative architecture/limitation references:
 `docs/architecture.md` (Known Limitations / Future Roadmap),
 `docs/algorithms.md` (implementation-grounded algorithm reference), and
 `docs/internal/architecture-review-2026-09-25.md`.
 
-## Current state (0.6.3-unreleased, 2026-10-13)
+## Current state (0.6.3 released, 2026-10-15)
 
-`master` head `7dd617a`; the working tree carries the round-2 and round-3
-review remediation (uncommitted). Round-2 report:
+`master` head `d4d7a31`; version **0.6.3 released 2026-10-15** (tags `v0.6.2`,
+`v0.6.3` both present). Round-2 report:
 `docs/reviews/mfs-review-round2.md`; round-3 report:
 `docs/reviews/mfs-review-round3.md`. All CI-parity checks green on this tree
 (local, WSL2 / Rust 1.95.0):
@@ -32,7 +32,7 @@ review remediation (uncommitted). Round-2 report:
 Since the 0.6.1 snapshot: the 0.6.1 whole-crate review wave (3 P1 + 14 P2 +
 11 P3) is **fully closed and gate-anchored** (released as 0.6.2, 2026-10-11:
 fast-path group delay + three-algorithm verification, §D.7 dB single source,
-CI wheel/FFI gate). On top of 0.6.2, in 0.6.3-unreleased: `flip_sign` /
+CI wheel/FFI gate). On top of 0.6.2, in 0.6.3: `flip_sign` /
 `flip_sign_inplace` deduplicated into one shared `pub(crate)` helper
 (`matrix/mod.rs`), bit-exact A/B verified (9 prototype cases, orders 4–10,
 byte-identical folded/CT/CQ matrices + 401-point response); the P2-1
@@ -44,7 +44,7 @@ feasibility domain guard in `find_eps` (typed `PreconditionViolation` for
 port-diagonal guard + 3 tests, complex S21+S11 fast-path gate + 5 tests,
 measured high-order boundary 28/24 + example regression test, `synthesize`
 doc + `verify_against_spec` doctest, with-zeros group-delay FD anchor test)
-is fully closed and test-anchored — see the 0.6.3-unreleased CHANGELOG entry.
+is fully closed and test-anchored — see the 0.6.3 CHANGELOG entry.
 The Open sections below hold the remaining low-priority ecosystem items and
 the refuted passband-TZ work.
 

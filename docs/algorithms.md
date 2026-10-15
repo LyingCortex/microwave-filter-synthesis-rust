@@ -332,13 +332,24 @@ S21 = −2j√(R_S R_L)·[A⁻¹]_{N+1,0}
 `ResponseSolver::evaluate_normalized(_with_settings)` (`response/mod.rs:169-185`)。
 
 ### 7.2 极点展开快路径(O(N)/点,仅无耗横向)`pole_expansion.rs`
-`PoleExpansionData::from_matrix` (`:87`) 从横向矩阵**直接读极点/残差**(不求根):
+`PoleExpansionData::from_matrix` (`pole_expansion.rs:100`) 从横向矩阵**直接读极点/残差**(不求根):
+
+**结构性前置条件**(`assert_transversal_structure`,`:164`,round-3 修复):
+该路径只能表达**横向**矩阵(谐振器块对角 + 每谐振器只耦合 Source/Load)。
+折叠/箭头等拓扑携带的谐振器间耦合 `M[k,k']` 无法表达 —— 若直接读取会被**静默丢弃**、
+给出物理上错误(但静默算出)的响应。`from_matrix` 现在先扫描所有谐振器块非对角项与
+**端口对角** `M[0,0]`/`M[N+1,N+1]`,任何超过 `1e-9·max(1, max|M|)` 者(远高于 f64
+舍入 ~1e-16,远低于任何 O(1) 耦合)即以 typed `PreconditionViolation` 拒绝 ——
+查的是**元素**而非拓扑标签,故标着 `Transversal` 却仍含谐振器间耦合的矩阵也拦得住。
+拒绝后主流程落回 LU(任意对称矩阵都正确,只是慢)。5 个回归测试钉住该契约。
+
+读取本身(不求根):
 ```
 极点  pole_k  = −B_k            （实 ω 域,= 对角相反数,P2-12 约定）
 残差  y11: M_Sk² ,  y12: M_Sk·M_kL ,  y22: M_kL²
 常项  y12 += M_SL
 ```
-`evaluate_at(ω)` (`:150`) 在 Schur 2×2 型下解析求:
+`evaluate_at(ω)` (`:233`) 在 Schur 2×2 型下解析求:
 ```
 S11 = 1 + 2j·[Σ r11,k/(ω−pole_k) + const11] / D(ω)
 S21 = −2j·[Σ r12,k/(ω−pole_k) + M_SL] / D(ω)
@@ -348,12 +359,15 @@ D(ω) = 1 + Σ r22,k/(ω−pole_k) + …（网络分母）
         d/dω [b/(ω−p)^(m−k)] = −(m−k)·b/(ω−p)^(m−k+1)   （Laurent,每 Y 用自己长度）
 ```
 单遍 O(N)。**在传输零点(S21→0)群延迟返回 `None`**(`inv_10.norm_sqr() ≤ 1e-18`,
-`:247`),与 LU 的退化守卫一致 —— 显式未定义,不是假 0。
+`:330`),与 LU 的退化守卫一致 —— 显式未定义,不是假 0。
 
-### 7.3 快路径的信任策略(`design.rs:404-453`)
-`response_normalized` 先建极点展开,在 **5 点检查网格**上与 LU 比对:
-`|S21 相对差| < 1e-3` 且**至少比对了 1 个非深阻带点**才信任;否则整格落回 LU。
-信任后单点若近奇异仍落回 LU。
+### 7.3 快路径的信任策略(`design.rs` `fast_path_gate`,`:72`)
+`response_normalized` / `response_bandpass` 先建极点展开,在 **5 点检查网格**上与 LU
+比对 `fast_path_gate`:比较**复数** S21(幅度**与**相位)与 S11,任一点
+`max(|ΔS21|/|S21_LU|, |ΔS11|/|S11_LU|) < 1e-3`,且**至少比对了 1 个**
+`|S21| > 1e-10`(深阻带噪声地板)的点、所有值有限,才信任;否则整格落回 LU。
+纯幅度门会放过"幅度不变但相位旋转/仅 S11 畸变"的错误,复数门(含 S11)堵住了
+(round-3 修复,5 个测试钉住,含"等幅旋转相位"回归用例)。信任后单点若近奇异仍逐点落回 LU。
 
 ### 7.4 群延迟单位约定(`response/mod.rs:15-35`)
 `group_delay` 是**归一化原型单位** `dτ/dω`(ω = 归一化坐标,`normalized_omega`),
