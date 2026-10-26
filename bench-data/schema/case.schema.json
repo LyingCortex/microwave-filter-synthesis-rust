@@ -26,7 +26,8 @@
         "tags": { "type": "array", "items": { "type": "string" } },
         "spec": { "type": "object" },
         "invariants": { "type": "object" },
-        "anchor_id": { "type": "string" }
+        "anchor_id": { "type": "string" },
+        "anchor": { "type": "object" }
       }
     }
   }

@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "filter-bench multiplexer case family",
+  "description": "多工器/双工器算例：spec 描述通道与结，invariants 描述合成尺寸关系。family 特定约束在此；通用 envelope 见 case.schema.json。",
+  "type": "object",
+  "required": ["schema_version", "family", "cases"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "family": { "const": "multiplexer" },
+    "cases": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/case" } }
+  },
+  "definitions": {
+    "case": {
+      "type": "object",
+      "required": ["id", "provenance", "spec", "invariants"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9_]*$" },
+        "provenance": {
+          "type": "object",
+          "required": ["source"],
+          "properties": {
+            "source": { "type": "string", "minLength": 1 },
+            "note": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "tags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "spec": {
+          "type": "object",
+          "required": ["junction", "channels"],
+          "properties": {
+            "junction": { "enum": ["resonant", "nonresonant"] },
+            "extra_rz_channel": { "type": ["integer", "null"], "minimum": 0 },
+            "channels": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["f_low", "f_high", "n_rz", "rl_db"],
+                "properties": {
+                  "f_low": { "type": "number", "exclusiveMinimum": 0 },
+                  "f_high": { "type": "number", "exclusiveMinimum": 0 },
+                  "n_rz": { "type": "integer", "minimum": 0 },
+                  "rl_db": { "type": "number", "exclusiveMinimum": 0 },
+                  "tz": { "type": "array", "items": { "type": "number" } }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "invariants": {
+          "type": "object",
+          "required": ["n_total", "n_ports", "cm_size", "rz_per_band"],
+          "properties": {
+            "n_total": { "type": "integer", "minimum": 1 },
+            "n_ports": { "type": "integer", "minimum": 2 },
+            "cm_size": { "type": "integer", "minimum": 1 },
+            "rz_per_band": { "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 0 } },
+            "resonators_per_channel": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+            "junction_node": {
+              "type": "boolean",
+              "description": "true when the resonant junction is an explicit extra matrix node (CST 'Resonant' diplexer): cm_size == n_total + n_ports + 1. Zhao et al. type-2 junctions (shared RZ inside a channel) do NOT add a node and omit this field."
+            }
+          },
+          "additionalProperties": false
+        },
+        "anchor_id": { "type": "string", "minLength": 1 },
+        "anchor": { "type": "object" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "schema_version": "1.0",
+  "contract_version": "1.4.0",
+  "note": "P05 suite 成员：哪些 case 何时执行。嵌套关系 smoke⊆standard⊆extended；stress 与其它三者 disjoint（N=300 这类高成本 case 只进 stress，不阻塞日常回归）。一个 case 可在多个 suite，但**科学数据不复制**——这里只引用 qualid。validate_coverage 会检查成员都是已注册 case、嵌套关系、stress 互斥。",
+  "suites": {
+    "smoke": {
+      "description": "最快冒烟：一个 twoport 黄金基准 + 一个最小双工器，秒级跑完。",
+      "qualids": [
+        "multiplexer_diplexer",
+        "twoport_4_4",
+        "twoport_cst_cq"
+      ]
+    },
+    "standard": {
+      "description": "日常回归：主要黄金基准 + 代表性多工器（不含 N=300 压力）。",
+      "qualids": [
+        "multiplexer_a",
+        "multiplexer_b",
+        "multiplexer_cst_gsm1800_duplexer",
+        "multiplexer_cst_gsm900_duplexer",
+        "multiplexer_diplexer",
+        "twoport_4_1_trisection",
+        "twoport_4_2_unity",
+        "twoport_4_4",
+        "twoport_6_2_culdesac",
+        "twoport_6_3",
+        "twoport_cst_cq",
+        "twoport_cst_gsm1800_downlink",
+        "twoport_cst_gsm1800_uplink",
+        "twoport_cst_gsm900_downlink",
+        "twoport_cst_gsm900_uplink",
+        "twoport_cst_multiband"
+      ]
+    },
+    "extended": {
+      "description": "完整非压力覆盖：所有两端口 + 全部中阶多工器/双工器（不含 stress）。",
+      "qualids": [
+        "multiplexer_a",
+        "multiplexer_b",
+        "multiplexer_c",
+        "multiplexer_cst_gsm1800_duplexer",
+        "multiplexer_cst_gsm900_duplexer",
+        "multiplexer_diplexer",
+        "multiplexer_diplexer_contiguous",
+        "multiplexer_diplexer_type2",
+        "multiplexer_e",
+        "twoport_4_1_trisection",
+        "twoport_4_2_unity",
+        "twoport_4_4",
+        "twoport_6_2_culdesac",
+        "twoport_6_3",
+        "twoport_7_1_2",
+        "twoport_8_3",
+        "twoport_cst_cq",
+        "twoport_cst_gsm1800_downlink",
+        "twoport_cst_gsm1800_uplink",
+        "twoport_cst_gsm900_downlink",
+        "twoport_cst_gsm900_uplink",
+        "twoport_cst_multiband"
+      ]
+    },
+    "stress": {
+      "description": "规模/性能压力：N=300 高阶多工器（harness 已配 warmup=0/repeats=1，墙钟很长）。",
+      "qualids": [
+        "multiplexer_d"
+      ]
+    }
+  }
+}

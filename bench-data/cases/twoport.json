@@ -168,7 +168,239 @@
         "n_ports": 2
       },
       "anchor_id": "SEVEN_ONE_TWO"
+    },
+    {
+      "id": "cst_cq",
+      "provenance": {
+        "source": "ref/CQ.fil (CST Filter Designer 官方算例)",
+        "note": "CQ: 4 阶 2 零 (SymmetricPair ±2), RL 20, 1000-1050 MHz. 发布矩阵 CQ.txt 与 python 后端 folded 完全一致(dev 0.0); CQ_folded.txt 实为 transversal(文件名互换)."
+      },
+      "tags": [
+        "cst",
+        "external-tool"
+      ],
+      "spec": {
+        "order": 4,
+        "rl": 20.0,
+        "zeros": [
+          2.0,
+          -2.0
+        ]
+      },
+      "invariants": {
+        "n_total": 4,
+        "n_ports": 2
+      },
+      "anchor_id": "CST_CQ"
+    },
+    {
+      "id": "cst_gsm900_uplink",
+      "provenance": {
+        "source": "ref/gsm 900 uplink.fil (CST Filter Designer 官方算例)",
+        "note": "GSM900 uplink: 7 阶 3 零, RL 25, 880-915 MHz. 发布矩阵与 python 后端同一滤波器(S 参数 1e-12 / 特征值 1e-14)但 folded 约定不同(dev 0.269), 故存为 cst_folded 独立参照."
+      },
+      "tags": [
+        "cst",
+        "external-tool"
+      ],
+      "spec": {
+        "order": 7,
+        "rl": 25.0,
+        "zeros": [
+          1.5784646747098516,
+          1.7758280273557028,
+          2.4280377793079277
+        ],
+        "response": "Equiripple",
+        "goals": [
+          {
+            "type": "S21",
+            "start": 1.5575289575289573,
+            "stop": 3.4642857142857184,
+            "value_db": -80.0
+          }
+        ]
+      },
+      "invariants": {
+        "n_total": 7,
+        "n_ports": 2
+      },
+      "anchor_id": "CST_GSM900_UPLINK"
+    },
+    {
+      "id": "cst_gsm900_downlink",
+      "provenance": {
+        "source": "ref/gsm 900 downlink.fil (CST Filter Designer 官方算例; = ref/gsm1.fil 同一滤波器)",
+        "note": "GSM900 downlink: 7 阶 3 零, RL 25, 925-960 MHz (= gsm1.fil 同一滤波器). 发布矩阵同滤波器, folded 约定不同 -> cst_folded."
+      },
+      "tags": [
+        "cst",
+        "external-tool"
+      ],
+      "spec": {
+        "order": 7,
+        "rl": 25.0,
+        "zeros": [
+          -2.4818968494489715,
+          -1.8106939965325666,
+          -1.6071008825242672
+        ],
+        "response": "Equiripple",
+        "goals": [
+          {
+            "type": "S21",
+            "start": -3.6883116883116878,
+            "stop": -1.5854800936768119,
+            "value_db": -80.0
+          }
+        ]
+      },
+      "invariants": {
+        "n_total": 7,
+        "n_ports": 2
+      },
+      "anchor_id": "CST_GSM900_DOWNLINK"
+    },
+    {
+      "id": "cst_gsm1800_uplink",
+      "provenance": {
+        "source": "ref/gsm 1800 uplink.fil (CST Filter Designer 官方算例)",
+        "note": "GSM1800 uplink: 7 阶 4 零, RL 25, 1710-1785 MHz. 无发布矩阵, spec-only."
+      },
+      "tags": [
+        "cst",
+        "external-tool"
+      ],
+      "spec": {
+        "order": 7,
+        "rl": 25.0,
+        "zeros": [
+          1.5348819318219136,
+          1.6744033393433142,
+          2.052417786532277,
+          2.9626547995807404
+        ],
+        "response": "Equiripple",
+        "goals": [
+          {
+            "type": "S21",
+            "start": 1.5192982456140318,
+            "stop": 3.418794326241131,
+            "value_db": -80.0
+          }
+        ]
+      },
+      "invariants": {
+        "n_total": 7,
+        "n_ports": 2
+      },
+      "anchor_id": "CST_GSM1800_UPLINK"
+    },
+    {
+      "id": "cst_gsm1800_downlink",
+      "provenance": {
+        "source": "ref/gsm 1800 downlink.fil (CST Filter Designer 官方算例)",
+        "note": "GSM1800 downlink: 7 阶 4 零, RL 25, 1805-1880 MHz. 无发布矩阵, spec-only."
+      },
+      "tags": [
+        "cst",
+        "external-tool"
+      ],
+      "spec": {
+        "order": 7,
+        "rl": 25.0,
+        "zeros": [
+          -3.1072926757304336,
+          -2.1095482826468452,
+          -1.7102205381299656,
+          -1.5638512073054835
+        ],
+        "response": "Equiripple",
+        "goals": [
+          {
+            "type": "S21",
+            "start": -3.659259259259255,
+            "stop": -1.5475256769374395,
+            "value_db": -80.0
+          }
+        ]
+      },
+      "invariants": {
+        "n_total": 7,
+        "n_ports": 2
+      },
+      "anchor_id": "CST_GSM1800_DOWNLINK"
+    },
+    {
+      "id": "cst_multiband",
+      "provenance": {
+        "source": "ref/multiband.fil (CST Filter Designer 官方算例)",
+        "note": "Arbitrary 响应: 无 order/RL 声明, 4 传输零点 + 8 反射零点 + Goals(带内 S11 -20, 带外 S21 -45). 参考后端不可综合(order=null) -> spec-only 登记(P06 L3), 门禁对其 capability-SKIP."
+      },
+      "tags": [
+        "cst",
+        "external-tool",
+        "arbitrary"
+      ],
+      "spec": {
+        "order": null,
+        "rl": null,
+        "zeros": [
+          1.4252025237744603,
+          -0.1283147870620903,
+          0.17666066010451942,
+          -1.4756357938910551
+        ],
+        "reflection_zeros": [
+          -0.983249393810897,
+          -0.8549027389194526,
+          -0.6511196480938535,
+          -0.5020393352391488,
+          0.5363165639205447,
+          0.6748083492254487,
+          0.8647235332994154,
+          0.9844026751863365
+        ],
+        "response": "Arbitrary",
+        "goals": [
+          {
+            "type": "S11",
+            "start": -1.0000000000000016,
+            "stop": -0.4817073170731717,
+            "value_db": -20.0
+          },
+          {
+            "type": "S11",
+            "start": 0.5174418604651173,
+            "stop": 0.9999999999999982,
+            "value_db": -20.0
+          },
+          {
+            "type": "S21",
+            "start": -2.0789473684210518,
+            "stop": -1.4244897959183684,
+            "value_db": -45.0
+          },
+          {
+            "type": "S21",
+            "start": -0.17692307692307724,
+            "stop": 0.22264150943396094,
+            "value_db": -30.0
+          },
+          {
+            "type": "S21",
+            "start": 1.3785714285714288,
+            "stop": 1.934782608695651,
+            "value_db": -45.0
+          }
+        ]
+      },
+      "invariants": {
+        "n_total": null,
+        "n_ports": 2
+      },
+      "anchor_id": "CST_MULTIBAND"
     }
   ],
-  "note": "跨语言共享算例：fuqtgui (src/benchmarks/cases/twoport.json) 与 mfs (tests/*.rs 手抄常量) 的并集；7_1_2 由 mfs 侧收编。"
+  "note": "跨语言共享算例：fuqtgui (src/benchmarks/cases/twoport.json) 与 mfs 的并集，7_1_2 由 mfs 侧收编；cst_* 为 CST Filter Designer 官方算例 (ref/)，其中带发布矩阵的 3 例 (CQ / GSM900 up / GSM900 down) 与 python 后端综合 S 参数一致 (1e-12)，是独立 oracle；GSM1800 up/down 为 spec-only（矩阵未随工程导出）。"
 }

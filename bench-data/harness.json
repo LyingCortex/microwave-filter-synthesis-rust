@@ -1,25 +1,26 @@
 {
   "schema_version": "1.0",
-  "contract_version": "1.0.0",
+  "contract_version": "1.4.0",
   "note": "机器/调参相关策略数字，按 case 的全局 id (<family>_<id>) 键控。刻意与 cases/*.json 分离：换机器或收紧判据时只动这里，不 bump 数据 schema。所有数值均迁移自 fuqtgui 既有已验证来源（见 provenance 字段），未新造。",
-
   "defaults": {
-    "timing": { "warmup": 3, "repeats": 9, "stat": "median" },
+    "timing": {
+      "warmup": 3,
+      "repeats": 9,
+      "stat": "median"
+    },
     "max_iter": null,
     "gate_tols": {}
   },
-
   "gate_tols_global": {
     "response_invariance": 1e-10,
     "folded_mask": 0.0,
     "coupling_abs": 0.02,
     "return_loss_db": 1.0,
-    "unitarity": 1e-8,
-    "equiripple": 1e-9,
-    "s11_match": 1e-8,
-    "cross_backend_equivalence": 1e-6
+    "unitarity": 1e-08,
+    "equiripple": 1e-09,
+    "s11_match": 1e-08,
+    "cross_backend_equivalence": 1e-06
   },
-
   "provenance": {
     "defaults.timing": "fuqtgui/src/scripts/bench_synthesis.py time_call(warmup=3, repeats=9)",
     "gate_tols_global.unitarity": "fuqtgui/src/scripts/bench_multiplexer.py GATE_TOL_UNITARITY=1e-8",
@@ -31,28 +32,130 @@
     "gate_tols_global.return_loss_db": "fuqtgui/docs/analysis/folded-golden-benchmarks-2026-09.md §四.4 (transversal 4 位舍入使纹波峰偏移)",
     "gate_tols_global.cross_backend_equivalence": "fuqtgui/src/scripts/bench_synthesis.py verify_equivalence(tol=1e-6)"
   },
-
   "cases": {
-    "twoport_4_4": { "timing": { "warmup": 3, "repeats": 9, "stat": "median" } },
-    "twoport_6_3": { "timing": { "warmup": 3, "repeats": 9, "stat": "median" } },
-    "twoport_4_2_unity": { "timing": { "warmup": 3, "repeats": 9, "stat": "median" } },
-    "twoport_6_2_culdesac": { "timing": { "warmup": 3, "repeats": 9, "stat": "median" } },
-    "twoport_8_3": { "timing": { "warmup": 3, "repeats": 9, "stat": "median" } },
-    "twoport_4_1_trisection": { "timing": { "warmup": 3, "repeats": 9, "stat": "median" } },
-    "twoport_7_1_2": { "timing": { "warmup": 3, "repeats": 9, "stat": "median" } },
-
-    "multiplexer_a": { "timing": { "warmup": 1, "repeats": 3, "stat": "median" } },
-    "multiplexer_b": { "timing": { "warmup": 1, "repeats": 3, "stat": "median" } },
-    "multiplexer_c": { "timing": { "warmup": 1, "repeats": 3, "stat": "median" } },
-    "multiplexer_diplexer": { "timing": { "warmup": 1, "repeats": 3, "stat": "median" } },
-    "multiplexer_diplexer_type2": { "timing": { "warmup": 1, "repeats": 3, "stat": "median" } },
-    "multiplexer_diplexer_contiguous": { "timing": { "warmup": 1, "repeats": 3, "stat": "median" } },
+    "twoport_4_4": {
+      "timing": {
+        "warmup": 3,
+        "repeats": 9,
+        "stat": "median"
+      }
+    },
+    "twoport_6_3": {
+      "timing": {
+        "warmup": 3,
+        "repeats": 9,
+        "stat": "median"
+      }
+    },
+    "twoport_4_2_unity": {
+      "timing": {
+        "warmup": 3,
+        "repeats": 9,
+        "stat": "median"
+      }
+    },
+    "twoport_6_2_culdesac": {
+      "timing": {
+        "warmup": 3,
+        "repeats": 9,
+        "stat": "median"
+      }
+    },
+    "twoport_8_3": {
+      "timing": {
+        "warmup": 3,
+        "repeats": 9,
+        "stat": "median"
+      }
+    },
+    "twoport_4_1_trisection": {
+      "timing": {
+        "warmup": 3,
+        "repeats": 9,
+        "stat": "median"
+      }
+    },
+    "twoport_7_1_2": {
+      "timing": {
+        "warmup": 3,
+        "repeats": 9,
+        "stat": "median"
+      }
+    },
+    "multiplexer_a": {
+      "timing": {
+        "warmup": 1,
+        "repeats": 3,
+        "stat": "median"
+      }
+    },
+    "multiplexer_b": {
+      "timing": {
+        "warmup": 1,
+        "repeats": 3,
+        "stat": "median"
+      }
+    },
+    "multiplexer_c": {
+      "timing": {
+        "warmup": 1,
+        "repeats": 3,
+        "stat": "median"
+      }
+    },
+    "multiplexer_diplexer": {
+      "timing": {
+        "warmup": 1,
+        "repeats": 3,
+        "stat": "median"
+      }
+    },
+    "multiplexer_diplexer_type2": {
+      "timing": {
+        "warmup": 1,
+        "repeats": 3,
+        "stat": "median"
+      }
+    },
+    "multiplexer_diplexer_contiguous": {
+      "timing": {
+        "warmup": 1,
+        "repeats": 3,
+        "stat": "median"
+      }
+    },
     "multiplexer_d": {
-      "timing": { "warmup": 0, "repeats": 1, "stat": "median" },
+      "timing": {
+        "warmup": 0,
+        "repeats": 1,
+        "stat": "median"
+      },
       "max_iter": 80,
-      "gate_tols": { "s11_match": 1e-7 },
+      "gate_tols": {
+        "s11_match": 1e-07
+      },
       "note": "N=300; 必须用 --stages poly --warmup 0 --repeats 1，否则每阶段重跑前序 -> 墙钟 >= 6.5h。s11 门禁底值 2.29e-8 (326x326 逐点求逆数值底) 被 1e-7 覆盖 4x。"
     },
-    "multiplexer_e": { "timing": { "warmup": 0, "repeats": 1, "stat": "median" } }
+    "multiplexer_e": {
+      "timing": {
+        "warmup": 0,
+        "repeats": 1,
+        "stat": "median"
+      }
+    },
+    "multiplexer_cst_gsm900_duplexer": {
+      "timing": {
+        "warmup": 1,
+        "repeats": 3,
+        "stat": "median"
+      }
+    },
+    "multiplexer_cst_gsm1800_duplexer": {
+      "timing": {
+        "warmup": 1,
+        "repeats": 3,
+        "stat": "median"
+      }
+    }
   }
 }

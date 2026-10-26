@@ -5,27 +5,34 @@
   "type": "object",
   "required": ["schema_version", "contract_version", "harness", "results"],
   "properties": {
-    "schema_version": { "const": "1.0" },
-    "contract_version": { "type": "string" },
+    "schema_version": { "const": "1.1" },
+    "contract_version": { "type": "string", "minLength": 1 },
     "harness": {
       "type": "object",
       "required": ["backend", "language", "platform"],
       "properties": {
-        "backend": { "type": "string" },
-        "language": { "type": "string" },
-        "platform": { "type": "string" },
+        "backend": { "type": "string", "minLength": 1 },
+        "language": { "type": "string", "minLength": 1 },
+        "platform": { "type": "string", "minLength": 1 },
         "cpu": { "type": "string" },
-        "notes": { "type": "string" }
-      }
+        "notes": { "type": "string" },
+        "generated_utc": { "type": "string", "description": "RFC3339 时间戳；用于报告可追溯" },
+        "git_rev": { "type": "string", "description": "后端源码 revision（消费方自报）" },
+        "data_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "权威 data/ 树的 sha256，钉死'哪份数据'" },
+        "config_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "有效 harness 配置（warmup/repeats/gate_tols 合并后）的 sha256" },
+        "seed": { "type": ["integer", "null"], "minimum": 0, "description": "随机种子（如适用）" }
+      },
+      "additionalProperties": false
     },
     "results": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["case", "gates", "stages"],
+        "required": ["case", "status", "gates", "stages"],
         "properties": {
           "case": { "type": "string", "description": "全局 id: <family>_<id>" },
-          "status": { "enum": ["PASS", "FAIL", "SKIP"] },
+          "status": { "enum": ["PASS", "FAIL", "SKIP"], "description": "observed：必须与 gates 聚合一致（见 validate_report）" },
+          "expected": { "enum": ["pass", "reject", null], "description": "预期：正向算例 pass（缺省），negative 算例 reject（预期被正确拒绝，不计入性能排行）" },
           "gates": {
             "type": "object",
             "additionalProperties": {
@@ -36,7 +43,8 @@
                 "metric": { "type": ["number", "null"] },
                 "tol": { "type": ["number", "null"] },
                 "detail": { "type": ["string", "null"] }
-              }
+              },
+              "additionalProperties": false
             }
           },
           "stages": {
@@ -45,16 +53,19 @@
               "type": "object",
               "required": ["median_ms"],
               "properties": {
-                "median_ms": { "type": "number" },
-                "p95_ms": { "type": ["number", "null"] },
-                "min_ms": { "type": ["number", "null"] },
-                "n": { "type": ["integer", "null"] }
-              }
+                "median_ms": { "type": "number", "minimum": 0 },
+                "p95_ms": { "type": ["number", "null"], "minimum": 0 },
+                "min_ms": { "type": ["number", "null"], "minimum": 0 },
+                "n": { "type": ["integer", "null"], "minimum": 1, "description": "采样次数；n=1 时 p95 退化为单点，不应描述成稳定分布" }
+              },
+              "additionalProperties": false
             }
           },
-          "wall_s": { "type": ["number", "null"] }
-        }
+          "wall_s": { "type": ["number", "null"], "minimum": 0 }
+        },
+        "additionalProperties": false
       }
     }
-  }
+  },
+  "additionalProperties": false
 }

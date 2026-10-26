@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "contract_version": "1.0.0",
+  "contract_version": "1.4.0",
   "note": "Stage / Gate / Backend 标识符与语义的规范定义。实现侧（Python、Rust、未来的 GUI/CLI）必须使用这里的 id 字符串，不得自造别名。",
 
   "stages": {
@@ -28,12 +28,12 @@
     },
     "folded_mask": {
       "family": "twoport",
-      "semantics": "折叠结果必须落在 Cameron 折叠掩码内。掩码 = 主链 (i,i+1) + 两条交叉对角线 + 多重 I/O 耦合 (0,j)/(i,N+1)；只检查上三角 j>i，自耦合豁免。**接受两种折叠约定**：源端折叠（canonical，交叉档 index sum = N+1+shift / N+shift，shift=N%2）与负载端折叠（mirrored，上述集合的序号镜像）。二者互为镜像、都是合法折叠形（书 §8.3 折叠形不唯一），故判据取两者并集。",
+      "semantics": "折叠结果必须**完整地**落在某一种 Cameron 折叠约定内。掩码 = 主链 (i,i+1) + 两条交叉对角线 + 多重 I/O 耦合 (0,j)/(i,N+1)；只检查上三角 j>i，自耦合豁免。两种合法约定：源端折叠（canonical，交叉档 index sum = N+1+shift / N+shift，shift=N%2）与负载端折叠（mirrored，其序号镜像）。**判据 = min(violation(canonical), violation(mirrored))**：整体满足任一完整约定即通过，而非逐元素取两者并集。取并集会放过混合（chimeric）矩阵——一部分交叉档取自 canonical、另一部分取自 mirrored，整体不满足任何一种完整约定（N=2 反例 {(0,2),(1,3)}）。1.0.0 的并集判据有此漏洞，1.1.0 收紧。",
       "kind": "hard",
-      "metric": "max|M[i][j]| over upper-triangle (i,j) outside the union mask (canonical ∪ mirrored)",
+      "metric": "min( max|M[i][j]| outside canonical mask, max|M[i][j]| outside mirrored mask ) over upper-triangle j>i",
       "requires_backend": ["synthesis", "folding"],
       "tol_key": "folded_mask",
-      "evidence": "实测（2026-09-27）：只认 canonical 时，书里 6 个印刷折叠矩阵全部越界（最大 0.77）；接受两种约定后全部为 0。fuqtgui 计算结果用 canonical，mfs 偶数阶用 mirrored，两者都合法。实现须声明自己产出哪种约定，或产出任意一种均可（default=either）。"
+      "evidence": "实测（2026-09-27）：只认 canonical 时，书里 6 个印刷折叠矩阵全部越界（最大 0.77）；接受两种约定后全部为 0。fuqtgui 计算结果用 canonical，mfs 偶数阶用 mirrored，两者都合法。1.1.0 收紧为 min 判据后已验证：对所有单点越界矩阵（N=2..8）与全部出版锚点，与旧并集判据数值相同，仅额外拒绝混合负例，故为纯收紧、无误伤。"
     },
     "book_matrix": {
       "family": "twoport",
@@ -99,7 +99,7 @@
     },
     "cross_backend_equivalence": {
       "family": "*",
-      "semantics": "同一算例在两个后端/两种实现上做的是同一个滤波器 (折叠矩阵归一化 Omega 域特征值一致)。跨语言对比前必须过。",
+      "semantics": "同一算例在两个后端/两种实现上做的是同一个滤波器 (折叠矩阵归一化 Omega 域特征值一致)。**判据是必要非充分**：谐振器子块（去源/负载行列）特征值一致只证明内部动力学相同，不约束端口外耦合 R1/R2 与端口接入——改变端口耦合的两个不同滤波器会有相同子块谱（反例见 test_cross_backend_equivalence.py）。因此本门禁必须与 response_invariance 联用，不能单独作为'同一滤波器'的证明。跨语言对比前必须过。",
       "kind": "hard",
       "metric": "max|eig(A_py) - eig(A_other)| (sorted/paired)",
       "requires_backend": ["synthesis", "folding"],

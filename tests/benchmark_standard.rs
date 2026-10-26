@@ -360,11 +360,15 @@ fn standard_twoport_cases_cover_the_folded_invariance_specs() {
 
 #[test]
 fn standard_specs_match_the_annotated_anchor_values() {
-    // Sized to the contract: 7 twoport cases (Cameron book + the 7-1-2 case mfs
-    // contributed), each with a resolving anchor_id.
+    // Sized to the contract: 13 twoport cases (Cameron book + the 7-1-2 case
+    // mfs contributed + the 1.4.0 CST official cases), each with a resolving
+    // anchor_id.
     let cases = data::cases("twoport").expect("twoport cases");
-    assert_eq!(cases.len(), 7, "twoport case count");
-
+    assert_eq!(
+        cases.len(),
+        13,
+        "twoport case count (contract 1.4.0 adds the CST official cases)"
+    );
     for case in &cases {
         assert!(
             case.anchor_id.is_some(),
@@ -500,10 +504,14 @@ fn vendored_data_matches_its_manifest() {
 /// The loader itself must be reading the standard, not a copy of its numbers.
 #[test]
 fn loader_reads_the_vendored_standard() {
-    assert_eq!(data::check_contract().expect("contract"), "1.0.0");
+    assert_eq!(data::check_contract().expect("contract"), "1.4.0");
 
     let cases = data::cases("multiplexer").expect("multiplexer cases");
-    assert_eq!(cases.len(), 8, "multiplexer case count");
+    assert_eq!(
+        cases.len(),
+        10,
+        "multiplexer case count (contract 1.4.0 adds the CST duplexers + contiguous diplexer)"
+    );
     let ids: BTreeSet<&str> = cases.iter().map(|c| c.id.as_str()).collect();
     assert!(
         ids.contains("diplexer"),
@@ -559,19 +567,30 @@ fn sha256_streaming_matches_one_shot() {
     assert_eq!(sha256::hex(&hasher.finish()), sha256::digest(&data));
 }
 
-/// `folded_mask` gate (hard, tolerance 0.0): every matrix mfs folds must have
-/// numerical zeros outside the contract's folded mask.
+/// `folded_mask` gate (hard, tolerance 0.0): every matrix mfs folds must sit
+/// entirely inside **one** complete Cameron folding convention - the contract
+/// criterion `min(violation(canonical), violation(mirrored))` (contract 1.1.0;
+/// `data/gates.json:gates.folded_mask`). Cameron's folded form is not unique
+/// (§8.3): mfs's `to_folded` emits the mirrored variant for even orders, the
+/// book's printed folded matrices the canonical one; satisfying either complete
+/// convention passes.
 ///
-/// The gate's default `"either"` convention is the union of the source-end and
-/// load-end masks (`data/gates.json:gates.folded_mask`), because Cameron's folded
-/// form is not unique (§8.3) - mfs's `to_folded` emits the mirrored variant for
-/// even orders, exactly like the book's printed folded matrices, which escape the
-/// canonical-only mask. Both conventions are checked here so the assertion is on
-/// the contract's real (union) criterion, not on mfs's own convention.
+/// Cases whose spec has no integer `order` (the 1.4.0 CST `cst_multiband`, an
+/// `order: null` Arbitrary-response design) are L3 spec-only: the contract
+/// mandates a capability-SKIP, not a FAIL, so they are skipped here.
 #[test]
 fn folded_mask_holds_for_every_standard_twoport_case() {
     for case in data::cases("twoport").expect("twoport cases") {
-        let order = gates::spec_usize(&case.spec, "order").expect("order");
+        let order = match gates::spec_usize(&case.spec, "order") {
+            Ok(order) => order,
+            Err(_) => {
+                eprintln!(
+                    "folded_mask: {} has no integer order (L3 spec-only) -> capability-SKIP",
+                    case.qualid
+                );
+                continue;
+            }
+        };
         let rl = gates::spec_f64(&case.spec, "rl").expect("rl");
         let zeros = gates::spec_f64_vec(&case.spec, "zeros").expect("zeros");
         let design = mfs::design::FilterDesign::prototype(order, rl)
@@ -792,8 +811,8 @@ fn response_invariance_metric_detects_a_real_difference() {
 /// The reference's eigenvalues are real to within 1e-9 (folded resonator
 /// subblock is real symmetric). The mfs metric is bounded by the
 /// cross_backend_equivalence gate tolerance 1e-6, but the *measured* deviation
-/// between the two backends is at machine precision (≤ ~3e-12 across all 7
-/// standard twoport cases, verified by the rust-native bench). The conformance
+/// between the two backends is at machine precision (≤ ~3e-12 across all 12
+/// synthesizable twoport cases, verified by the rust-native bench). The conformance
 /// test pins the gate at its contract tolerance (1e-6) so a regression that
 /// breaks the eigenvalue match is caught, while the 1e-9 realness bound pins
 /// the reference against being silently replaced by a complex-valued matrix.
@@ -811,8 +830,15 @@ fn cross_backend_equivalence_matches_python_reference() {
         !xref.cases.is_empty(),
         "cross_backend_reference.json has no cases"
     );
-    // Every registered twoport case must have a reference entry.
+    // Every *synthesizable* twoport case (one with an integer `order`) must
+    // have a reference entry. `order: null` cases are L3 spec-only - the
+    // reference covers exactly the synthesizable set (contract: the file
+    // requires coverage of every synthesizable twoport case, no more).
     for case in &cases {
+        // `order: null` (L3 spec-only) cases are not in the reference set.
+        if gates::spec_usize(&case.spec, "order").is_err() {
+            continue;
+        }
         assert!(
             xref.cases.contains_key(case.qualid.as_str()),
             "case {} missing from cross_backend_reference.json",
@@ -826,7 +852,16 @@ fn cross_backend_equivalence_matches_python_reference() {
         .unwrap_or(1e-6);
     // Verify each case: synthesize with mfs, fold, compare eigenvalues.
     let mut worst = 0.0_f64;
+    let mut checked = 0;
     for case in &cases {
+        // `order: null` (L3 spec-only) cases have no reference entry.
+        if gates::spec_usize(&case.spec, "order").is_err() {
+            eprintln!(
+                "cross_backend_equivalence: {} has no integer order (L3 spec-only) -> capability-SKIP",
+                case.qualid
+            );
+            continue;
+        }
         let entry = &xref.cases[case.qualid.as_str()];
         let order = gates::spec_usize(&case.spec, "order").expect("order");
         assert_eq!(
@@ -859,10 +894,11 @@ fn cross_backend_equivalence_matches_python_reference() {
             tol
         );
         worst = worst.max(dev);
+        checked += 1;
     }
     eprintln!(
         "cross_backend_equivalence: worst={worst:.3e} over {} twoport cases (tol {:.1e})",
-        cases.len(),
+        checked,
         tol
     );
 }

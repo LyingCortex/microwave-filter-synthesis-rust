@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "filter-bench suite manifests",
+  "description": "P05：哪些 case 何时执行。smoke⊆standard⊆extended；stress 与其它 disjoint。只引用 qualid，不复制科学数据。",
+  "type": "object",
+  "required": ["schema_version", "contract_version", "suites"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "contract_version": { "const": "1.4.0" },
+    "note": { "type": "string" },
+    "suites": {
+      "type": "object",
+      "required": ["smoke", "standard", "extended", "stress"],
+      "properties": {
+        "smoke": { "$ref": "#/definitions/suite" },
+        "standard": { "$ref": "#/definitions/suite" },
+        "extended": { "$ref": "#/definitions/suite" },
+        "stress": { "$ref": "#/definitions/suite" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "suite": {
+      "type": "object",
+      "required": ["qualids"],
+      "properties": {
+        "description": { "type": "string" },
+        "qualids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -72,6 +72,31 @@
    failing any gross wrong-magnitude/wrong-degree factor, which lands at
    O(1e-1)).
 
+### Changed
+
+- **Migrated the `benchmark_standard` conformance harness to filter-bench
+  contract 1.4.0.** The vendored `bench-data/` (re-synced via
+  `filter-bench/tools/vendor.py`) advanced from 1.0.0 to 1.4.0, which
+  changed the data surface the harness asserts: 7 → 13 twoport cases (the
+  five CST official cases, incl. the L3 spec-only `cst_multiband`) and
+  8 → 10 multiplexer cases. The loader now asserts contract `1.4.0` and the
+  new case counts. The single-prototype loops
+  (`folded_mask_holds_for_every_standard_twoport_case`,
+  `cross_backend_equivalence_matches_python_reference`) now capability-SKIP
+  cases whose spec has no integer `order` (the contract mandates a
+  capability-SKIP, not a FAIL, for `order: null` L3 designs), and the
+  cross-backend reference-coverage assertion is scoped to the synthesizable
+  set (the pinned reference covers exactly the 12 synthesizable twoport
+  cases, no more).
+- **`folded_mask` gate metric tightened union → `min` per contract 1.1.0.**
+  `gates::folded_mask_violations` now implements the contract's
+  `min(violation(canonical), violation(mirrored))` criterion — the folded
+  result must lie entirely inside *one* complete Cameron convention —
+  instead of the 1.0.0 per-element union, which would accept chimeric
+  matrices mixing the two conventions. The metric is numerically identical
+  for single-convention matrices (all that mfs folds), so no synthesized
+  case changes result; the change closes the chimeric false-positive the
+  contract's N=2 counterexample `{(0,2),(1,3)}` documents.
 ## [0.6.3] — 2026-10-15
 
 ### Changed

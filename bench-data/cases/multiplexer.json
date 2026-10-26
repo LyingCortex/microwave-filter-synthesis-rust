@@ -703,6 +703,106 @@
           3
         ]
       }
+    },
+    {
+      "id": "cst_gsm900_duplexer",
+      "provenance": {
+        "source": "ref/gsm 900 duplexer.fil (CST Filter Designer 官方算例)",
+        "note": "GSM900 双工器: 3 端口, 6+6, 谐振结=独立结谐振器(junction_node), cm_size=12+3+1=16. 发布 16x16 矩阵为独立锚点."
+      },
+      "tags": [
+        "cst",
+        "external-tool",
+        "diplexer"
+      ],
+      "spec": {
+        "junction": "resonant",
+        "extra_rz_channel": null,
+        "channels": [
+          {
+            "f_low": 880.0,
+            "f_high": 915.0,
+            "n_rz": 6,
+            "rl_db": 25.0,
+            "tz": [
+              926.02,
+              930.26,
+              944.93
+            ]
+          },
+          {
+            "f_low": 925.0,
+            "f_high": 960.0,
+            "n_rz": 6,
+            "rl_db": 25.0,
+            "tz": [
+              915.61,
+              911.44,
+              897.09
+            ]
+          }
+        ]
+      },
+      "invariants": {
+        "n_total": 12,
+        "n_ports": 3,
+        "cm_size": 16,
+        "rz_per_band": [
+          6,
+          6
+        ],
+        "junction_node": true
+      },
+      "anchor_id": "CST_GSM900_DUPLEXER"
+    },
+    {
+      "id": "cst_gsm1800_duplexer",
+      "provenance": {
+        "source": "ref/gsm 1800 duplexer.fil (CST Filter Designer 官方算例)",
+        "note": "GSM1800 双工器: 3 端口, 7+7, 星形结(Star=非谐振, 无独立结节点), cm_size=14+3=17. 无发布矩阵, spec-only."
+      },
+      "tags": [
+        "cst",
+        "external-tool",
+        "diplexer"
+      ],
+      "spec": {
+        "junction": "nonresonant",
+        "extra_rz_channel": null,
+        "channels": [
+          {
+            "f_low": 1710.0,
+            "f_high": 1785.0,
+            "n_rz": 7,
+            "rl_db": 25.0,
+            "tz": [
+              1807.8,
+              1815.34,
+              1840.18
+            ]
+          },
+          {
+            "f_low": 1805.0,
+            "f_high": 1880.0,
+            "n_rz": 7,
+            "rl_db": 25.0,
+            "tz": [
+              1786.52,
+              1779.34,
+              1756.33
+            ]
+          }
+        ]
+      },
+      "invariants": {
+        "n_total": 14,
+        "n_ports": 3,
+        "cm_size": 17,
+        "rz_per_band": [
+          7,
+          7
+        ]
+      }
     }
   ]
 }

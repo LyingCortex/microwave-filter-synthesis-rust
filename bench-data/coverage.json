@@ -1,0 +1,173 @@
+{
+  "schema_version": "1.0",
+  "contract_version": "1.4.0",
+  "note": "P05 覆盖登记：每个已注册 case 的用途（purpose，可多选）与难度（difficulty 1-5，数值难度，不等于执行耗时）。key 是 qualid（<family>_<id>），不复制 spec——结构特征由 filterbench.coverage.features() 从 spec/invariants 派生，避免与科学数据漂移。新增/退役 case 时必须同步本文件（validate_coverage 会抓缺失与孤儿条目）。",
+  "purposes": {
+    "golden": "与独立可信基准一致（出版物/外部工具 anchor）",
+    "coverage": "覆盖支持的输入/结构空间",
+    "boundary": "合法边界稳定性",
+    "negative": "非法输入是否正确拒绝（P07 数据未注册）",
+    "stress": "规模增大后的可用性（只进 stress suite）"
+  },
+  "difficulty_scale": {
+    "1": "最小/最简结构",
+    "2": "小规模",
+    "3": "中等（默认黄金基准）",
+    "4": "较大阶数/较复杂拓扑",
+    "5": "高阶/压力"
+  },
+  "cases": {
+    "twoport_4_4": {
+      "purpose": [
+        "golden"
+      ],
+      "difficulty": 3
+    },
+    "twoport_6_3": {
+      "purpose": [
+        "golden"
+      ],
+      "difficulty": 3
+    },
+    "twoport_4_2_unity": {
+      "purpose": [
+        "golden"
+      ],
+      "difficulty": 3
+    },
+    "twoport_6_2_culdesac": {
+      "purpose": [
+        "golden"
+      ],
+      "difficulty": 3
+    },
+    "twoport_8_3": {
+      "purpose": [
+        "golden"
+      ],
+      "difficulty": 4
+    },
+    "twoport_4_1_trisection": {
+      "purpose": [
+        "golden"
+      ],
+      "difficulty": 3
+    },
+    "twoport_7_1_2": {
+      "purpose": [
+        "golden"
+      ],
+      "difficulty": 3
+    },
+    "multiplexer_a": {
+      "purpose": [
+        "golden"
+      ],
+      "difficulty": 3
+    },
+    "multiplexer_b": {
+      "purpose": [
+        "golden"
+      ],
+      "difficulty": 3
+    },
+    "multiplexer_c": {
+      "purpose": [
+        "coverage"
+      ],
+      "difficulty": 3
+    },
+    "multiplexer_e": {
+      "purpose": [
+        "coverage"
+      ],
+      "difficulty": 3,
+      "note": "tags 标 'contiguous'，但通道带并不真正相接（f_high != 下一段 f_low）——派生特征 contiguous_bands=False 为准。"
+    },
+    "multiplexer_d": {
+      "purpose": [
+        "stress"
+      ],
+      "difficulty": 5
+    },
+    "multiplexer_diplexer": {
+      "purpose": [
+        "coverage"
+      ],
+      "difficulty": 2
+    },
+    "multiplexer_diplexer_type2": {
+      "purpose": [
+        "coverage"
+      ],
+      "difficulty": 2
+    },
+    "multiplexer_diplexer_contiguous": {
+      "purpose": [
+        "coverage",
+        "boundary"
+      ],
+      "difficulty": 2
+    },
+    "twoport_cst_cq": {
+      "purpose": [
+        "golden"
+      ],
+      "difficulty": 3,
+      "note": "CST 官方 4 阶 2 零; 带 transversal+folded+parallel 三份发布矩阵, 独立 oracle"
+    },
+    "twoport_cst_gsm900_uplink": {
+      "purpose": [
+        "golden"
+      ],
+      "difficulty": 3,
+      "note": "CST 官方 7 阶 3 零; cst_folded 独立参照"
+    },
+    "twoport_cst_gsm900_downlink": {
+      "purpose": [
+        "golden"
+      ],
+      "difficulty": 3,
+      "note": "CST 官方 7 阶 3 零 (=gsm1.fil 同一滤波器); cst_folded 独立参照"
+    },
+    "twoport_cst_gsm1800_uplink": {
+      "purpose": [
+        "golden",
+        "coverage"
+      ],
+      "difficulty": 3,
+      "note": "CST 官方 7 阶 4 零; spec-only (无发布矩阵)"
+    },
+    "twoport_cst_gsm1800_downlink": {
+      "purpose": [
+        "golden",
+        "coverage"
+      ],
+      "difficulty": 3,
+      "note": "CST 官方 7 阶 4 零; spec-only (无发布矩阵)"
+    },
+    "multiplexer_cst_gsm900_duplexer": {
+      "purpose": [
+        "golden",
+        "coverage"
+      ],
+      "difficulty": 4,
+      "note": "CST 官方 3 端口 6+6, 谐振结=独立结节点 (junction_node), cm 16; 首个 junction_node 算例, 带 16x16 发布矩阵"
+    },
+    "multiplexer_cst_gsm1800_duplexer": {
+      "purpose": [
+        "coverage"
+      ],
+      "difficulty": 4,
+      "note": "CST 官方 3 端口 7+7, 星形结(非谐振), cm 17; spec-only"
+    },
+    "twoport_cst_multiband": {
+      "purpose": [
+        "coverage",
+        "boundary"
+      ],
+      "difficulty": 4,
+      "note": "Arbitrary 响应 + 8 反射零点 + Goals 指标; spec-only (参考后端不可综合). 数据里第一个非等波纹 twoport."
+    }
+  }
+}

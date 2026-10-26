@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "filter-bench coverage registration",
+  "description": "P05：每个已注册 case 的用途（purpose，可多选）与难度（difficulty 1-5）。key 是 qualid，不复制 spec。",
+  "type": "object",
+  "required": ["schema_version", "contract_version", "cases"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "contract_version": { "const": "1.4.0" },
+    "note": { "type": "string" },
+    "purposes": { "type": "object" },
+    "difficulty_scale": { "type": "object" },
+    "cases": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["purpose", "difficulty"],
+        "properties": {
+          "purpose": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "enum": ["golden", "coverage", "boundary", "negative", "stress"] }
+          },
+          "difficulty": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "note": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -226,25 +226,43 @@ pub fn multiplexer_unitarity_residual(smatrix: &mfs::multiplexer::MultiplexerSMa
     worst
 }
 
-/// `folded_mask` (hard, tol 0.0) — largest |M[i][j]| over the upper triangle
-/// outside the folded mask, using the contract's default `"either"` convention:
-/// the union of the source-end (`canonical`) and load-end (`mirrored`) masks.
+/// `folded_mask` (hard, tol 0.0) — the folded result must sit entirely inside
+/// **one** complete Cameron folding convention. The metric is
+/// `min(violation(canonical), violation(mirrored))`: the largest |M[i][j]|
+/// outside the canonical mask and the largest outside the mirrored mask, of
+/// which we take the smaller. Satisfying either complete convention passes;
+/// a per-element union (the 1.0.0 criterion) would instead accept chimeric
+/// matrices whose cross-couplings mix the two conventions, satisfying neither
+/// complete convention (contract 1.1.0 tightened it for this reason).
 ///
-/// Normative source: `data/gates.json:gates.folded_mask` (semantics + evidence)
-/// and `CONTRACT.md`. Cameron's folded form is not unique (§8.3), so the gate
-/// accepts both mirror images; mfs's `to_folded` emits the mirrored one for even
-/// orders, the book's printed folded matrices the canonical one, fuqtgui's
-/// computed folded matrices the canonical one.
+/// Normative source: `data/gates.json:gates.folded_mask` (semantics + metric)
+/// and `CONTRACT.md`. Cameron's folded form is not unique (§8.3); mfs's
+/// `to_folded` emits the mirrored one for even orders, the book's printed
+/// folded matrices the canonical one, fuqtgui's computed folded matrices the
+/// canonical one.
 pub fn folded_mask_violations(matrix: &CouplingMatrix) -> f64 {
-    let side = matrix.side();
     let order = matrix.order();
+    folded_convention_violation(matrix, order, false)
+        .min(folded_convention_violation(matrix, order, true))
+        .max(0.0)
+}
+
+/// Largest |M[i][j]| over the upper triangle (`j > i`) outside one folding
+/// convention's mask. The mirrored convention is read off the same matrix
+/// (its cross-couplings live at the centre-reflected positions), so no
+/// mirrored matrix is rebuilt - this keeps the helper valid for the
+/// deliberately-asymmetric fixtures the negative tests build.
+fn folded_convention_violation(matrix: &CouplingMatrix, order: usize, mirrored: bool) -> f64 {
+    let side = matrix.side();
     let mut worst = 0.0_f64;
     for row in 0..side {
         for col in (row + 1)..side {
-            let mirrored = (mirror_index(col, order), mirror_index(row, order));
-            if folded_mask_keeps(row, col, order)
-                || folded_mask_keeps(mirrored.0, mirrored.1, order)
-            {
+            let pos = if mirrored {
+                (mirror_index(col, order), mirror_index(row, order))
+            } else {
+                (row, col)
+            };
+            if folded_mask_keeps(pos.0, pos.1, order) {
                 continue;
             }
             worst = worst.max(matrix.at(row, col).unwrap_or_default().abs());
