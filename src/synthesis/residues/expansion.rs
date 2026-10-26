@@ -212,13 +212,30 @@ fn residue_expansion(
 
     // Cluster roots that are closer together than `CLUSTER_TOLERANCE`: the
     // root solver splits a genuine multiplicity-m root into m numerically
-    // coalesced roots within ~1e-7 (double) to ~1e-5 (triple) of each other,
-    // while distinct roots in a filter prototype are separated by at least
-    // ~1.6e-3 in the normalized s-plane (order-16, measured). A single-linkage
-    // cluster at 1e-5 therefore recovers the true multiplicity as its size;
-    // numerator-denominator cancellation is handled by trimming leading near-
-    // zero principal coefficients after the principal part is computed.
-    const CLUSTER_TOLERANCE: f64 = 1e-5;
+    // coalesced roots, while genuinely distinct poles stay apart.
+    //
+    // The tolerance is anchored to the solver's measured behavior, not to an
+    // assumed minimum pole spacing (E6 re-measured):
+    //   - a genuine double root splits by at most ~1.34e-7 (degree 3) and
+    //     ~2.5e-8 (degree 7);
+    //   - two genuinely *distinct* roots separated by d are recovered with a
+    //     gap within ~2×d down to d ~ 3e-8, below which the pair is
+    //     numerically indistinguishable from a single root.
+    // 3e-7 therefore sits 2.2× above the largest genuine-double split (so
+    // every true multiplicity-m root still clusters as one m-fold pole) and
+    // ~10× below the smallest distinct-pair gap any production filter pole
+    // can produce here (recorded defect pair: 4.95e-6; comment-era
+    // minimum: 1.6e-3).
+    //
+    // The previous value (1e-5) silently merged a *distinct* near-coincident
+    // pair (gap 4.95e-6, order-7 7p3z with a transmission zero driving two
+    // denominator poles coalescent at s ≈ j·1.1362) into one double pole,
+    // dropping the residue count 7 → 6 and failing the transversal order
+    // check. Poles closer than 3e-7 are below the solver's resolution and
+    // are treated as a repeated pole, which `principal_part`/`trim_leading_
+    // zeros` and the transversal's `NotImplemented` repeated-pole guard then
+    // handle per their documented semantics.
+    const CLUSTER_TOLERANCE: f64 = 3e-7;
     let mut unassigned = vec![true; roots.len()];
     let mut residues: Vec<ResiduePole> = Vec::with_capacity(roots.len());
 
@@ -249,11 +266,13 @@ fn residue_expansion(
                 .sum::<ComplexCoefficient>()
                 / (cluster.len() as f64);
             // The multiplicity is the cluster size: the solver splits a
-            // genuine m-fold root into m coalesced roots (single-linkage at
-            // 1e-5), while distinct filter poles are ≥ ~1.6e-3 apart, so the
-            // cluster count recovers the true multiplicity. We do NOT re-derive
-            // it from the shifted coefficient vector, which is ill-conditioned
-            // for high-degree denominators.
+            // genuine m-fold root into m coalesced roots (measured spread
+            // ≤ ~1.34e-7 at degree 3, ≤ ~2.5e-8 at degree 7), while
+            // distinct filter poles down to a ~3e-8 gap are still
+            // resolved separately, so the cluster count recovers the true
+            // multiplicity. We do NOT re-derive it from the shifted
+            // coefficient vector, which is ill-conditioned for high-degree
+            // denominators.
             let principal =
                 principal_part(&adjusted_numerator, denominator, pole, cluster.len())?;
             // Trim leading near-zero principal coefficients: a numerator factor
@@ -298,14 +317,14 @@ fn residue_expansion(
 /// ```
 ///
 /// `m` is the cluster size: the root solver splits a genuine multiplicity-m
-/// root into m numerically coalesced roots (measured spread ≤ ~1e-5 for
-/// double/triple), while distinct filter poles are separated by at least
-/// ~1.6e-3, so a single-linkage cluster at 1e-5 recovers the true
-/// multiplicity. The multiplicity is therefore taken from the clustering,
-/// not re-detected from the shifted coefficient vector — that vector is
-/// ill-conditioned for high-degree denominators, and a scale-relative
-/// "vanishing" threshold miscounts small-but-genuine `q_1` as zero and
-/// inflates `m` on simple poles.
+/// root into m numerically coalesced roots (measured spread ≤ ~1.34e-7 at
+/// degree 3, ≤ ~2.5e-8 at degree 7), while distinct filter poles down to a
+/// ~3e-8 gap are still resolved separately, so a single-linkage cluster at
+/// the 3e-7 tolerance recovers the true multiplicity. The multiplicity is
+/// therefore taken from the clustering, not re-detected from the shifted
+/// coefficient vector — that vector is ill-conditioned for high-degree
+/// denominators, and a scale-relative "vanishing" threshold miscounts
+/// small-but-genuine `q_1` as zero and inflates `m` on simple poles.
 ///
 /// The computation:
 /// 1. Shift both polynomials to the pole: `P(x) = numerator(p + x)`,
@@ -816,5 +835,38 @@ mod tests {
             "the simple pole must not carry a Laurent principal part"
         );
         assert!((simple.residue - ComplexCoefficient::new(2.0 / 9.0, 0.0)).norm() < 1e-9);
+    }
+
+    /// Regression for the 7p3z `expected 7, got 6` defect: a pair of
+    /// genuinely distinct denominator poles at a 2e-6 gap (the recorded
+    /// production case sits at 4.95e-6, the failure window extends down to
+    /// the solver's ~1.2e-7 resolution floor) used to be merged into one
+    /// double pole by the former 1e-5 cluster tolerance, collapsing the
+    /// residue count. Both poles must survive as simple poles.
+    #[test]
+    fn distinct_close_poles_not_merged_by_clustering() {
+        let half = 1.0e-6;
+        let denominator = ComplexPolynomial::from_complex_roots(&[
+            ComplexCoefficient::new(0.0, 1.0 - half),
+            ComplexCoefficient::new(0.0, 1.0 + half),
+            ComplexCoefficient::new(0.0, 0.5),
+            ComplexCoefficient::new(-0.5, 0.0),
+        ])
+        .unwrap();
+        let numerator = ComplexPolynomial::from_complex_roots(&[ComplexCoefficient::new(
+            0.2, 0.0,
+        )])
+        .unwrap();
+
+        let expansion = residue_expansion(&numerator, &denominator).unwrap();
+        assert_eq!(
+            expansion.residues.len(),
+            4,
+            "the 2e-6-close pair must stay two simple poles"
+        );
+        assert!(
+            expansion.residues.iter().all(|r| r.laurent.is_none()),
+            "no merged double pole may be produced"
+        );
     }
 }

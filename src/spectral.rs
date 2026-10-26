@@ -202,24 +202,25 @@ fn fit_polynomial_from_freq_samples(
 /// `{λ, conj(λ)} ∪ {eig(C)}`, so a root and its conjugate are indistinguishable
 /// by conjugate-pair matching alone). See
 /// `companion_matrix_solver_complex_branch_returns_conjugate_flipped_non_roots`.
-pub fn companion_spectral_factor(
-    r_poly: &ComplexPolynomial,
-    target_degree: usize,
-) -> Result<ComplexPolynomial> {
-    use crate::approx::AdaptiveRootSolver;
-    use crate::approx::ComplexRootSolver;
+ pub fn companion_spectral_factor(
+     r_poly: &ComplexPolynomial,
+     target_degree: usize,
+ ) -> Result<ComplexPolynomial> {
+     use crate::approx::{AdaptiveRootSolver, ComplexRootSolver};
 
-    // Find all roots of R(s) using the adaptive (faer-gated) chain
-    let all_roots = AdaptiveRootSolver.roots_of(r_poly)?;
+     // Find all roots of R(s) using the adaptive (faer-gated) chain, then
+     // polish them (see `polish_roots`).
+     let all_roots = AdaptiveRootSolver.roots_of(r_poly)?;
+     let all_roots = polish_roots(r_poly, all_roots)?;
 
-    // Select LHP roots for the spectral factor
-    let stable_roots = select_lhp_roots(&all_roots, target_degree);
+     // Select LHP roots for the spectral factor
+     let stable_roots = select_lhp_roots(&all_roots, target_degree);
 
-    if stable_roots.is_empty() {
-        return ComplexPolynomial::new(vec![Complex64::new(1.0, 0.0)]);
-    }
+     if stable_roots.is_empty() {
+         return ComplexPolynomial::new(vec![Complex64::new(1.0, 0.0)]);
+     }
 
-    // Build D(s) from stable roots
+     // Build D(s) from stable roots
     let mut result = ComplexPolynomial::from_complex_roots(&stable_roots)?;
 
     // Scale so that D(s)*D*(-s) matches R(s) at s = 0
@@ -238,6 +239,56 @@ pub fn companion_spectral_factor(
 
     Ok(result)
 }
+ /// Polishes root estimates with Newton's method, restoring the accuracy
+ /// that an eigenvalue-based root find (backward stable but forward
+ /// inaccurate) loses on clustered or near-axis roots.
+ ///
+ /// In the spectral factorization, R is built as a sum of para-product
+ /// terms (N·Ñ + Σ p0²·Pt·Pt̃), so its *exact* roots come in T-symmetric
+ /// pairs (z, −z̄). Coefficient roundoff (~1e-15 relative) in building R
+ /// breaks that pair symmetry at root-cluster scale: when a transmission
+ /// zero lands near another channel's band edge, 4–8 roots of R cluster
+ /// within ΔΩ ≲ 0.01 of the jω axis (σ ~ 1e-2) and the companion
+ /// forward error (~1e-3) corrupts the mirror pairing that
+ /// [`select_lhp_roots`] relies on. A few Newton steps per root (quadratic
+ /// convergence, backward error at the machine level) restore the pairing.
+ ///
+ /// A step is rejected — and the last good iterate kept — when it is
+ /// non-finite or larger than 10× the root's own magnitude (divergence on
+ /// a near-multiple root); the iteration also stops once the step falls
+ /// below 1e-14 relative.
+ fn polish_roots(
+     poly: &ComplexPolynomial,
+     mut roots: Vec<Complex64>,
+ ) -> Result<Vec<Complex64>> {
+     if roots.is_empty() {
+         return Ok(roots);
+     }
+     let dpoly = poly.derivative()?;
+     for r in roots.iter_mut() {
+         let mut z = *r;
+         for _ in 0..8 {
+             let f = poly.evaluate(z);
+             let df = dpoly.evaluate(z);
+             let step = f / df;
+             let tol = 1e-14 * (1.0 + z.norm());
+             if step.norm() < tol {
+                 break;
+             }
+             if !step.re.is_finite() || !step.im.is_finite() || step.norm() > 10.0 * (1.0 + z.norm()) {
+                 break;
+             }
+             let nz = z - step;
+             if !nz.re.is_finite() || !nz.im.is_finite() {
+                 break;
+             }
+             z = nz;
+         }
+         *r = z;
+     }
+     Ok(roots)
+ }
+ 
 /// Selects LHP roots from a set of roots that come in (z, -z*) pairs.
 fn select_lhp_roots(all_roots: &[Complex64], target_count: usize) -> Vec<Complex64> {
     let mut stable: Vec<Complex64> = Vec::new();

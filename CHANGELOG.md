@@ -1,5 +1,77 @@
 # Changelog
 
+ ## [Unreleased]
+ 
+ ### Fixed
+ 
+
+- **7p3z resonance near-coalescence no longer trips the transversal
+  pole-count check ("expected 7, got 6").** For order 7 with
+  transmission zeros z = [1.1362, 2.3415, -1.4132] (RL = 23 dB), two
+  denominator poles at s ≈ j·1.1362 are genuinely distinct but only
+  4.95e-6 apart — below the residue expansion's former 1e-5
+  single-linkage cluster tolerance, which merged them into one double
+  pole, collapsed the residue count to 6, and made the transversal
+  order check reject the design. Measured the production root solver's
+  resolution floor across orders 3–7 (genuine double/triple roots split
+  to ~1.2e-7 … 2e-7 apart) and re-anchored `CLUSTER_TOLERANCE` at
+  3e-7: distinct poles above the solver's floor stay separate, while
+  genuinely coalesced poles (indistinguishable from a repeated root at
+  floor level) still take the existing repeated-pole rejection path.
+  The recorded input now synthesizes a finite order-7 matrix with the
+  near pair as two distinct resonators (diagonals -1.136208/-1.136213);
+  the failure window narrows from ~±2.5e-5 in z0 to ~±1.1e-6, and the
+  remaining two points inside it sit below the solver's resolution
+  floor. Regression tests:
+  `tests/synthesis_regression.rs::regression_order7_7p3z_*` (3) and
+  `expansion::tests::distinct_close_poles_not_merged_by_clustering`.
+  Full record: docs/internal/pole-count-defect-7p3z-2026-10-26.md.
+ - **Full-path (Macchiarella–Tamiazzo) spectral factorization no longer fails
+   when a channel's finite transmission zero sits at a *neighboring* channel's
+   band edge.**
+   The junction R polynomial `R = N·Ñ + Σ p₀ᵢ²·Ptᵢ·Pt̃ᵢ` is exactly T-symmetric
+   in exact arithmetic, so its roots come in mirror pairs `(z, −z̄)` that
+   `select_lhp_roots` relies on. Building R in f64 breaks that symmetry at the
+   ~1e-15 coefficient level, which is invisible for well-separated roots but is
+   amplified by the root condition number when a transmission zero lands at a
+   neighbor's band edge: several R roots then cluster within ΔΩ ≈ 0.01 of the
+   jω axis (σ ~ 1e-2, e.g. LTE B3 1805–1890 + B1 1920–2170 MHz with B3's zero
+   at 1925 MHz and B1's at 1885 MHz), and the companion-matrix eigenvalues
+   carry ~1e-3 *forward* error there (backward residual already at the
+   machine level). The corrupted mirror pairing produced a D whose
+   `|D(jω)|² ≠ R(jω)` and tripped the para-product verification with a typed
+   `NumericalFailure` at iteration 1 — so the physically correct zero
+   placement for a 30 MHz guard band was exactly the one the full path could
+   not synthesize.
+   `companion_spectral_factor` now **Newtons-polishes the R roots** (up to 8
+   steps per root, rejecting divergent/non-finite steps) before LHP
+   selection. The polish drives the backward residual to the machine level,
+   restores the mirror pairing, and costs nothing for well-conditioned
+   polynomials (the first step is already < 1e-14 and the loop stops
+   immediately). The worst-case triplexer now converges on its own criterion
+   (11 iterations, 54 ms): junction passbands > −0.05 dB, antenna RL
+   −10.7…−24.8 dB at band edges (20 dB spec), B3/B1 inter-band isolation
+   ~39–42 dB. New regression test
+   `synthesis::machiarella::full_path_tz_at_neighbor_band_edge_converges`
+   pins the production `synthesize_full` path on that configuration
+   (convergence + a real junction passband at each band center + a < −10 dB
+   dip at each transmission zero). `examples/lte_triplexer.rs` now uses the
+   natural edge TZ placement (1925/1885 MHz) and passes end to end.
+ - **The N=4 Zhao test's para-identity bound is now keyed on the spectral
+   factor's degree, not the root-displacement convergence regime.** The
+   polish above made the vendored N=4 case converge strictly
+   (`convergence_error` 1.7e-4 → 5.9e-7, 12 iterations), which flipped the
+   test from the stagnation regime (bound 5e-2) into the strict regime —
+   whose 1e-4 bound was calibrated from the low-degree duplexer order-7/8
+   gates and is unachievable at degree 19: the spectral-factorization floor
+   of the N=4 factor (transmission zeros inside adjacent channels' bands,
+   near-axis root clusters) is 3.6e-4 on-axis, measured at the exact fixed
+   point — a 4.4× tightening over the pre-polish stagnation path's 1.6e-3.
+   The bound is now `1e-4` for factor degree ≤ 14 (strict low-degree
+   gates) and `1e-3` above (≈3× margin over the measured floor, still
+   failing any gross wrong-magnitude/wrong-degree factor, which lands at
+   O(1e-1)).
+
 ## [0.6.3] — 2026-10-15
 
 ### Changed

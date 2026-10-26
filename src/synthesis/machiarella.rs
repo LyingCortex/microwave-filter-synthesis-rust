@@ -803,4 +803,66 @@ mod tests {
         );
         assert!(err.to_string().contains("leading coefficient"));
     }
+     #[test]
+     fn full_path_tz_at_neighbor_band_edge_converges() {
+         // Regression guard: a finite transmission zero at the *neighboring*
+         // channel's band edge (B3's zero at B1's lower edge 1925 MHz, B1's
+         // zero at B3's upper edge 1885 MHz) places several roots of the
+         // junction R polynomial within ΔΩ ≈ 0.01 of the jω axis. The
+         // companion-matrix eigenvalues of such a clustered near-axis R carry
+         // ~1e-3 forward error, which broke the T-symmetric mirror pairing in
+         // `select_lhp_roots` and failed the para-product verification at
+         // iteration 1 (typed NumericalFailure from `synthesize_full`). The
+         // Newton polish in `companion_spectral_factor` restores the pairing;
+         // this test pins the production path on that worst case and asserts
+         // convergence plus a real junction-level passband with working TZs.
+         use crate::freq::FrequencyMapping;
+         fn spec(order: usize, lo: f64, hi: f64, tz: Option<f64>) -> ChannelSpec {
+             let (c, bw) = crate::freq::edges_to_center_bandwidth(lo, hi);
+             let m = crate::freq::BandPassMapping::new(c, bw).unwrap();
+             let zeros = match tz {
+                 Some(f) => vec![m.map_hz_to_normalized(f).unwrap().omega],
+                 None => Vec::new(),
+             };
+             ChannelSpec { order, return_loss_db: 20.0, zeros, center_hz: c, bandwidth_hz: bw }
+         }
+         let junction = JunctionType::TypeI { n: 1.0, b0: 0.0 };
+         let (_, state) = synthesize_full(
+             &[spec(4, 1805e6, 1890e6, Some(1925e6)),
+              spec(7, 1920e6, 2170e6, Some(1885e6)),
+              spec(5, 2500e6, 2690e6, None)],
+             junction,
+             80,
+             1e-8,
+         )
+         .expect("full path must converge with TZs at the neighbor band edges");
+         assert!(state.converged, "full path exhausted its iteration budget");
+
+         // The junction response must show a real passband at each band
+         // center (the recovered D is a valid spectral factor, not just a
+         // non-erroring one) and a deep dip at each transmission zero.
+         let common = state.common.as_ref().expect("captured junction state");
+         let resp = junction_response(common, 3, 1750e6, 2750e6, 2001).unwrap();
+         let nearest = |f: f64| {
+             resp.frequencies
+                 .iter()
+                 .enumerate()
+                 .min_by(|(_, a), (_, b)| (*a - f).abs().partial_cmp(&(*b - f).abs()).unwrap())
+                 .map(|(i, _)| i)
+                 .unwrap()
+         };
+         let centers = [1.847e9, 2.041e9, 2.593e9];
+         for (i, &c) in centers.iter().enumerate() {
+             let db = resp.channel_s21_db[i][nearest(c)];
+             assert!(db > -1.0, "channel {i} junction S21 at band center: {db:.3} dB");
+         }
+         let db_b3_tz = resp.channel_s21_db[0][nearest(1925e6)];
+         let db_b1_tz = resp.channel_s21_db[1][nearest(1885e6)];
+         assert!(db_b3_tz < -10.0, "B3 TZ dip at 1925 MHz: {db_b3_tz:.3} dB");
+         assert!(db_b1_tz < -10.0, "B1 TZ dip at 1885 MHz: {db_b1_tz:.3} dB");
+         assert!(
+             resp.antenna_s11_db.iter().all(|x| x.is_finite()),
+             "antenna S11 non-finite"
+         );
+     }
 }

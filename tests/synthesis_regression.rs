@@ -455,3 +455,60 @@ fn all_finite_feasible_low_rl_succeeds() -> Result<()> {
     );
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Pole-coalescence regression (7p3z, RL = 23 dB)
+// ---------------------------------------------------------------------------
+// A transmission zero can drive two denominator poles of the Chebyshev
+// prototype into numerical near-coalescence. For order 7 with
+// z = [1.1362, 2.3415, -1.4132] the two poles at s ≈ j·1.1362 are distinct
+// but 4.95e-6 apart — below the former 1e-5 cluster tolerance, which merged
+// them into a single double pole and failed the transversal order check
+// ("expected 7, got 6"). The tolerance is now anchored to the root
+// solver's resolution floor (3e-7), so these distinct poles stay separate
+// and the design synthesizes. See docs/internal/pole-count-defect-7p3z-
+// 2026-10-26.md for the full root-cause record.
+
+/// The recorded defect input: order 7, RL = 23 dB, z0 = 1.1362.
+#[test]
+fn regression_order7_7p3z_pole_coalescence_synthesis_succeeds() -> Result<()> {
+    let spec = build_spec(7, 23.0, &[1.1362, 2.3415, -1.4132]);
+    let matrix = synthesize_matrix(&spec);
+    assert_eq!(matrix.order(), 7);
+    assert!(
+        matrix.as_slice().iter().all(|v| v.is_finite()),
+        "coalescence-regression matrix must be fully finite"
+    );
+    // The near-coincident pair must appear as two distinct resonator
+    // diagonals at ≈ -1.1362, not a single merged pole.
+    let near = (0..matrix.order())
+        .filter_map(|i| matrix.resonator_diagonal(i))
+        .filter(|d| (d - -1.1362).abs() < 5e-3)
+        .count();
+    assert_eq!(
+        near, 2,
+        "expected two distinct resonators near -1.1362, got {near}"
+    );
+    Ok(())
+}
+
+/// Inside the former failure window: z0 = 1.13621 puts the pole pair at a
+/// 5.85e-7 gap — still above the 3e-7 resolution floor, so it must synthesize
+/// even though the old 1e-5 tolerance rejected it.
+#[test]
+fn regression_order7_7p3z_coalescence_window_edge_succeeds() -> Result<()> {
+    let spec = build_spec(7, 23.0, &[1.13621, 2.3415, -1.4132]);
+    let matrix = synthesize_matrix(&spec);
+    assert_eq!(matrix.order(), 7);
+    Ok(())
+}
+
+/// Control just outside the coalescence region: z0 = 1.13624 (gap 1.25e-5)
+/// synthesized under the old tolerance and must continue to.
+#[test]
+fn regression_order7_7p3z_control_outside_window_succeeds() -> Result<()> {
+    let spec = build_spec(7, 23.0, &[1.13624, 2.3415, -1.4132]);
+    let matrix = synthesize_matrix(&spec);
+    assert_eq!(matrix.order(), 7);
+    Ok(())
+}
