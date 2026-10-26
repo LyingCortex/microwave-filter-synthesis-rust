@@ -174,6 +174,42 @@ the refuted passband-TZ work.
     (`src/response/mod.rs`) and `response_full` (`src/python.rs`) so the next
     reader hits the convention before reaching for a per-hertz derivative.
 
+### 0.6.4 release — parked (2026-10-26)
+
+The release was started, then cancelled on request. **Already committed
+state:** the pyo3 0.23 → 0.27 upgrade in `src/python.rs` is complete and
+compiles warning-free (`cargo check --features python`): the deprecated
+`pyo3::PyObject` alias is replaced by `Py<PyAny>` everywhere, and both
+`response` methods (duplexer, multiplexer) now take the standard injected
+`py: Python<'_>` instead of `Python::with_gil`. pyo3 0.27 is the first
+release line tested against 3.14 final (3.14 support started in 0.25.0,
+beta-only); 0.27 still supports 3.11/3.12. Version stays at 0.6.3 until
+the release is re-run; the CHANGELOG entry under `[Unreleased]` documents
+the upgrade with the wheel build marked pending.
+
+**Remaining steps to re-run the 0.6.4 release:**
+
+1. `cargo test --features python` — confirm the migration against the full
+   suite (baseline at 0.6.3: 473 passed with `--features cli,python`).
+2. Bump `0.6.3 → 0.6.4` in `Cargo.toml`, `pyproject.toml` and
+   `Cargo.lock`; cut the CHANGELOG `[Unreleased]` section to
+   `[0.6.4] — <date>` (the 0.6.4 entries are already written).
+3. WSL wheel: `scripts/build_mfs.sh` (uv build --wheel, cp312) and
+   re-verify the 7p3z input against the fresh wheel.
+4. Windows wheels (must be built on the Windows host — no mingw-w64 in
+   WSL, cross-compiling is documented as not possible in
+   `scripts/build_mfs.sh`). Toolchain already present: cargo 1.99.0
+   (MSVC), uv, `maturin.exe`; interpreters: 3.14.3
+   (`C:\Program Files\Python\Python314`), 3.12.13 and 3.11.15 (uv-managed
+   under `%APPDATA%\uv\python`). Per-interpreter recipe:
+   `uv venv --python 3.1x .venv-win && uv pip install -p .venv-win maturin`
+   then `set VIRTUAL_ENV=C:\...\mfs\.venv-win && .venv-win\Scripts\maturin.exe
+   build --release -o dist` (repeat for 3.11 / 3.12 / 3.14 →
+   cp311/cp312/cp314 wheels).
+5. Verify each wheel imports on its own interpreter (throwaway
+   `sys.path.insert` import + one synthesis, same pattern as the 0.6.3
+   smoke test).
+6. Copy the four wheels into `dist/` and commit.
 
 ### Low priority (ecosystem)
 

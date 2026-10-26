@@ -74,6 +74,15 @@
 
 ### Changed
 
+- **Python bindings: pyo3 0.23 → 0.27 (Python 3.14 support).**
+  0.27 is the first release line tested against 3.14 final
+  (3.14 support started in 0.25.0 against the beta). The migration is
+  mechanical: the deprecated `pyo3::PyObject` alias is replaced by
+  `Py<PyAny>` and the two `response` methods take the standard injected
+  `py: Python<'_>` argument instead of re-acquiring the GIL via
+  `Python::with_gil` (a no-op change — those methods are always called
+  with the GIL held). The cp311/cp312/cp314 wheel-matrix build is
+  pending; steps are recorded in `docs/internal/todo.md`.
 - **Migrated the `benchmark_standard` conformance harness to filter-bench
   contract 1.4.0.** The vendored `bench-data/` (re-synced via
   `filter-bench/tools/vendor.py`) advanced from 1.0.0 to 1.4.0, which

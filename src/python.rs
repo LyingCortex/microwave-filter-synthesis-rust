@@ -30,7 +30,7 @@ use crate::design::FilterDesign;
 use crate::matrix::CouplingMatrix;
 
 /// Convert a CouplingMatrix to a nested list for Python.
-fn matrix_to_pylist(py: Python<'_>, matrix: &CouplingMatrix) -> PyObject {
+fn matrix_to_pylist(py: Python<'_>, matrix: &CouplingMatrix) -> Py<PyAny> {
     use pyo3::types::PyList;
     let side = matrix.side();
     let rows: Vec<_> = (0..side)
@@ -40,7 +40,7 @@ fn matrix_to_pylist(py: Python<'_>, matrix: &CouplingMatrix) -> PyObject {
                 .collect();
             PyList::new(py, &row_data).unwrap().into()
         })
-        .collect::<Vec<PyObject>>();
+        .collect::<Vec<Py<PyAny>>>();
     PyList::new(py, &rows).unwrap().into()
 }
 
@@ -84,12 +84,12 @@ impl PyFilterDesign {
     }
 
     /// Returns the transversal coupling matrix as a 2D list.
-    fn matrix(&self, py: Python<'_>) -> PyObject {
+    fn matrix(&self, py: Python<'_>) -> Py<PyAny> {
         matrix_to_pylist(py, self.inner.matrix())
     }
 
     /// Returns the folded coupling matrix as a 2D list.
-    fn folded(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn folded(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let m = self
             .inner
             .to_folded()
@@ -98,7 +98,7 @@ impl PyFilterDesign {
     }
 
     /// Returns the arrow coupling matrix as a 2D list.
-    fn arrow(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn arrow(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let m = self
             .inner
             .to_arrow()
@@ -109,7 +109,7 @@ impl PyFilterDesign {
     /// Returns CT (Cascaded Trisection) topology matrix.
     /// positions: list of [from_node, to_node] pairs (1-indexed resonator numbers).
     #[pyo3(signature = (positions))]
-    fn ct(&self, py: Python<'_>, positions: Vec<[usize; 2]>) -> PyResult<PyObject> {
+    fn ct(&self, py: Python<'_>, positions: Vec<[usize; 2]>) -> PyResult<Py<PyAny>> {
         let arrow = self
             .inner
             .to_arrow()
@@ -125,7 +125,7 @@ impl PyFilterDesign {
     /// Returns CQ (Cascaded Quadruplet) topology matrix.
     /// z_locs: list of [from, to] pairs. span=2 for trisection, span=3 for quadruplet diagonal.
     #[pyo3(signature = (z_locs))]
-    fn cq(&self, py: Python<'_>, z_locs: Vec<[usize; 2]>) -> PyResult<PyObject> {
+    fn cq(&self, py: Python<'_>, z_locs: Vec<[usize; 2]>) -> PyResult<Py<PyAny>> {
         let arrow = self
             .inner
             .to_arrow()
@@ -140,7 +140,7 @@ impl PyFilterDesign {
     /// Returns BOX topology matrix.
     /// spans: list of [start, end] pairs with end-start=3, one per zero.
     #[pyo3(signature = (spans))]
-    fn box_topology(&self, py: Python<'_>, spans: Vec<[usize; 2]>) -> PyResult<PyObject> {
+    fn box_topology(&self, py: Python<'_>, spans: Vec<[usize; 2]>) -> PyResult<Py<PyAny>> {
         let arrow = self
             .inner
             .to_arrow()
@@ -153,7 +153,7 @@ impl PyFilterDesign {
     }
 
     /// Returns the band-pass scaled matrix as a 2D list.
-    fn scaled_matrix(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn scaled_matrix(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let m = self
             .inner
             .scale()
@@ -214,7 +214,7 @@ impl PyFilterDesign {
         start: Option<f64>,
         stop: Option<f64>,
         points: usize,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         use pyo3::types::PyDict;
 
         let resp = match (start, stop) {
@@ -244,7 +244,7 @@ impl PyFilterDesign {
                 dict.set_item("group_delay", s.group_delay).unwrap();
                 dict.into()
             })
-            .collect::<Vec<PyObject>>();
+            .collect::<Vec<Py<PyAny>>>();
 
         Ok({
             use pyo3::types::PyList;
@@ -414,7 +414,7 @@ impl PyFilterDesign {
         target_s11_re: Vec<f64>,
         target_s11_im: Vec<f64>,
         max_iter: usize,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         use crate::freq::FrequencyGrid;
         use crate::optimize::{optimize_matrix, OptimizeConfig};
         use crate::response::{ResponseSample, SParameterResponse};
@@ -616,7 +616,7 @@ fn extract(
     s11_re: Vec<f64>,
     s11_im: Vec<f64>,
     order: usize,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     use crate::freq::FrequencyGrid;
     use crate::optimize::extract_matrix;
     use crate::response::{ResponseSample, SParameterResponse};
@@ -686,32 +686,30 @@ impl PyDuplexer {
     /// Returns dict with keys: frequencies, tx_s21_db, rx_s21_db,
     /// tx_s11_db, rx_s11_db, antenna_s11_db, isolation_db.
     #[pyo3(signature = (start, stop, points=401))]
-    fn response(&self, start: f64, stop: f64, points: usize) -> PyResult<PyObject> {
+    fn response(&self, py: Python<'_>, start: f64, stop: f64, points: usize) -> PyResult<Py<PyAny>> {
         let resp = self
             .inner
             .response(start, stop, points)
             .map_err(|e| PyValueError::new_err(format!("{e}")))?;
-        Python::with_gil(|py| {
-            use pyo3::types::PyDict;
-            let d = PyDict::new(py);
-            d.set_item("frequencies", resp.frequencies.clone())?;
-            d.set_item("tx_s21_db", resp.tx_s21_db.clone())?;
-            d.set_item("rx_s21_db", resp.rx_s21_db.clone())?;
-            d.set_item("tx_s11_db", resp.tx_s11_db.clone())?;
-            d.set_item("rx_s11_db", resp.rx_s11_db.clone())?;
-            d.set_item("antenna_s11_db", resp.antenna_s11_db.clone())?;
-            d.set_item("isolation_db", resp.isolation_db.clone())?;
-            Ok(d.into())
-        })
+        use pyo3::types::PyDict;
+        let d = PyDict::new(py);
+        d.set_item("frequencies", resp.frequencies.clone())?;
+        d.set_item("tx_s21_db", resp.tx_s21_db.clone())?;
+        d.set_item("rx_s21_db", resp.rx_s21_db.clone())?;
+        d.set_item("tx_s11_db", resp.tx_s11_db.clone())?;
+        d.set_item("rx_s11_db", resp.rx_s11_db.clone())?;
+        d.set_item("antenna_s11_db", resp.antenna_s11_db.clone())?;
+        d.set_item("isolation_db", resp.isolation_db.clone())?;
+        Ok(d.into())
     }
 
     /// Get Tx filter coupling matrix (folded).
-    fn tx_matrix(&self, py: Python<'_>) -> PyObject {
+    fn tx_matrix(&self, py: Python<'_>) -> Py<PyAny> {
         matrix_to_pylist(py, self.inner.tx.matrix())
     }
 
     /// Get Rx filter coupling matrix (folded).
-    fn rx_matrix(&self, py: Python<'_>) -> PyObject {
+    fn rx_matrix(&self, py: Python<'_>) -> Py<PyAny> {
         matrix_to_pylist(py, self.inner.rx.matrix())
     }
 
@@ -794,25 +792,23 @@ impl PyMultiplexer {
     /// Returns dict with keys: frequencies, antenna_s11_db, channel_s21_db,
     /// channel_s11_db, isolation_db.
     #[pyo3(signature = (start, stop, points=401))]
-    fn response(&self, start: f64, stop: f64, points: usize) -> PyResult<PyObject> {
+    fn response(&self, py: Python<'_>, start: f64, stop: f64, points: usize) -> PyResult<Py<PyAny>> {
         let resp = self
             .inner
             .response(start, stop, points)
             .map_err(|e| PyValueError::new_err(format!("{e}")))?;
-        Python::with_gil(|py| {
-            use pyo3::types::PyDict;
-            let d = PyDict::new(py);
-            d.set_item("frequencies", resp.frequencies.clone())?;
-            d.set_item("antenna_s11_db", resp.antenna_s11_db.clone())?;
-            d.set_item("channel_s21_db", resp.channel_s21_db.clone())?;
-            d.set_item("channel_s11_db", resp.channel_s11_db.clone())?;
-            d.set_item("isolation_db", resp.isolation_db.clone())?;
-            Ok(d.into())
-        })
+        use pyo3::types::PyDict;
+        let d = PyDict::new(py);
+        d.set_item("frequencies", resp.frequencies.clone())?;
+        d.set_item("antenna_s11_db", resp.antenna_s11_db.clone())?;
+        d.set_item("channel_s21_db", resp.channel_s21_db.clone())?;
+        d.set_item("channel_s11_db", resp.channel_s11_db.clone())?;
+        d.set_item("isolation_db", resp.isolation_db.clone())?;
+        Ok(d.into())
     }
 
     /// Get the i-th channel's folded coupling matrix as a 2D list.
-    fn channel_folded(&self, py: Python<'_>, i: usize) -> PyResult<PyObject> {
+    fn channel_folded(&self, py: Python<'_>, i: usize) -> PyResult<Py<PyAny>> {
         let m = self
             .inner
             .channel_folded(i)
