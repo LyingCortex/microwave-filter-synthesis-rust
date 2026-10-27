@@ -174,42 +174,44 @@ the refuted passband-TZ work.
     (`src/response/mod.rs`) and `response_full` (`src/python.rs`) so the next
     reader hits the convention before reaching for a per-hertz derivative.
 
-### 0.6.4 release — parked (2026-10-26)
+### 0.6.4 release — wheels built, version bump pending (2026-10-28)
 
-The release was started, then cancelled on request. **Already committed
-state:** the pyo3 0.23 → 0.27 upgrade in `src/python.rs` is complete and
-compiles warning-free (`cargo check --features python`): the deprecated
-`pyo3::PyObject` alias is replaced by `Py<PyAny>` everywhere, and both
-`response` methods (duplexer, multiplexer) now take the standard injected
-`py: Python<'_>` instead of `Python::with_gil`. pyo3 0.27 is the first
-release line tested against 3.14 final (3.14 support started in 0.25.0,
-beta-only); 0.27 still supports 3.11/3.12. Version stays at 0.6.3 until
-the release is re-run; the CHANGELOG entry under `[Unreleased]` documents
-the upgrade with the wheel build marked pending.
+The release was started 2026-10-26, then **paused** on request (the
+pyo3 upgrade was committed at `f31ddb0`, version kept at 0.6.3).
+**Wheel builds completed 2026-10-28** — all four are built with pyo3
+0.27 and smoke-tested on their own interpreter (7p3z input, 9×9 matrix,
+near-coalesced pair −1.136208/−1.136213 as two distinct resonators,
+all pass):
 
-**Remaining steps to re-run the 0.6.4 release:**
+- `mfs-0.6.3-cp312-cp312-linux_x86_64.whl` (WSL, `CARGO_TARGET_DIR` on the
+  Linux side to avoid a full C: drive)
+- `mfs-0.6.3-cp311-cp311-win_amd64.whl`
+- `mfs-0.6.3-cp312-cp312-win_amd64.whl`
+- `mfs-0.6.3-cp314-cp314-win_amd64.whl`
 
-1. `cargo test --features python` — confirm the migration against the full
-   suite (baseline at 0.6.3: 473 passed with `--features cli,python`).
-2. Bump `0.6.3 → 0.6.4` in `Cargo.toml`, `pyproject.toml` and
+Windows build recipe (re-runnable): per-interpreter venv
+`uv venv --python 3.1x .venv-win31x`, then
+`set "CARGO_TARGET_DIR=C:\Users\eynulai\mfs_target_win"` and
+`.venv-win31x\Scripts\maturin.exe build --release -i
+.venv-win31x\Scripts\python.exe -o dist`. The shared target dir makes the
+2nd/3rd interpreter ~1.5 min each (only pyo3 + mfs recompile); the first
+is a full build (~6.5 min). The venvs are gitignored via uv's per-venv
+`.gitignore`. **Note:** the stale `mfs-0.6.3-cp312-cp312-manylinux_2_39`
+wheel (the pre-pyo3-0.27 build from 2026-10-26) was deleted; a
+`manylinux_2_35` cp312 wheel from 2026-10-14 also remains in `dist/` —
+it is likewise pre-0.27 and should be dropped before the 0.6.4 cut unless
+it is deliberately kept for a specific consumer.
+
+**Remaining to re-run the 0.6.4 release:**
+
+1. Bump `0.6.3 → 0.6.4` in `Cargo.toml`, `pyproject.toml` and
    `Cargo.lock`; cut the CHANGELOG `[Unreleased]` section to
    `[0.6.4] — <date>` (the 0.6.4 entries are already written).
-3. WSL wheel: `scripts/build_mfs.sh` (uv build --wheel, cp312) and
-   re-verify the 7p3z input against the fresh wheel.
-4. Windows wheels (must be built on the Windows host — no mingw-w64 in
-   WSL, cross-compiling is documented as not possible in
-   `scripts/build_mfs.sh`). Toolchain already present: cargo 1.99.0
-   (MSVC), uv, `maturin.exe`; interpreters: 3.14.3
-   (`C:\Program Files\Python\Python314`), 3.12.13 and 3.11.15 (uv-managed
-   under `%APPDATA%\uv\python`). Per-interpreter recipe:
-   `uv venv --python 3.1x .venv-win && uv pip install -p .venv-win maturin`
-   then `set VIRTUAL_ENV=C:\...\mfs\.venv-win && .venv-win\Scripts\maturin.exe
-   build --release -o dist` (repeat for 3.11 / 3.12 / 3.14 →
-   cp311/cp312/cp314 wheels).
-5. Verify each wheel imports on its own interpreter (throwaway
-   `sys.path.insert` import + one synthesis, same pattern as the 0.6.3
-   smoke test).
-6. Copy the four wheels into `dist/` and commit.
+2. Rebuild the four wheels under the 0.6.4 tag (the steps above) so the
+   wheel names match; re-run the per-interpreter 7p3z smoke test.
+3. `cargo test --features python` on the release tree (baseline at 0.6.3:
+   473 passed with `--features cli,python`).
+4. Commit the `dist/` wheel set.
 
 ### Low priority (ecosystem)
 

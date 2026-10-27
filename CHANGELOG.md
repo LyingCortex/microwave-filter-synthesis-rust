@@ -81,8 +81,9 @@
   `Py<PyAny>` and the two `response` methods take the standard injected
   `py: Python<'_>` argument instead of re-acquiring the GIL via
   `Python::with_gil` (a no-op change — those methods are always called
-  with the GIL held). The cp311/cp312/cp314 wheel-matrix build is
-  pending; steps are recorded in `docs/internal/todo.md`.
+  with the GIL held). The cp311/cp312/cp314 Windows wheel matrix is
+  built and smoke-tested (see `docs/internal/todo.md`); they ship
+  under the 0.6.4 tag once the version bump is re-run.
 - **Migrated the `benchmark_standard` conformance harness to filter-bench
   contract 1.4.0.** The vendored `bench-data/` (re-synced via
   `filter-bench/tools/vendor.py`) advanced from 1.0.0 to 1.4.0, which
